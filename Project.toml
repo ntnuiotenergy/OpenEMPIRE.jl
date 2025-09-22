@@ -1,0 +1,18 @@
+name = "OpenEMPIRE"
+uuid = "0a5e0d9c-b95c-459b-9a1c-b5e5a9d7c465"
+authors = ["Gerardo A Perez-Valdes <GerardoA.Perez-Valdes@sintef.no>", "Truls Flatberg <Truls.Flatberg@sintef.no>"]
+version = "0.1.0"
+
+[deps]
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
+SparseVariables = "2749762c-80ed-4b14-8f33-f0736679b02b"
+TimeStruct = "f9ed5ce0-9f41-4eaa-96da-f38ab8df101c"
+XLSX = "fdbf4ff8-1666-58a4-91e7-1b58723a45e0"
+
+[compat]
+CSV = "0.10.15"
+JuMP = "1.29.1"
+SparseVariables = "0.7.4"
+TimeStruct = "0.9.5"
+XLSX = "0.10.4"
