@@ -36,7 +36,7 @@ function test_variable_large()
     sets.Storage = ["S$(i)" for i in 1:20]
     sets.StoragesOfNode = [(n, s) for (n,s) in zip(sets.Node, sets.Storage)]
     sets.GeneratorsOfNode = [(n, g) for (n, g) in zip(sets.Node, sets.Generator)]
-    sets.BidirectionalArc = [(n1, n2) for n1 in sets.Node for n2 in sets.Node if n1 != n2][1:100]
+    sets.DirectionalLink = [(n1, n2) for n1 in sets.Node for n2 in sets.Node if n1 != n2][1:100]
 
     emp = JuMP.Model()
     @time OpenEMPIRE.create_variables(emp, sets, periods)
@@ -53,7 +53,7 @@ function test_constraints()
     sets.Storage = ["S1", "S2"]
     sets.StoragesOfNode = [("N1", "S1"), ("N2", "S2")]
     sets.GeneratorsOfNode = [("N1", "G1"), ("N2", "G2")]
-    sets.BidirectionalArc = [("N1", "N2"), ("N2", "N1")]
+    sets.DirectionalLink = [("N1", "N2"), ("N2", "N1")]
     sets.Technology = ["Coal", "Gas"]
     sets.GeneratorsOfTechnology = [("Coal", "G1"), ("Gas", "G2")]
 
@@ -77,10 +77,11 @@ function test_constraints()
     par.genMaxBuiltCap = Dict( ("N1", "G1") => 200.0, ("N2", "G2") => 250.0)
     par.genMaxInstalledCap = Dict( ("N1", "G1") => 300.0, ("N2", "G2") => 350.0)
     par.genLifetime = Dict("G1" => 25, "G2" => 30)
-
+    par.transmissionInitCap = Dict( ("N1", "N2") => 100.0, ("N2", "N1") => 100.0)
 
     emp = JuMP.Model()
     @time OpenEMPIRE.create_variables(emp, sets, periods)
     @time OpenEMPIRE.create_constraints(emp, sets, par,periods)
+    @time OpenEMPIRE.create_objective(emp, sets, par, periods)
 
 end
