@@ -8,39 +8,13 @@ mutable struct EmpireSets
     Storage
     DependentStorage
     Technology
-    Period
-    Operationalhour
-    Season
     Node
     DirectionalLink
-    DirectionalLink_H2
-    transmissionType
-    transmissionType_H2
-    Scenario
-    transmissionTypeOfDirectionalLink
-    transmissionTypeOfDirectionalLink_H2
+    TransmissionType
+    TransmissionTypeOfDirectionalLink
     GeneratorsOfTechnology
     GeneratorsOfNode
     StoragesOfNode
-    HoursOfSeason
-    FirstHoursOfRegSeason
-    FirstHoursOfPeakSeason
-    ElToHeat
-    ElToHeatOfNode
-    GeneratorEL
-    GeneratorTR
-    StorageEL
-    StorageTR
-    StorageHydrogen
-    StoragesOfHydrogen
-    AvailableSale
-    DependentStorageHydrogen
-    BidirectionalArc
-    BidirectionalArc_H2
-    NodeGenTime
-    NodeNodeTransm
-    NodeNodeTransm_H2
-    NodeStorTime
 
     EmpireSets() = new()
 end
@@ -48,8 +22,10 @@ end
 nodes(sets::EmpireSets) = sets.Node
 generators(sets::EmpireSets) = sets.Generator
 storages(sets::EmpireSets) = sets.Storage
+dependent_storages(sets::EmpireSets) = sets.DependentStorage
 techs(sets::EmpireSets) = sets.Technology
-transmission_types(sets::EmpireSets) = sets.transmissionType
+transmission_types(sets::EmpireSets) = sets.TransmissionType
+arcs(sets::EmpireSets) = sets.DirectionalLink
 
 generators(sets::EmpireSets, n) = [g for (nn, g) in sets.GeneratorsOfNode if nn == n]
 storages(sets::EmpireSets, n) = [s for (nn, s) in sets.StoragesOfNode if nn == n]
@@ -59,14 +35,10 @@ generators_tech(sets::EmpireSets, n, t) =
 
 
 mutable struct EmpireParams
-    discountrate
+    # Financial parameters
     WACC
-    LeapYearsInvestment
-    operationalDiscountrate
-    sceProbab
-    seasScale
-    lengthRegSeason
-    lengthPeakSeason
+    discountRate
+    # Generator inputs from file
     genCapitalCost
     genFixedOMCost
     genVariableOMCost
@@ -78,22 +50,20 @@ mutable struct EmpireParams
     genInitCap
     genMaxBuiltCap
     genMaxInstalledCapRaw
-    genCO2TypeFactor
     genRampUpCap
     genCapAvailTypeRaw
+    genCO2Content
+    genLifetime
+    # Transmission inputs from file
     transmissionInitCap
     transmissionMaxBuiltCap
     transmissionMaxInstalledCapRaw
     transmissionLength
     transmissionTypeCapitalCost
     transmissionTypeFixedOMCost
-    transmissionInitCap_H2
-    transmissionMaxBuiltCap_H2
-    transmissionMaxInstalledCapRaw_H2
-    transmissionLength_H2
-    transmissionCapitalCost_H2
-    transmissionFixedOMCost_H2
     lineEfficiency
+    transmissionLifetime
+    # Storage inputs from file
     storageBleedEff
     storageChargeEff
     storageDischargeEff
@@ -109,86 +79,49 @@ mutable struct EmpireParams
     storPWInitCap
     storPWMaxBuiltCap
     storPWMaxInstalledCapRaw
+    storageLifetime
+    # Node inputs from file
     nodeLostLoadCost
     sloadAnnualDemand
-    CO2price
-    maxHydroNode
     maxRegHydroGenRaw
-    genCapAvailStochRaw
-    sloadRaw
-    genLifetime
-    transmissionLifetime
-    transmissionLifetime_H2
-    storageLifetime
+    # General parameters from file
     CO2cap
-    ElToHeatCapitalCost
-    ElToHeatFixedOMCost
-    μElToHeatInvCost
-    ElToHeatLifetime
-    ElToHeatEff
-    ElToHeatInitCap
-    ElToHeatMaxBuiltCap
-    ElToHeatMaxInstalledCapRaw
-    ElToHeatMaxInstalledCap
-    sloadRawTR
-    sloadAnnualDemandTR
-    sloadTR
+    CO2price
+
+    # Stochastic parameters
+    sloadRaw::Dict{String, TimeProfile}
+    sload::Dict{String, TimeProfile}
+    genCapAvailStochRaw::Dict{Tuple{String,String}, TimeProfile}
+    genCapAvail::Dict{Tuple{String,String}, TimeProfile}
+    maxRegHydroGen::Dict{String, Float64}
+
+    # Processed parameters
+    genInvCost::Dict{String, TimeProfileProfile}
+    storENInvCost::Dict{String, TimeProfile}
+    storPWInvCost::Dict{String, TimeProfile}
+    transmissionInvCost::Dict{String, TimeProfile}
+    genMargCost::Dict{String, TimeProfile}
+
+    maxHydroNode
     EVdemand
-    genRefInitCapNewnode
-    genInitCapNewnode
-    genMaxBuiltCapNewnode
-    genMaxInstalledCapRawNewnode
-    genCapitalCostNewnode
-    genFixedOMCostNewnode
-    lineEfficiencyNewnode
-    transmissionInitCapNewnode
-    transmissionMaxBuiltCapNewnode
-    transmissionMaxInstalledCapRawNewnode
-    storENInitCapNewnode
-    storENMaxBuiltCapNewnode
-    storENMaxInstalledCapRawNewnode
-    storPWInitCapNewnode
-    storPWMaxBuiltCapNewnode
-    storPWMaxInstalledCapRawNewnode
-    nodeLostLoadCostNewnode
-    sloadAnnualDemandNewnode
-    maxHydroNodeNewnode
-    maxRegHydroGenRawNewnode
-    genCapAvailStochRawNewnode
-    sloadRawNewnode
-    transmissionLifetimeNewnode
-    genLifetimeNewnode
-    HydrogenPrice
-    MaxHydrogenDemand
-    genInvCost
-    storENInvCost
-    storPWInvCost
-    transmissionInvCost
-    transmissionInvCost_H2
-    genMargCost
-    μgenInitCap
     transmissionMaxInstalledCap
-    transmissionMaxInstalledCap_H2
-    operationalDiscountRate
     genMaxInstalledCap
     storENMaxInstalledCap
     storPWMaxInstalledCap
-    maxRegHydroGen
-    genCapAvail
-    sload
 
     EmpireParams() = new()
 end
 
-# Helper functions to get parameter values with default fallbacks
+# Helper functions to get parameter values with default fallbacks, the model should
+# only use these functions to access parameter values
 
 # Generator properties
 gencap_avail(par, n, g, t) = get(par.genCapAvail, (n, g, t), 0.0)
-rampup_cap(par, g) = get(par.genRampUpCap, g, 0.0)
-max_build_cap(par, n, t, sp) = get(par.genMaxBuiltCap, (n, t, sp), nothing)
-max_inst_cap(par, n, t, sp) = get(par.genMaxInstalledCap, (n, t, sp), nothing)
-gen_lifetime(par, g) = get(par.genLifetime, g, 1)
-gencap_init(par, n, g, sp) = get(par.genInitCap, (n, g, sp), 0.0)
+rampup_cap(par, g) = get(par.genRampUpCap, g, 1.0)
+max_build_cap(par, n, gt, sp) = (n, gt) in keys(par.genMaxBuiltCap) ? par.genMaxBuiltCap[(n, gt)][sp] : nothing
+max_inst_cap(par, n, gt, sp) = (n, gt) in keys(par.genMaxInstalledCap) ? par.genMaxInstalledCap[(n, gt)][sp] : nothing
+gen_lifetime(par, g) = get(par.genLifetime, g, 40)
+gencap_init(par, n, g, sp) = (n, g) in keys(par.genInitCap) ? par.genInitCap[(n, g)][sp] : nothing
 
 # Storage properties
 bleed_eff(par, s) = get(par.storageBleedEff, s, 1.0)
@@ -196,8 +129,25 @@ charge_eff(par, s) = get(par.storageChargeEff, s, 1.0)
 discharge_eff(par, s) = get(par.storageDischargeEff, s, 1.0)
 storage_init(par, s) = get(par.storOperationalInit, s, 0.0)
 lifetime_storage(par, s) = get(par.storageLifetime, s, 1)
-stor_cap_init_en(par, s, sp) = get(par.storENInitCap, (s, sp), 0.0)
-stor_cap_init_pow(par, s, sp) = get(par.storPWInitCap, (s, sp), 0.0)
+stor_cap_init_en(par, s, sp) = haskey(par.storENInitCap, s) ? par.storENInitCap[s][sp] : 0.0
+stor_cap_init_pow(par, s, sp) = haskey(par.storPWInitCap, s) ? par.storPWInitCap[s][sp] : 0.0
+power_to_energy(par, s) = get(par.storagePowToEnergy, s, 1.0)
+
+# Transmission properties
+trans_cap_init(par, m, n) = get(par.transmissionInitCap, (m, n), 0.0)
+trans_lifetime(par, m, n) = get(par.transmissionLifetime, (m, n), 40)
+trans_max_build_cap(par, m, n, sp) = haskey(par.transmissionMaxBuiltCap, (m, n)) ? par.transmissionMaxBuiltCap[(m, n)][sp] : nothing
+
+# Cost properties
+gen_invest_cost(par, g, sp) = haskey(par.genInvCost, g) ? par.genInvCost[g][sp] : 0.0
+stor_en_invest_cost(par, s, sp) = haskey(par.storENInvCost, s) ? par.storENInvCost[s][sp] : 0.0
+stor_pw_invest_cost(par, s, sp) = haskey(par.storPWInvCost, s) ? par.storPWInvCost[s][sp] : 0.0
+trans_invest_cost(par, tt, sp) = haskey(par.transmissionInvCost, tt) ? par.transmissionInvCost[tt][sp] : 0.0
+
+lost_load_cost(par, n, t) = haskey(par.nodeLostLoadCost, n) ? par.nodeLostLoadCost[n][t] : 1000.0
+sload(par, n, t) = haskey(par.sload, n) ? par.sload[n][t] : 0.0
+max_reg_hydro_gen(par, n) = get(par.maxRegHydroGen, n, 0.0)
+gen_marginal_cost(par, g, t) = haskey(par.genMargCost, g) ? par.genMargCost[g][t] : 0.0
 
 mutable struct empire_opt
     EMISSION_CAP
