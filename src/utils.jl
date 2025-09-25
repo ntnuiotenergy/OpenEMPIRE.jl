@@ -104,8 +104,6 @@ function preprocess_invest_cost(params::EmpireParams, sets, periods)
                 invest_cost = present_value(cost_per_year * 1000, ρ, y; at_start = true) # in €/MW
                 push!(profiles, FixedProfile(invest_cost))
             end
-            println("Transmission investment cost for line $((m, n))")
-            println(typeof(params.transmissionInvCost))
             params.transmissionInvCost[(m, n)] = StrategicProfile(profiles)
         end
     end
@@ -120,7 +118,7 @@ function preprocess_max_installed_cap(params::EmpireParams, sets, periods)
         vals = Float64[]
         for sp in strat_periods(periods)
             max_cap = params.genMaxInstalledCapRaw[(n, gt)]
-            init_cap = sum(gencap_init(params, n, g, sp) for g in generators_tech(sets, n, gt))
+            init_cap = sum(gencap_init(params, n, g, sp) for g in generators_tech(sets, n, gt); init = 0)
             if init_cap > max_cap
                 @warn "Initial capacity $init_cap for technology $gt at node $n exceeds maximum installed capacity $max_cap. Setting maximum installed capacity to initial capacity."
                 max_cap = init_cap
@@ -167,6 +165,7 @@ function preprocess_operational_cost(params::EmpireParams, sets, periods)
 end
 
 function preprocess_initcap_gen(params::EmpireParams, sets, periods)
+    @info "Preprocessing initial generation capacities"
     for (n, g) in sets.GeneratorsOfNode
         values = Float64[]
         for sp in strat_periods(periods)
@@ -187,9 +186,13 @@ function preprocess_initcap_gen(params::EmpireParams, sets, periods)
 end
 
 function preprocess_stoch_load(params::EmpireParams, sets, periods)
+    @info "Preprocessing stochastic load profiles based on annual demand"
     # Scale the stochastic load profiles based on the expected annual load
     params.sload = Dict{String, TimeProfile}()
     for n in sets.Node
+        if !haskey(params.sloadRaw, n)
+            continue
+        end
         repr_profiles = RepresentativeProfile[]
         for sp in strat_periods(periods)
             load_raw = sum(multiple(t) * probability(t) * params.sloadRaw[n][t] for t in sp)

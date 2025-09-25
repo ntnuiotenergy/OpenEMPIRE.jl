@@ -1,7 +1,7 @@
 
 function read_sets_xlsx(dirX)
     # Read the data from the xlsx files
-    @info "Reading sets"
+    @info "Reading sets from $dirX"
 
     sets = OpenEMPIRE.EmpireSets()
 
@@ -32,33 +32,22 @@ function read_sets_xlsx(dirX)
 end
 
 # Remove rows where there are missing values in the first column
-# and columns that are completely missing
 function purge_missing(data)
     # Find the first row with missing values in the first column
     first_missing_row = findfirst(row -> ismissing(row[1]), eachrow(data))
     if first_missing_row !== nothing
         data = data[1:first_missing_row-1, :]
     end
-    # Remove columns that are missing values in the first row
-    data = data[:, 1:length([c for c in data[1,:] if !ismissing(c)])]
     return data
 end
 
-function param_load(temp)
+function param_load(temp; value_col=2)
     temp = purge_missing(temp)
-    returner = Dict()
-    for row in 1:length(temp[:,1])
-        if length(temp[1,:]) > 2
-            spample = Any[]
-            for col in 1:length(temp[1,:])-1
-                push!(spample, temp[row, col])
-            end
-            returner[spample...] = temp[row, end]
-        else
-            returner[temp[row, 1]] = temp[row, end]
-        end
+    values = Dict()
+    for row in eachrow(temp)
+        values[row[1:value_col-1]...] = row[value_col]
     end
-    return returner
+    return values
 end
 
 function strat_profiles(data; default_value=0.0)
@@ -128,7 +117,7 @@ end
 
 function read_params_xlsx(dirX)
     # Read the data from the xlsx files
-    @info "Reading parameters"
+    @info "Reading parameters from $dirX"
 
     par = OpenEMPIRE.EmpireParams()
 
@@ -138,13 +127,13 @@ function read_params_xlsx(dirX)
         par.genFixedOMCost = filehandle["FixedOMCosts"][:][4:end,:] |> data -> strat_profiles(data)
         par.genVariableOMCost = filehandle["VariableOMCosts"][:][4:end,:] |> data -> param_load(data)
         par.genFuelCost = filehandle["FuelCosts"][:][4:end,:] |> data -> strat_profiles(data)
-        par.CCSCostTSVariable = filehandle["CCSCostTSVariable"][:][4:end,:] |> data -> param_load(data)
+        par.CCSCostTSVariable = filehandle["CCSCostTSVariable"][:][4:end,:] |> data -> strat_profile(data)
         par.genEfficiency = filehandle["Efficiency"][:][4:end,:] |> data -> strat_profiles(data)
-        par.genRefInitCap = filehandle["RefInitialCap"][:][4:end,:] |> data -> param_load(data)
+        par.genRefInitCap = filehandle["RefInitialCap"][:][4:end,:] |> data -> param_load(data; value_col = 3)
         par.genScaleInitCap = filehandle["ScaleFactorInitialCap"][:][4:end,:] |> data -> strat_profiles(data)
         par.genInitCap = filehandle["InitialCapacity"][:][4:end,:] |> data -> strat_profiles_gen(data)
         par.genMaxBuiltCap = filehandle["MaxBuiltCapacity"][:][4:end,:] |> data -> strat_profiles_gen(data)
-        par.genMaxInstalledCapRaw = filehandle["MaxInstalledCapacity"][:][4:end,:] |> data -> param_load(data)
+        par.genMaxInstalledCapRaw = filehandle["MaxInstalledCapacity"][:][4:end,:] |> data -> param_load(data; value_col = 3)
         par.genRampUpCap = filehandle["RampRate"][:][4:end,:] |> data -> param_load(data)
         par.genCapAvailType = filehandle["GeneratorTypeAvailability"][:][4:end,:] |> data -> param_load(data)
         par.genCO2Content = filehandle["CO2Content"][:][4:end,:] |> data -> param_load(data)
@@ -156,11 +145,11 @@ function read_params_xlsx(dirX)
         par.transmissionInitCap = filehandle["InitialCapacity"][:][4:end,:] |> data ->strat_profiles_gen(data)
         par.transmissionMaxBuiltCap = filehandle["MaxBuiltCapacity"][:][4:end,:] |> data ->strat_profiles_gen(data)
         par.transmissionMaxInstalledCap = filehandle["MaxInstallCapacityRaw"][:][4:end,:] |> data ->strat_profiles_gen(data)
-        par.transmissionLength = filehandle["Length"][:][4:end,:] |> data ->param_load(data)
+        par.transmissionLength = filehandle["Length"][:][4:end,:] |> data ->param_load(data; value_col = 3)
         par.transmissionTypeCapitalCost = filehandle["TypeCapitalCost"][:][4:end,:] |> data ->strat_profiles(data)
         par.transmissionTypeFixedOMCost = filehandle["TypeFixedOMCost"][:][4:end,:] |> data ->strat_profiles(data)
-        par.lineEfficiency = filehandle["lineEfficiency"][:][4:end,:] |> data ->param_load(data)
-        par.transmissionLifetime = filehandle["Lifetime"][:][4:end,:] |> data -> param_load(data)
+        par.lineEfficiency = filehandle["lineEfficiency"][:][4:end,:] |> data ->param_load(data; value_col = 3)
+        par.transmissionLifetime = filehandle["Lifetime"][:][4:end,:] |> data -> param_load(data; value_col = 3)
     end
 
     # Storage parameters
@@ -171,15 +160,15 @@ function read_params_xlsx(dirX)
         par.storagePowToEnergy = data = filehandle["StoragePowToEnergy"][:][4:end,:] |> data -> param_load(data)
         par.storENCapitalCost = data = filehandle["EnergyCapitalCost"][:][4:end,:] |> data -> strat_profiles(data)
         par.storENFixedOMCost = data = filehandle["EnergyFixedOMCost"][:][4:end,:] |> data -> strat_profiles(data)
-        par.storENInitCap = data = filehandle["EnergyInitialCapacity"][:][4:end,:] |> data -> param_load(data)
-        par.storENMaxBuiltCap = data = filehandle["EnergyMaxBuiltCapacity"][:][4:end,:] |> data -> param_load(data)
-        par.storENMaxInstalledCap = data = filehandle["EnergyMaxInstalledCapacity"][:][4:end,:] |> data -> param_load(data)
+        par.storENInitCap = data = filehandle["EnergyInitialCapacity"][:][4:end,:] |> data -> strat_profiles_gen(data)
+        par.storENMaxBuiltCap = data = filehandle["EnergyMaxBuiltCapacity"][:][4:end,:] |> data -> strat_profiles_gen(data)
+        par.storENMaxInstalledCap = data = filehandle["EnergyMaxInstalledCapacity"][:][4:end,:] |> data -> param_load(data; value_col = 3)
         par.storOperationalInit = data = filehandle["StorageInitialEnergyLevel"][:][4:end,:] |> data -> param_load(data)
-        par.storPWCapitalCost = data = filehandle["PowerCapitalCost"][:][4:end,:] |> data -> param_load(data)
-        par.storPWFixedOMCost = data = filehandle["PowerFixedOMCost"][:][4:end,:] |> data -> param_load(data)
-        par.storPWInitCap = data = filehandle["InitialPowerCapacity"][:][4:end,:] |> data -> param_load(data)
-        par.storPWMaxBuiltCap = data = filehandle["PowerMaxBuiltCapacity"][:][4:end,:] |> data -> param_load(data)
-        par.storPWMaxInstalledCap = data = filehandle["PowerMaxInstalledCapacity"][:][4:end,:] |> data -> param_load(data)
+        par.storPWCapitalCost = data = filehandle["PowerCapitalCost"][:][4:end,:] |> data -> strat_profiles(data)
+        par.storPWFixedOMCost = data = filehandle["PowerFixedOMCost"][:][4:end,:] |> data -> strat_profiles(data)
+        par.storPWInitCap = data = filehandle["InitialPowerCapacity"][:][4:end,:] |> data -> strat_profiles_gen(data)
+        par.storPWMaxBuiltCap = data = filehandle["PowerMaxBuiltCapacity"][:][4:end,:] |> data -> strat_profiles_gen(data)
+        par.storPWMaxInstalledCap = data = filehandle["PowerMaxInstalledCapacity"][:][4:end,:] |> data -> param_load(data; value_col = 3)
         par.storageLifetime = data = filehandle["Lifetime"][:][4:end,:] |> data -> param_load(data)
     end
 

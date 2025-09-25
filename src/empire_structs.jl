@@ -127,9 +127,9 @@ bleed_eff(par, s) = get(par.storageBleedEff, s, 1.0)
 charge_eff(par, s) = get(par.storageChargeEff, s, 1.0)
 discharge_eff(par, s) = get(par.storageDischargeEff, s, 1.0)
 storage_init(par, s) = get(par.storOperationalInit, s, 0.0)
-lifetime_storage(par, s) = get(par.storageLifetime, s, 1)
-stor_cap_init_en(par, s, sp) = haskey(par.storENInitCap, s) ? par.storENInitCap[s][sp] : 0.0
-stor_cap_init_pow(par, s, sp) = haskey(par.storPWInitCap, s) ? par.storPWInitCap[s][sp] : 0.0
+lifetime_storage(par, s) = get(par.storageLifetime, s, 40)
+stor_cap_init_en(par, n, s, sp) = haskey(par.storENInitCap, (n, s)) ? par.storENInitCap[(n, s)][sp] : 0.0
+stor_cap_init_pow(par, n, s, sp) = haskey(par.storPWInitCap, (n, s)) ? par.storPWInitCap[(n, s)][sp] : 0.0
 power_to_energy(par, s) = get(par.storagePowToEnergy, s, 1.0)
 
 # Transmission properties

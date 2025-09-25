@@ -3,16 +3,19 @@ function test_interface()
     using JuMP
     using Test
     using HiGHS
+    using Xpress
 
     config_file = "data/testrun.yaml"
     data_folder = "data"
 
-    emp, periods, sets, params = OpenEMPIRE.create_model(config_file, data_folder)
-    set_optimizer(emp, HiGHS.Optimizer)
+    config_file = "../OpenEMPIRE/config/run.yaml"
+    data_folder = "../OpenEMPIRE/Data handler/europe_v51"
+
+    emp, periods, sets, params = OpenEMPIRE.create_model(config_file, data_folder; optimizer = Xpress.Optimizer);
     optimize!(emp)
 
-    prod = Containers.rowtable(value, emp[:genOperational]; header = [:Node, :Generator, :Time, :Production])
-    prod = filter(r -> r.Production > 0.0, prod)
+    gen = Containers.rowtable(value, emp[:genOperational]; header = [:Node, :Generator, :Time, :Production])
+    gen = filter(r -> r.Production > 0.0, gen)
 
     storDischarge = Containers.rowtable(value, emp[:storDischarge]; header = [:Node, :Storage, :Time, :Discharge])
     storDischarge = filter(r -> r.Discharge > 0.0, storDischarge)

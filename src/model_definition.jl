@@ -164,7 +164,6 @@ end
 function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure)
     @info "Creating generator constraints"
     N = sets.Node
-    G = sets.Generator
     SP = strat_periods(periods)
 
     genOp = emp[:genOperational]
@@ -172,6 +171,7 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
     genInv = emp[:genInvCap]
 
     # Generation capacity constraints
+    @info " - capacity constraints: $(length(sets.GeneratorsOfNode) * length(periods))"
     @constraint(
         emp,
         gen_max_prod[n in N, g in generators(sets, n), sp in SP, t in sp],
@@ -179,6 +179,7 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
     )
 
     # Ramping Constraints
+    @info " - ramping constraints: $(length(sets.GeneratorsOfNode) * length(periods))"
     @constraint(
         emp,
         gen_ramping[n in N, g in generators(sets, n), sp in SP, (prev, t) in withprev(sp); !isnothing(prev)],
@@ -187,6 +188,7 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
 
     # Tracking installed capacity from investments across strategic periods that are within
     # the technology lifetime
+    @info " - installed capacity constraints: $(length(sets.GeneratorsOfNode) * length(SP))"
     @constraint(
         emp,
         installed_cap_gen[n in N, g in generators(sets, n), sp in SP],
@@ -194,9 +196,8 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
             gencap_init(par, n, g, sp) == genCap[n, g, sp]
     )
 
-    test = [max_build_cap(par, n, tc, sp) for n in N for tc in techs(sets, n) for sp in SP]
-
     # Constraints on maximum capacity that can be built and installed for each technology
+    @info " - maximum investment constraints: $(length(sets.GeneratorsOfNode) * length(SP))"
     @constraint(
         emp,
         max_inv_tech[n in N, tc in techs(sets, n), sp in SP; max_build_cap(par, n, tc, sp) !== nothing],
@@ -204,6 +205,7 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
     )
 
     # Constraints on maximum installed capacity for each technology
+    @info " - maximum installed capacity constraints: $(length(sets.GeneratorsOfNode) * length(SP))"
     @constraint(
         emp,
         max_inst_tech[n in N, tc in techs(sets, n), sp in SP; max_inst_cap(par, n, tc, sp) !== nothing],
@@ -225,6 +227,7 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
     storCapInvPow = emp[:storPWInvCap]
 
     # Storage energy balance constraints
+    @info " - energy balance constraints: $(length(sets.StoragesOfNode) * length(periods))"
     @constraint(
         emp,
         storage_bal[n in N, s in storages(sets, n), sp in SP, (prev, t) in withprev(sp)],
@@ -233,6 +236,7 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
     )
 
     # Cyclic condition for storage at the end of each operational scenario
+    @info " - cyclic condition constraints"
     @constraint(
         emp,
         storage_cyclic[n in N, s in storages(sets, n), sp in SP, sc in opscenarios(sp)],
@@ -240,29 +244,32 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
     )
 
     # Storage operational and power capacity constraints
+    @info " - operational capacity constraints energy: $(length(sets.StoragesOfNode) * length(periods))"
     @constraint(
         emp,
         storage_op_cap_en[n in N, s in storages(sets, n), sp in SP, t in sp],
         storOp[n, s, t] <= storCapEn[n, s, sp]
     )
+    @info " - operational capacity constraints power: $(length(sets.StoragesOfNode) * length(periods))"
     @constraint(
         emp,
         storage_op_cap_pow[n in N, s in storages(sets, n), sp in SP, t in sp],
         storCharge[n, s, t] <= storCapPow[n, s, sp]
     )
 
+    @info " - investment constraints"
     # Tracking installed capacity from investments
     @constraint(
         emp,
         storage_installed_cap_en[n in N, s in storages(sets, n), sp in SP],
         sum(storCapInvEn[n, s, spp] for spp in SP if duration_aggr(spp, sp, SP) <= lifetime_storage(par, s)) +
-            stor_cap_init_en(par, s, sp) == storCapEn[n, s, sp]
+            stor_cap_init_en(par, n, s, sp) == storCapEn[n, s, sp]
     )
     @constraint(
         emp,
         storage_installed_cap_pow[n in N, s in storages(sets, n), sp in SP],
         sum(storCapInvPow[n, s, spp] for spp in SP if duration_aggr(spp, sp, SP) <= lifetime_storage(par, s)) +
-            stor_cap_init_pow(par, s, sp) == storCapPow[n, s, sp]
+            stor_cap_init_pow(par, n, s, sp) == storCapPow[n, s, sp]
     )
 
     # Couple power and energy capacity investments via a fixed ratio for dependent storages
