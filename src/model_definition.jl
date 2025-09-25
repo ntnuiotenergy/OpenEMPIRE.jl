@@ -57,9 +57,6 @@ function create_variables(emp::JuMP.Model, sets, periods::TimeStruct.TimeStructu
     @variable(emp, storOperational[N, S, T] >= 0; container = IndexedVarArray)
     @variable(emp, loadShed[N, T] >= 0; container = IndexedVarArray)
 
-    # Variable for tracking the objective value
-    @variable(emp, obj, base_name="objective")
-
     # Insert sparse variables
     @info "Inserting variables into sparse arrays - strategic variables"
     for (n, g) in sets.GeneratorsOfNode, sp in SP
@@ -92,17 +89,18 @@ function create_variables(emp::JuMP.Model, sets, periods::TimeStruct.TimeStructu
         unsafe_insertvar!(storDischarge, n, s, t)
         unsafe_insertvar!(storOperational, n, s, t)
     end
+    @info "Load shedding variables: $(length(N) * length(T))"
+    for n in N, t in T
+        unsafe_insertvar!(loadShed, n, t)
+    end
 end
 
 function create_objective(emp::JuMP.Model, sets, par, periods::TimeStructure, discounter::Discounter)
-
+    @info "Creating objective function"
     N = nodes(sets)
-    G = generators(sets)
-    S = storages(sets)
     T = periods
     SP = strat_periods(periods)
 
-    obj = emp[:obj]
     genInvCap = emp[:genInvCap]
     transInvCap = emp[:transmissionInvCap]
     storInvCapPow = emp[:storPWInvCap]
@@ -111,25 +109,25 @@ function create_objective(emp::JuMP.Model, sets, par, periods::TimeStructure, di
     shed = emp[:loadShed]
     genOp = emp[:genOperational]
 
-    @constraint(
+    @objective(
         emp,
-        objective,
-        obj == sum(objective_weight(sp, discounter) * (
+        Min,
+        sum(objective_weight(sp, discounter) * (
             sum(gen_invest_cost(par, g, sp) * genInvCap[n, g, sp] for n in N, g in generators(sets, n); init = 0) +
-            sum(transmission_invest_cost(par, m, n, sp) * transInvCap[m, n, sp] for (m, n) in arcs(sets); init = 0) +
+            sum(trans_invest_cost(par, m, n, sp) * transInvCap[m, n, sp] for (m, n) in arcs(sets); init = 0) +
             sum(stor_pw_invest_cost(par, s, sp) * storInvCapPow[n, s, sp] for n in N, s in storages(sets, n); init = 0) +
             sum(stor_en_invest_cost(par, s, sp) * storInvCapEn[n, s, sp] for n in N, s in storages(sets, n); init = 0)
             ) for sp in SP) +
-            sum(objective_weight(t, discounter) * (
+        sum(objective_weight(t, discounter) * (
                 sum(lost_load_cost(par, n, t) * shed[n, t] for n in N; init = 0) +
                 sum(gen_marginal_cost(par, g, t) * genOp[n, g, t] for n in N for g in generators(sets, n); init = 0)
                 ) for t in T)
-
-        )
-    @objective(emp, Min, obj)
+    )
 end
 
+# Create all constraints in the model
 function create_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure)
+    @info "Creating constraints"
 
     N = nodes(sets)
     G = generators(sets)
@@ -141,15 +139,13 @@ function create_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure)
     trOp = emp[:transmissionOperational]
     shed = emp[:loadShed]
 
-    μ = par.lineEfficiency
-
+    @info "Flow balance constraints: $((length(N)) * length(T))"
     @constraint(
         emp,
         flow_balance[n in N, t in T],
         sum(genOp[n, g, t] for g in G) + sum(discharge_eff(par, s) * storDischarge[n, s, t] - storCharge[n, s, t] for s in storages(sets, n)) +
-            sum(μ[m, n] * trOp[m, n, t] for (m, n, t) in SparseVariables.select(trOp, :, n, t)) - sum(trOp[n, :, t]) +
-            #par.sload[n, t] +
-            shed[n, t] == 0
+            sum(line_eff(par, m, n) * trOp[m, n, t] for (m, n, t) in SparseVariables.select(trOp, :, n, t)) - sum(trOp[n, :, t]) +
+            shed[n, t] == load(par, n, t)
     )
 
     create_generator_constraints(emp, sets, par, periods)
@@ -158,13 +154,15 @@ function create_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure)
 
 end
 
+# Calculate the total duration of all strategic periods from spp to sp (inclusive)
+# Return Inf if spp < sp
 function duration_aggr(sp, spp, strat_periods)
     spp < sp && return Inf
     return sum(duration_strat(p) for p in strat_periods if p >= sp && p < spp; init = 0)
 end
 
 function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure)
-
+    @info "Creating generator constraints"
     N = sets.Node
     G = sets.Generator
     SP = strat_periods(periods)
@@ -176,14 +174,14 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
     # Generation capacity constraints
     @constraint(
         emp,
-        gen_max_prod[n in N, g in G, sp in SP, t in sp],
-        genOp[n, g, t] <= gencap_avail(par, n, g, sp) * genCap[n, g, sp]
+        gen_max_prod[n in N, g in generators(sets, n), sp in SP, t in sp],
+        genOp[n, g, t] <= gencap_avail(par, n, g, t) * genCap[n, g, sp]
     )
 
     # Ramping Constraints
     @constraint(
         emp,
-        gen_ramping[n in N, g in G, sp in SP, (prev, t) in withprev(sp); !isnothing(prev)],
+        gen_ramping[n in N, g in generators(sets, n), sp in SP, (prev, t) in withprev(sp); !isnothing(prev)],
         genOp[n, g, t] <= genOp[n, g, prev] + rampup_cap(par, g) * genCap[n, g, sp]
     )
 
@@ -191,28 +189,30 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
     # the technology lifetime
     @constraint(
         emp,
-        installed_cap_gen[n in N, g in G, sp in SP],
+        installed_cap_gen[n in N, g in generators(sets, n), sp in SP],
         sum(genInv[n, g, spp] for spp in SP if duration_aggr(spp, sp, SP) <= gen_lifetime(par, g)) +
-        gencap_init(par, n, g, sp) == genCap[n, g, sp]
+            gencap_init(par, n, g, sp) == genCap[n, g, sp]
     )
+
+    test = [max_build_cap(par, n, tc, sp) for n in N for tc in techs(sets, n) for sp in SP]
 
     # Constraints on maximum capacity that can be built and installed for each technology
     @constraint(
         emp,
-        max_inv_tech[n in N, t in techs(sets, n), sp in SP; !isnothing(max_build_cap(par, n, t, sp))],
-        sum(genInv[n, g, sp] for g in generators_tech(sets, n, t)) <= max_build_cap(par, n, t, sp)
+        max_inv_tech[n in N, tc in techs(sets, n), sp in SP; max_build_cap(par, n, tc, sp) !== nothing],
+        sum(genInv[n, g, sp] for g in generators_tech(sets, n, tc)) <= max_build_cap(par, n, tc, sp)
     )
 
     # Constraints on maximum installed capacity for each technology
     @constraint(
         emp,
-        max_inst_tech[n in N, t in techs(sets, n), sp in SP; !isnothing(max_inst_cap(par, n, t, sp))],
-        sum(genCap[n, g, sp] for g in generators_tech(sets, n, t)) <= max_inst_cap(par, n, t, sp)
+        max_inst_tech[n in N, tc in techs(sets, n), sp in SP; max_inst_cap(par, n, tc, sp) !== nothing],
+        sum(genCap[n, g, sp] for g in generators_tech(sets, n, tc)) <= max_inst_cap(par, n, tc, sp)
     )
 end
 
 function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure)
-
+    @info "Creating storage constraints"
     N = sets.Node
     SP = strat_periods(periods)
 
@@ -275,7 +275,7 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
 end
 
 function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure)
-
+    @info "Creating transmission constraints"
     N = sets.Node
     SP = strat_periods(periods)
 
@@ -294,9 +294,9 @@ function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::Ti
     # the technology lifetime
     @constraint(
         emp,
-        trans_lifetime[(m, n) in arcs(sets), sp in SP],
+        trans_track_cap[(m, n) in arcs(sets), sp in SP],
         sum(tr_inv_cap[m, n, spp] for spp in SP if duration_aggr(spp, sp, SP) <= trans_lifetime(par, m, n)) +
-            trans_cap_init(par, m, n) * tr_cap[m, n, sp] == 0
+            trans_cap_init(par, m, n, sp) * tr_cap[m, n, sp] == 0
     )
 
     # Constraints on maximum capacity that can be built and installed for each transmission line

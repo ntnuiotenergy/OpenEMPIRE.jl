@@ -21,8 +21,8 @@ function read_scenario_tab(data_folder, periods, params::EmpireParams, hours_per
     read_scenario_data(hydro_file, params.maxRegHydroGenRaw, periods, hours_per_season, 6)
 
     avail_file = joinpath(data_folder, "Stochastic", "Stochastic_StochasticAvailability.tab")
-    params.genCapAvailStochRaw = Dict{Tuple{String,String}, TimeProfile}()
-    read_scenario_data_gen(avail_file, params.genCapAvailStochRaw, periods, hours_per_season, 6)
+    params.genCapAvail = Dict{Tuple{String,String}, TimeProfile}()
+    read_scenario_data_gen(avail_file, params.genCapAvail, periods, hours_per_season, 6)
 
 end
 

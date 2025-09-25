@@ -22,7 +22,6 @@ function test_read_excel_params()
 
     params = OpenEMPIRE.read_params_xlsx("data")
 
-
     sets = OpenEMPIRE.read_sets_xlsx("data")
     periods = OpenEMPIRE.create_timestruct(2, 5, 4, 24, 2, 24, 2)
     params.WACC = 0.05
@@ -30,7 +29,5 @@ function test_read_excel_params()
 
     OpenEMPIRE.preprocess_invest_cost(params, sets, periods)
     OpenEMPIRE.preprocess_operational_cost(params, sets, periods)
-
-
-
+    OpenEMPIRE.preprocess_initcap_gen(params, sets, periods)
 end

@@ -146,21 +146,21 @@ function read_params_xlsx(dirX)
         par.genMaxBuiltCap = filehandle["MaxBuiltCapacity"][:][4:end,:] |> data -> strat_profiles_gen(data)
         par.genMaxInstalledCapRaw = filehandle["MaxInstalledCapacity"][:][4:end,:] |> data -> param_load(data)
         par.genRampUpCap = filehandle["RampRate"][:][4:end,:] |> data -> param_load(data)
-        par.genCapAvailTypeRaw = filehandle["GeneratorTypeAvailability"][:][4:end,:] |> data -> param_load(data)
+        par.genCapAvailType = filehandle["GeneratorTypeAvailability"][:][4:end,:] |> data -> param_load(data)
         par.genCO2Content = filehandle["CO2Content"][:][4:end,:] |> data -> param_load(data)
         par.genLifetime = filehandle["Lifetime"][:][4:end,:] |> data -> param_load(data)
     end
 
     # Transmission parameters
     XLSX.openxlsx(joinpath(dirX, "Transmission.xlsx")) do filehandle
-        par.transmissionInitCap = data = filehandle["InitialCapacity"][:][4:end,:] |> data ->strat_profiles_gen(data)
-        par.transmissionMaxBuiltCap = data = filehandle["MaxBuiltCapacity"][:][4:end,:] |> data ->strat_profiles_gen(data)
-        par.transmissionMaxInstalledCapRaw = data = filehandle["MaxInstallCapacityRaw"][:][4:end,:] |> data ->strat_profiles_gen(data)
-        par.transmissionLength = data = filehandle["Length"][:][4:end,:] |> data ->param_load(data)
-        par.transmissionTypeCapitalCost = data = filehandle["TypeCapitalCost"][:][4:end,:] |> data ->strat_profiles(data)
-        par.transmissionTypeFixedOMCost = data = filehandle["TypeFixedOMCost"][:][4:end,:] |> data ->strat_profiles(data)
-        par.lineEfficiency = data = filehandle["lineEfficiency"][:][4:end,:] |> data ->param_load(data)
-        par.transmissionLifetime = data = filehandle["Lifetime"][:][4:end,:] |> data -> param_load(data)
+        par.transmissionInitCap = filehandle["InitialCapacity"][:][4:end,:] |> data ->strat_profiles_gen(data)
+        par.transmissionMaxBuiltCap = filehandle["MaxBuiltCapacity"][:][4:end,:] |> data ->strat_profiles_gen(data)
+        par.transmissionMaxInstalledCap = filehandle["MaxInstallCapacityRaw"][:][4:end,:] |> data ->strat_profiles_gen(data)
+        par.transmissionLength = filehandle["Length"][:][4:end,:] |> data ->param_load(data)
+        par.transmissionTypeCapitalCost = filehandle["TypeCapitalCost"][:][4:end,:] |> data ->strat_profiles(data)
+        par.transmissionTypeFixedOMCost = filehandle["TypeFixedOMCost"][:][4:end,:] |> data ->strat_profiles(data)
+        par.lineEfficiency = filehandle["lineEfficiency"][:][4:end,:] |> data ->param_load(data)
+        par.transmissionLifetime = filehandle["Lifetime"][:][4:end,:] |> data -> param_load(data)
     end
 
     # Storage parameters
@@ -173,20 +173,20 @@ function read_params_xlsx(dirX)
         par.storENFixedOMCost = data = filehandle["EnergyFixedOMCost"][:][4:end,:] |> data -> strat_profiles(data)
         par.storENInitCap = data = filehandle["EnergyInitialCapacity"][:][4:end,:] |> data -> param_load(data)
         par.storENMaxBuiltCap = data = filehandle["EnergyMaxBuiltCapacity"][:][4:end,:] |> data -> param_load(data)
-        par.storENMaxInstalledCapRaw = data = filehandle["EnergyMaxInstalledCapacity"][:][4:end,:] |> data -> param_load(data)
+        par.storENMaxInstalledCap = data = filehandle["EnergyMaxInstalledCapacity"][:][4:end,:] |> data -> param_load(data)
         par.storOperationalInit = data = filehandle["StorageInitialEnergyLevel"][:][4:end,:] |> data -> param_load(data)
         par.storPWCapitalCost = data = filehandle["PowerCapitalCost"][:][4:end,:] |> data -> param_load(data)
         par.storPWFixedOMCost = data = filehandle["PowerFixedOMCost"][:][4:end,:] |> data -> param_load(data)
         par.storPWInitCap = data = filehandle["InitialPowerCapacity"][:][4:end,:] |> data -> param_load(data)
         par.storPWMaxBuiltCap = data = filehandle["PowerMaxBuiltCapacity"][:][4:end,:] |> data -> param_load(data)
-        par.storPWMaxInstalledCapRaw = data = filehandle["PowerMaxInstalledCapacity"][:][4:end,:] |> data -> param_load(data)
+        par.storPWMaxInstalledCap = data = filehandle["PowerMaxInstalledCapacity"][:][4:end,:] |> data -> param_load(data)
         par.storageLifetime = data = filehandle["Lifetime"][:][4:end,:] |> data -> param_load(data)
     end
 
     # Node parameters
     XLSX.openxlsx(joinpath(dirX, "Node.xlsx")) do filehandle
-        par.nodeLostLoadCost = data = filehandle["NodeLostLoadCost"][:][4:end,:] |> data -> param_load(data)
-        par.sloadAnnualDemand = data = filehandle["ElectricAnnualDemand"][:][4:end,:] |> data -> param_load(data)
+        par.nodeLostLoadCost = data = filehandle["NodeLostLoadCost"][:][4:end,:] |> data -> strat_profiles(data)
+        par.sloadAnnualDemand = data = filehandle["ElectricAnnualDemand"][:][4:end,:] |> data -> strat_profiles(data)
         par.maxRegHydroGenRaw = data = filehandle["HydroGenMaxAnnualProduction"][:][4:end,:] |> data -> param_load(data)
     end
 

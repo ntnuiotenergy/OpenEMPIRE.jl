@@ -12,6 +12,14 @@ function present_value(cost, discount_rate, years; at_start = true)
     return pv
 end
 
+function preprocess_params(params::EmpireParams, sets, periods)
+    preprocess_invest_cost(params, sets, periods)
+    preprocess_operational_cost(params, sets, periods)
+    preprocess_initcap_gen(params, sets, periods)
+    preprocess_stoch_load(params, sets, periods)
+    preprocess_max_installed_cap(params, sets, periods)
+end
+
 function preprocess_invest_cost(params::EmpireParams, sets, periods)
 
     @info "Preprocessing investment costs based on WACC and discount rate"
@@ -84,11 +92,11 @@ function preprocess_invest_cost(params::EmpireParams, sets, periods)
 
     # Transmission investment costs
     params.transmissionInvCost = Dict{Tuple{String,String}, StrategicProfile}()
-    for tr in sets.TransmissionType
-        if haskey(params.transmissionTypeCapitalCost, tr) && haskey(params.transmissionLifetime, tr)
-            cap_cost = params.transmissionTypeCapitalCost[tr] # in €/kW
-            life = params.transmissionLifetime[tr]
-            om_cost = get(params.transmissionTypeFixedOMCost, tr, 0.0) # in €/kW/year
+    for (m, n, tt) in sets.TransmissionTypeOfDirectionalLink
+        if haskey(params.transmissionTypeCapitalCost, tt) && haskey(params.transmissionLifetime, (m,n))
+            cap_cost = params.transmissionTypeCapitalCost[tt] # in €/kW
+            life = params.transmissionLifetime[(m,n)]
+            om_cost = get(params.transmissionTypeFixedOMCost, tt, 0.0) # in €/kW/year
             profiles = FixedProfile[]
             for sp in SP
                 cost_per_year = cap_cost[sp] / annuity_factor(wacc, life) + om_cost[sp]
@@ -96,8 +104,45 @@ function preprocess_invest_cost(params::EmpireParams, sets, periods)
                 invest_cost = present_value(cost_per_year * 1000, ρ, y; at_start = true) # in €/MW
                 push!(profiles, FixedProfile(invest_cost))
             end
-            params.transmissionInvCost[tr] = StrategicProfile(profiles)
+            println("Transmission investment cost for line $((m, n))")
+            println(typeof(params.transmissionInvCost))
+            params.transmissionInvCost[(m, n)] = StrategicProfile(profiles)
         end
+    end
+end
+
+function preprocess_max_installed_cap(params::EmpireParams, sets, periods)
+    # Ensure that the maximum installed capacity is at least equal to the initial capacity
+
+    # Generators of technology
+    params.genMaxInstalledCap = Dict{Tuple{String,String}, TimeProfile}()
+    for (n, gt) in keys(params.genMaxInstalledCapRaw)
+        vals = Float64[]
+        for sp in strat_periods(periods)
+            max_cap = params.genMaxInstalledCapRaw[(n, gt)]
+            init_cap = sum(gencap_init(params, n, g, sp) for g in generators_tech(sets, n, gt))
+            if init_cap > max_cap
+                @warn "Initial capacity $init_cap for technology $gt at node $n exceeds maximum installed capacity $max_cap. Setting maximum installed capacity to initial capacity."
+                max_cap = init_cap
+            end
+            push!(vals, max_cap)
+        end
+        params.genMaxInstalledCap[(n, gt)] = StrategicProfile(vals)
+    end
+
+    # Transmission lines
+    for (m, n) in keys(params.transmissionMaxInstalledCap)
+        vals = Float64[]
+        for sp in strat_periods(periods)
+            max_cap = params.transmissionMaxInstalledCap[(m, n)][sp]
+            init_cap = trans_cap_init(params, m, n, sp)
+            if init_cap > max_cap
+                @warn "Initial capacity $init_cap for transmission line $((m, n)) exceeds maximum installed capacity $max_cap. Setting maximum installed capacity to initial capacity."
+                max_cap = init_cap
+            end
+            push!(vals, max_cap)
+        end
+        params.transmissionMaxInstalledCap[(m, n)] = StrategicProfile(vals)
     end
 end
 
@@ -121,17 +166,48 @@ function preprocess_operational_cost(params::EmpireParams, sets, periods)
     end
 end
 
-function preprocess_initcap(params::EmpireParams, sets, periods)
-    for g in sets.Generator
+function preprocess_initcap_gen(params::EmpireParams, sets, periods)
+    for (n, g) in sets.GeneratorsOfNode
         values = Float64[]
         for sp in strat_periods(periods)
-            if !haskey(params.genInitCap, g) || params.genInitCap[g][sp] == 0
-                val = params.genRefInitCap[g] * (1 - params.genScaleInitCap[sp])
+            val = 0.0
+            # If no initial capacity is provided or equal to 0, use reference capacity
+            # scaled by reduction factor if available
+            if !haskey(params.genInitCap, (n, g)) || params.genInitCap[(n, g)][sp] == 0
+                if haskey(params.genRefInitCap, (n, g)) && haskey(params.genScaleInitCap, g)
+                    val = params.genRefInitCap[(n, g)] * (1 - params.genScaleInitCap[g][sp])
+                end
             else
-                val = params.genInitCap[g][sp]
+                val = params.genInitCap[(n, g)][sp]
             end
             push!(values, val)
         end
-        params.genInitCap[g] = StrategicProfile(values)
+        params.genInitCap[(n, g)] = StrategicProfile(values)
+    end
+end
+
+function preprocess_stoch_load(params::EmpireParams, sets, periods)
+    # Scale the stochastic load profiles based on the expected annual load
+    params.sload = Dict{String, TimeProfile}()
+    for n in sets.Node
+        repr_profiles = RepresentativeProfile[]
+        for sp in strat_periods(periods)
+            load_raw = sum(multiple(t) * probability(t) * params.sloadRaw[n][t] for t in sp)
+            scale_factor = 0.0
+            if haskey(params.sloadAnnualDemand, n)
+               scale_factor = params.sloadAnnualDemand[n][sp] / load_raw
+            end
+            scen_profiles = ScenarioProfile[]
+            for rp in repr_periods(sp)
+                op_profiles = OperationalProfile[]
+                for sc in opscenarios(rp)
+                    scaled_vals = [params.sloadRaw[n][t] * scale_factor for t in sc]
+                    push!(op_profiles, OperationalProfile(scaled_vals))
+                end
+                push!(scen_profiles, ScenarioProfile(op_profiles))
+            end
+            push!(repr_profiles, RepresentativeProfile(scen_profiles))
+        end
+        params.sload[n] = StrategicProfile(repr_profiles)
     end
 end
