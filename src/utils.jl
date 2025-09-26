@@ -32,6 +32,11 @@ function preprocess_invest_cost(params::EmpireParams, sets, periods)
     SP = strat_periods(periods)
 
     # Generator investment costs
+
+    # TODO: avoid hardcoding of ccs data
+    ccs_cost_fix = 1149873.72
+    ccs_rem_frac = 0.9
+
     params.genInvCost = Dict{String, StrategicProfile}()
     for g in sets.Generator
         if haskey(params.genCapitalCost, g) && haskey(params.genLifetime, g)
@@ -49,6 +54,11 @@ function preprocess_invest_cost(params::EmpireParams, sets, periods)
                 # Calculate the total investment cost in €/MW when investing in this strategic period
                 # assuming investments are made at the start of the strategic period
                 tot_invest_cost = present_value(cost_per_year * 1000, ρ, y; at_start = true) # in €/MW
+
+                if ("CCS", g) in sets.GeneratorsOfTechnology
+                    tot_invest_cost += ccs_cost_fix * ccs_rem_frac * params.genCO2Content[g] * (3.6 / params.genEfficiency[g][sp])
+                end
+
                 push!(inv_cost, tot_invest_cost)
             end
             params.genInvCost[g] = StrategicProfile(inv_cost)
@@ -156,9 +166,20 @@ function preprocess_operational_cost(params::EmpireParams, sets, periods)
             if !haskey(params.genFuelCost, g) || !haskey(params.genEfficiency, g)
                 continue
             end
+
+            ccs_remove_frac = 0.9
+
+            if ("CCS", g) in sets.GeneratorsOfTechnology
+                carbon_cost = (1 - ccs_remove_frac) * params.CO2price[sp] * params.genCO2Content[g] +
+                 ccs_remove_frac * params.genCO2Content[g] * params.CCSCostTSVariable[sp]
+            else
+                carbon_cost = params.CO2price[sp] * params.genCO2Content[g]
+            end
+
             # Convert fuel cost from €/GJ to €/MWh and add variable O&M cost and CO2 cost
-            cost_per_energy = (3.6 / params.genEfficiency[g][sp]) * params.genFuelCost[g][sp] +
-                params.CO2price[sp] * params.genCO2Content[g] + get(params.genVariableOMCost, g, 0.0) # in €/MWh
+            cost_per_energy = (3.6 / params.genEfficiency[g][sp]) * (params.genFuelCost[g][sp] +
+                carbon_cost) + get(params.genVariableOMCost, g, 0.0) # in €/MWh
+
             push!(values, cost_per_energy)
         end
         params.genMargCost[g] = StrategicProfile(values)
@@ -196,10 +217,10 @@ function preprocess_stoch_load(params::EmpireParams, sets, periods)
         end
         repr_profiles = RepresentativeProfile[]
         for sp in strat_periods(periods)
-            load_raw = sum(multiple(t) * probability(t) * params.sloadRaw[n][t] for t in sp)
+            load_raw = sum(multiple_strat(sp, t) * probability(t) * params.sloadRaw[n][t] for t in sp)
             scale_factor = 0.0
             if haskey(params.sloadAnnualDemand, n)
-               scale_factor = params.sloadAnnualDemand[n][sp] / load_raw
+                scale_factor = params.sloadAnnualDemand[n][sp] / load_raw
             end
             scen_profiles = ScenarioProfile[]
             for rp in repr_periods(sp)

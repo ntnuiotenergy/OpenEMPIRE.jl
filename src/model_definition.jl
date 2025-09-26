@@ -11,11 +11,13 @@ function create_timestruct(npers, years_period, nseasons, hours_season, npeaks, 
         peaks = [SimpleTimes(hours_peak, 1) for _ in 1:npeaks]
     end
 
-    # Give each season and equal share of each year
-    seasons_share = [1 / nseasons for _ in 1:nseasons]
+    peak_hours = hours_peak * npeaks
+
+    # Give each season an equal share of each year outside peak periods
+    seasons_share = [(8760 - peak_hours) / (8760 * nseasons) for _ in seasons]
 
     # Give peaks zero weight (only used for feasibility checks)
-    peaks_share = [0 for _ in 1:npeaks]
+    peaks_share = [hours_peak / 8760 for _ in peaks]
 
     # Create representative periods for each year
     repr_periods = RepresentativePeriods(8760, vcat(seasons_share, peaks_share), vcat(seasons, peaks))
@@ -300,15 +302,15 @@ function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::Ti
     N = sets.Node
     SP = strat_periods(periods)
 
-    tr_op = emp[:transmissionOperational]
-    tr_cap = emp[:transmissionInstalledCap]
-    tr_inv_cap = emp[:transmissionInvCap]
+    transOp = emp[:transmissionOperational]
+    transCap = emp[:transmissionInstalledCap]
+    transCapInv = emp[:transmissionInvCap]
 
     # Transmission capacity constraints
     @constraint(
         emp,
         trans_cap[(m, n) in arcs(sets), sp in SP, t in sp],
-        tr_op[m, n, t] <= (is_bidir(m, n) ? tr_cap[m, n, sp] : tr_cap[n, m, sp])
+        transOp[m, n, t] <= (is_bidir(m, n) ? transCap[m, n, sp] : transCap[n, m, sp])
     )
 
     # Tracking installed capacity from investments across strategic periods that are within
@@ -316,15 +318,15 @@ function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::Ti
     @constraint(
         emp,
         trans_track_cap[(m, n) in bidir_arcs(sets), sp in SP],
-        sum(tr_inv_cap[m, n, spp] for spp in SP if duration_aggr(spp, sp, SP) <= trans_lifetime(par, m, n)) +
-            trans_cap_init(par, m, n, sp) * tr_cap[m, n, sp] == 0
+        sum(transCapInv[m, n, spp] for spp in SP if duration_aggr(spp, sp, SP) <= trans_lifetime(par, m, n)) +
+            trans_cap_init(par, m, n, sp) == transCap[m, n, sp]
     )
 
     # Constraints on maximum capacity that can be built and installed for each transmission line
     @constraint(
         emp,
-        trans_cap_inv[(m, n) in bidir_arcs(sets), sp in SP; !isnothing(trans_max_build_cap(par, m, n, sp))],
-        tr_inv_cap[m, n, sp] <= trans_max_build_cap(par, m, n, sp)
+        trans_max_capacity[(m, n) in bidir_arcs(sets), sp in SP; !isnothing(trans_max_build_cap(par, m, n, sp))],
+        transCapInv[m, n, sp] <= trans_max_build_cap(par, m, n, sp)
     )
 
 end
