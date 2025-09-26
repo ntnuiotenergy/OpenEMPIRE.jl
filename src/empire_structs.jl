@@ -28,11 +28,15 @@ dependent_storages(sets::EmpireSets) = sets.DependentStorage
 techs(sets::EmpireSets) = sets.Technology
 transmission_types(sets::EmpireSets) = sets.TransmissionType
 arcs(sets::EmpireSets) = sets.DirectionalLink
+bidir_arcs(sets::EmpireSets) = [(m,n) for (m,n) in sets.DirectionalLink if m < n]
+is_bidir(m, n) = m < n
 
 generators(sets::EmpireSets, n) = [g for (nn, g) in sets.GeneratorsOfNode if nn == n]
+node_generators(sets::EmpireSets) = sets.GeneratorsOfNode
 is_thermal(sets::EmpireSets, g) = g in sets.ThermalGenerators
 is_hydro(sets::EmpireSets, g) = g in sets.HydroGenerator
 storages(sets::EmpireSets, n) = [s for (nn, s) in sets.StoragesOfNode if nn == n]
+node_storages(sets::EmpireSets) = sets.StoragesOfNode
 techs(sets::EmpireSets, n) = unique([t for (t, g) in sets.GeneratorsOfTechnology if (n, g) in sets.GeneratorsOfNode])
 generators_tech(sets::EmpireSets, n, t) =
     unique([g for (tt, g) in sets.GeneratorsOfTechnology if tt == t && (n, g) in sets.GeneratorsOfNode])

@@ -59,15 +59,15 @@ function create_variables(emp::JuMP.Model, sets, periods::TimeStruct.TimeStructu
 
     # Insert sparse variables
     @info "Inserting variables into sparse arrays - strategic variables"
-    for (n, g) in sets.GeneratorsOfNode, sp in SP
+    for (n, g) in node_generators(sets), sp in SP
         unsafe_insertvar!(genInvCap, n, g, sp)
         unsafe_insertvar!(genInstalledCap, n, g, sp)
     end
-    for (n, m) in sets.DirectionalLink, sp in SP
+    for (n, m) in bidir_arcs(sets), sp in SP
         unsafe_insertvar!(transmissionInvCap, n, m, sp)
         unsafe_insertvar!(transmissionInstalledCap, n, m, sp)
     end
-    for (n, s) in sets.StoragesOfNode, sp in SP
+    for (n, s) in node_storages(sets), sp in SP
         unsafe_insertvar!(storPWInvCap, n, s, sp)
         unsafe_insertvar!(storENInvCap, n, s, sp)
         unsafe_insertvar!(storPWInstalledCap, n, s, sp)
@@ -75,16 +75,16 @@ function create_variables(emp::JuMP.Model, sets, periods::TimeStruct.TimeStructu
     end
     @info "Inserting variables into sparse arrays - operational variables"
     @info "Total time periods: $(length(T))"
-    @info "Generator operational variables: $(length(sets.GeneratorsOfNode) * length(T))"
-    for (n, g) in sets.GeneratorsOfNode, t in T
+    @info "Generator operational variables: $(length(node_generators(sets)) * length(T))"
+    for (n, g) in node_generators(sets), t in T
         unsafe_insertvar!(genOperational, n, g, t)
     end
-    @info "Transmission operational variables: $(length(sets.DirectionalLink) * length(T))"
-    for (n, m) in sets.DirectionalLink, t in T
+    @info "Transmission operational variables: $(length(arcs(sets)) * length(T))"
+    for (n, m) in arcs(sets), t in T
         unsafe_insertvar!(transmissionOperational, n, m, t)
     end
-    @info "Storage operational variables: $(length(sets.StoragesOfNode) * length(T))"
-    for (n, s) in sets.StoragesOfNode, t in T
+    @info "Storage operational variables: $(length(node_storages(sets)) * length(T))"
+    for (n, s) in node_storages(sets), t in T
         unsafe_insertvar!(storCharge, n, s, t)
         unsafe_insertvar!(storDischarge, n, s, t)
         unsafe_insertvar!(storOperational, n, s, t)
@@ -308,14 +308,14 @@ function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::Ti
     @constraint(
         emp,
         trans_cap[(m, n) in arcs(sets), sp in SP, t in sp],
-        tr_op[m, n, t] <= tr_cap[m, n, sp]
+        tr_op[m, n, t] <= (is_bidir(m, n) ? tr_cap[m, n, sp] : tr_cap[n, m, sp])
     )
 
     # Tracking installed capacity from investments across strategic periods that are within
     # the technology lifetime
     @constraint(
         emp,
-        trans_track_cap[(m, n) in arcs(sets), sp in SP],
+        trans_track_cap[(m, n) in bidir_arcs(sets), sp in SP],
         sum(tr_inv_cap[m, n, spp] for spp in SP if duration_aggr(spp, sp, SP) <= trans_lifetime(par, m, n)) +
             trans_cap_init(par, m, n, sp) * tr_cap[m, n, sp] == 0
     )
@@ -323,7 +323,7 @@ function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::Ti
     # Constraints on maximum capacity that can be built and installed for each transmission line
     @constraint(
         emp,
-        trans_cap_inv[(m, n) in arcs(sets), sp in SP; !isnothing(trans_max_build_cap(par, m, n, sp))],
+        trans_cap_inv[(m, n) in bidir_arcs(sets), sp in SP; !isnothing(trans_max_build_cap(par, m, n, sp))],
         tr_inv_cap[m, n, sp] <= trans_max_build_cap(par, m, n, sp)
     )
 
