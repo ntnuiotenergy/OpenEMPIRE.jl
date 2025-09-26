@@ -178,12 +178,26 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
         genOp[n, g, t] <= gencap_avail(par, n, g, t) * genCap[n, g, sp]
     )
 
-    # Ramping Constraints
-    @info " - ramping constraints: $(length(sets.GeneratorsOfNode) * length(periods))"
+    # Ramping Constraints (thermal generators only)
+    @info " - ramping constraints (thermal generators only)"
     @constraint(
         emp,
-        gen_ramping[n in N, g in generators(sets, n), sp in SP, (prev, t) in withprev(sp); !isnothing(prev)],
+        gen_ramping[n in N, g in generators(sets, n), sp in SP, (prev, t) in withprev(sp); !isnothing(prev) && is_thermal(sets, g)],
         genOp[n, g, t] <= genOp[n, g, prev] + rampup_cap(par, g) * genCap[n, g, sp]
+    )
+
+    # Generation limit for hydropower plants
+    @info " - generation limit constraints for hydropower for each operational scenario"
+    @constraint(
+        emp,
+        gen_hydro_limit[n in N, g in generators(sets, n), sc in opscenarios(periods); is_hydro(sets, g)],
+        sum(genOp[n, g, t] for t in sc) <= max_hydro_gen(par, n, sc)
+    )
+    @info " - generation limit constraints for hydropower for each node and strategic period"
+    @constraint(
+        emp,
+        gen_hydro_node_limit[n in N, sp in SP; !isnothing(max_hydro_node(par, n))],
+        sum(genOp[n, g, t] for g in generators(sets, n) if is_hydro(sets, g) for t in sp) <= max_hydro_node(par, n)
     )
 
     # Tracking installed capacity from investments across strategic periods that are within

@@ -176,7 +176,7 @@ function read_params_xlsx(dirX)
     XLSX.openxlsx(joinpath(dirX, "Node.xlsx")) do filehandle
         par.nodeLostLoadCost = data = filehandle["NodeLostLoadCost"][:][4:end,:] |> data -> strat_profiles(data)
         par.sloadAnnualDemand = data = filehandle["ElectricAnnualDemand"][:][4:end,:] |> data -> strat_profiles(data)
-        par.maxRegHydroGenRaw = data = filehandle["HydroGenMaxAnnualProduction"][:][4:end,:] |> data -> param_load(data)
+        par.maxHydroNode = data = filehandle["HydroGenMaxAnnualProduction"][:][4:end,:] |> data -> param_load(data)
     end
 
     # General parameters

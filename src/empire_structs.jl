@@ -21,6 +21,8 @@ end
 
 nodes(sets::EmpireSets) = sets.Node
 generators(sets::EmpireSets) = sets.Generator
+thermal_generators(sets::EmpireSets) = sets.ThermalGenerators
+hydro_generators(sets::EmpireSets) = sets.HydroGenerator
 storages(sets::EmpireSets) = sets.Storage
 dependent_storages(sets::EmpireSets) = sets.DependentStorage
 techs(sets::EmpireSets) = sets.Technology
@@ -28,6 +30,8 @@ transmission_types(sets::EmpireSets) = sets.TransmissionType
 arcs(sets::EmpireSets) = sets.DirectionalLink
 
 generators(sets::EmpireSets, n) = [g for (nn, g) in sets.GeneratorsOfNode if nn == n]
+is_thermal(sets::EmpireSets, g) = g in sets.ThermalGenerators
+is_hydro(sets::EmpireSets, g) = g in sets.HydroGenerator
 storages(sets::EmpireSets, n) = [s for (nn, s) in sets.StoragesOfNode if nn == n]
 techs(sets::EmpireSets, n) = unique([t for (t, g) in sets.GeneratorsOfTechnology if (n, g) in sets.GeneratorsOfNode])
 generators_tech(sets::EmpireSets, n, t) =
@@ -84,7 +88,7 @@ mutable struct EmpireParams
     # Node inputs from file
     nodeLostLoadCost
     sloadAnnualDemand
-    maxRegHydroGenRaw
+    maxHydroNode
     # General parameters from file
     CO2cap
     CO2price
@@ -93,7 +97,8 @@ mutable struct EmpireParams
     sloadRaw::Dict{String, TimeProfile}
     sload::Dict{String, TimeProfile}
     genCapAvail::Dict{Tuple{String,String}, TimeProfile}
-    maxRegHydroGen::Dict{String, Float64}
+    maxRegHydroGenRaw::Dict{String, TimeProfile}
+    maxRegHydroGen::Dict{String, TimeProfile}
 
     # Processed parameters
     genInvCost::Dict{String, TimeProfile}
@@ -102,7 +107,6 @@ mutable struct EmpireParams
     transmissionInvCost::Dict{Tuple{String,String}, TimeProfile}
     genMargCost::Dict{String, TimeProfile}
 
-    maxHydroNode
 
     EmpireParams() = new()
 end
@@ -121,6 +125,8 @@ max_build_cap(par, n, gt, sp) = (n, gt) in keys(par.genMaxBuiltCap) ? par.genMax
 max_inst_cap(par, n, gt, sp) = (n, gt) in keys(par.genMaxInstalledCap) ? par.genMaxInstalledCap[(n, gt)][sp] : nothing
 gen_lifetime(par, g) = get(par.genLifetime, g, 40)
 gencap_init(par, n, g, sp) = (n, g) in keys(par.genInitCap) ? par.genInitCap[(n, g)][sp] : 0.0
+max_hydro_gen(par, n, sc) = haskey(par.maxRegHydroGen, n) ? par.maxRegHydroGen[n][sc] : 0.0
+max_hydro_node(par, n) = get(par.maxHydroNode, n, nothing)
 
 # Storage properties
 bleed_eff(par, s) = get(par.storageBleedEff, s, 1.0)

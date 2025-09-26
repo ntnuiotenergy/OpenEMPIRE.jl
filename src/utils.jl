@@ -18,6 +18,7 @@ function preprocess_params(params::EmpireParams, sets, periods)
     preprocess_initcap_gen(params, sets, periods)
     preprocess_stoch_load(params, sets, periods)
     preprocess_max_installed_cap(params, sets, periods)
+    preprocess_hydro_gen(params, sets, periods)
 end
 
 function preprocess_invest_cost(params::EmpireParams, sets, periods)
@@ -212,5 +213,22 @@ function preprocess_stoch_load(params::EmpireParams, sets, periods)
             push!(repr_profiles, RepresentativeProfile(scen_profiles))
         end
         params.sload[n] = StrategicProfile(repr_profiles)
+    end
+end
+
+function preprocess_hydro_gen(params::EmpireParams, sets, periods)
+    @info "Preprocessing stochastic hydro generation profiles"
+    # Aggregate the hydro generation profiles for each node and operational scenario
+    params.maxRegHydroGen = Dict{String, TimeProfile}()
+    for n in sets.Node
+        if !haskey(params.maxRegHydroGenRaw, n)
+            continue
+        end
+        profiles = FixedProfile[]
+        for sc in opscenarios(periods)
+            val = sum(params.maxRegHydroGenRaw[n][t] for t in sc)
+            push!(profiles, FixedProfile(val))
+        end
+        params.maxRegHydroGen[n] = ScenarioProfile(profiles)
     end
 end
