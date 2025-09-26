@@ -1,12 +1,7 @@
 function test_interface()
-    using OpenEMPIRE
-    using JuMP
-    using Test
-    using HiGHS
-    using Xpress
 
-    config_file = "data/testrun.yaml"
-    data_folder = "data"
+    data_folder = joinpath(pkgdir(OpenEMPIRE), "data")
+    config_file = joinpath(data_folder, "testrun.yaml")
 
     config_file = "../OpenEMPIRE/config/run.yaml"
     data_folder = "../OpenEMPIRE/Data handler/europe_v51"
