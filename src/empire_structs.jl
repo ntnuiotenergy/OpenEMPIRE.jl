@@ -23,6 +23,7 @@ nodes(sets::EmpireSets) = sets.Node
 generators(sets::EmpireSets) = sets.Generator
 thermal_generators(sets::EmpireSets) = sets.ThermalGenerators
 hydro_generators(sets::EmpireSets) = sets.HydroGenerator
+reg_hydro_generators(sets::EmpireSets) = sets.RegHydroGenerator
 storages(sets::EmpireSets) = sets.Storage
 dependent_storages(sets::EmpireSets) = sets.DependentStorage
 techs(sets::EmpireSets) = sets.Technology
@@ -35,6 +36,7 @@ generators(sets::EmpireSets, n) = [g for (nn, g) in sets.GeneratorsOfNode if nn 
 node_generators(sets::EmpireSets) = sets.GeneratorsOfNode
 is_thermal(sets::EmpireSets, g) = g in sets.ThermalGenerators
 is_hydro(sets::EmpireSets, g) = g in sets.HydroGenerator
+is_reg_hydro(sets::EmpireSets, g) = g in sets.RegHydroGenerator
 storages(sets::EmpireSets, n) = [s for (nn, s) in sets.StoragesOfNode if nn == n]
 node_storages(sets::EmpireSets) = sets.StoragesOfNode
 techs(sets::EmpireSets, n) = unique([t for (t, g) in sets.GeneratorsOfTechnology if (n, g) in sets.GeneratorsOfNode])
@@ -156,7 +158,6 @@ trans_invest_cost(par, m, n, sp) = haskey(par.transmissionInvCost, (m, n)) ? par
 
 lost_load_cost(par, n, t) = haskey(par.nodeLostLoadCost, n) ? par.nodeLostLoadCost[n][t] : 1000.0
 sload(par, n, t) = haskey(par.sload, n) ? par.sload[n][t] : 0.0
-max_reg_hydro_gen(par, n) = get(par.maxRegHydroGen, n, 0.0)
 gen_marginal_cost(par, g, t) = haskey(par.genMargCost, g) ? par.genMargCost[g][t] : 0.0
 
 mutable struct empire_opt

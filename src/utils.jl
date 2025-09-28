@@ -195,8 +195,9 @@ function preprocess_initcap_gen(params::EmpireParams, sets, periods)
             # If no initial capacity is provided or equal to 0, use reference capacity
             # scaled by reduction factor if available
             if !haskey(params.genInitCap, (n, g)) || params.genInitCap[(n, g)][sp] == 0
-                if haskey(params.genRefInitCap, (n, g)) && haskey(params.genScaleInitCap, g)
-                    val = params.genRefInitCap[(n, g)] * (1 - params.genScaleInitCap[g][sp])
+                if haskey(params.genRefInitCap, (n, g))
+                    scale = haskey(params.genScaleInitCap, g) ? params.genScaleInitCap[g][sp] : 0.0
+                    val = params.genRefInitCap[(n, g)] * (1 - scale)
                 end
             else
                 val = params.genInitCap[(n, g)][sp]

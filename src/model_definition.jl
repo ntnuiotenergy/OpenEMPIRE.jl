@@ -120,7 +120,7 @@ function create_objective(emp::JuMP.Model, sets, par, periods::TimeStructure, di
             sum(stor_pw_invest_cost(par, s, sp) * storInvCapPow[n, s, sp] for n in N, s in storages(sets, n); init = 0) +
             sum(stor_en_invest_cost(par, s, sp) * storInvCapEn[n, s, sp] for n in N, s in storages(sets, n); init = 0)
             ) for sp in SP) +
-        sum(objective_weight(t, discounter) * (
+        sum(objective_weight(t, discounter; type = "avg_year") * (
                 sum(lost_load_cost(par, n, t) * shed[n, t] for n in N; init = 0) +
                 sum(gen_marginal_cost(par, g, t) * genOp[n, g, t] for n in N for g in generators(sets, n); init = 0)
                 ) for t in T)
@@ -189,17 +189,17 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
     )
 
     # Generation limit for hydropower plants
-    @info " - generation limit constraints for hydropower for each operational scenario"
+    @info " - generation limit constraints for regulated hydropower for each operational scenario"
     @constraint(
         emp,
-        gen_hydro_limit[n in N, g in generators(sets, n), sc in opscenarios(periods); is_hydro(sets, g)],
+        gen_hydro_limit[n in N, g in generators(sets, n), sc in opscenarios(periods); is_reg_hydro(sets, g)],
         sum(genOp[n, g, t] for t in sc) <= max_hydro_gen(par, n, sc)
     )
     @info " - generation limit constraints for hydropower for each node and strategic period"
     @constraint(
         emp,
         gen_hydro_node_limit[n in N, sp in SP; !isnothing(max_hydro_node(par, n))],
-        sum(genOp[n, g, t] for g in generators(sets, n) if is_hydro(sets, g) for t in sp) <= max_hydro_node(par, n)
+        sum(multiple_strat(sp, t) * probability(t) * genOp[n, g, t] for g in generators(sets, n) if is_hydro(sets, g) for t in sp) <= max_hydro_node(par, n)
     )
 
     # Tracking installed capacity from investments across strategic periods that are within
@@ -247,8 +247,8 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
     @constraint(
         emp,
         storage_bal[n in N, s in storages(sets, n), sp in SP, (prev, t) in withprev(sp)],
-        bleed_eff(par, s) * (isnothing(prev) ? storage_init(par, s) * storCapEn[n, s, sp] : storOp[n, s, prev]) +
-            charge_eff(par, s) * storCharge[n, s, t] - storDischarge[n, s, t] == storOp[n, s, t]
+        (isnothing(prev) ? storage_init(par, s) * storCapEn[n, s, sp] : bleed_eff(par, s) * storOp[n, s, prev]) +
+        charge_eff(par, s) * storCharge[n, s, t] - storDischarge[n, s, t] == storOp[n, s, t]
     )
 
     # Cyclic condition for storage at the end of each operational scenario
@@ -271,6 +271,11 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
         emp,
         storage_op_cap_pow[n in N, s in storages(sets, n), sp in SP, t in sp],
         storCharge[n, s, t] <= storCapPow[n, s, sp]
+    )
+    @constraint(
+        emp,
+        storage_op_cap_pow_dis[n in N, s in storages(sets, n), sp in SP, t in sp],
+        storDischarge[n, s, t] <= storCapPow[n, s, sp]
     )
 
     @info " - investment constraints"
