@@ -14,5 +14,6 @@ include("read_excel.jl")
 include("utils.jl")
 include("model_definition.jl")
 include("user_interface.jl")
+include("results.jl")
 
 end # module OpenEMPIRE
