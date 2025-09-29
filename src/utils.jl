@@ -105,14 +105,15 @@ function preprocess_invest_cost(params::EmpireParams, sets, periods)
     params.transmissionInvCost = Dict{Tuple{String,String}, StrategicProfile}()
     for (m, n, tt) in sets.TransmissionTypeOfDirectionalLink
         if haskey(params.transmissionTypeCapitalCost, tt) && haskey(params.transmissionLifetime, (m,n))
-            cap_cost = params.transmissionTypeCapitalCost[tt] # in €/kW
+            cap_cost = params.transmissionTypeCapitalCost[tt] # in €/(MW * km)
             life = params.transmissionLifetime[(m,n)]
-            om_cost = get(params.transmissionTypeFixedOMCost, tt, 0.0) # in €/kW/year
+            trans_length = params.transmissionLength[(m,n)] # in km
+            om_cost = get(params.transmissionTypeFixedOMCost, tt, 0.0) # in €/MW/year
             profiles = FixedProfile[]
             for sp in SP
-                cost_per_year = cap_cost[sp] / annuity_factor(wacc, life) + om_cost[sp]
+                cost_per_year = trans_length * cap_cost[sp] / annuity_factor(wacc, life) + om_cost[sp]
                 y = min(life, sum(duration_strat(spp) for spp in SP if spp >= sp))
-                invest_cost = present_value(cost_per_year * 1000, ρ, y; at_start = true) # in €/MW
+                invest_cost = present_value(cost_per_year, ρ, y; at_start = true) # in €/MW
                 push!(profiles, FixedProfile(invest_cost))
             end
             params.transmissionInvCost[(m, n)] = StrategicProfile(profiles)
@@ -246,11 +247,19 @@ function preprocess_hydro_gen(params::EmpireParams, sets, periods)
         if !haskey(params.maxRegHydroGenRaw, n)
             continue
         end
-        profiles = FixedProfile[]
-        for sc in opscenarios(periods)
-            val = sum(params.maxRegHydroGenRaw[n][t] for t in sc)
-            push!(profiles, FixedProfile(val))
+        profiles = RepresentativeProfile[]
+        for sp in strat_periods(periods)
+            scen_profiles = ScenarioProfile[]
+            for rp in repr_periods(sp)
+                fixed_profiles = FixedProfile[]
+                for sc in opscenarios(rp)
+                    val = sum(params.maxRegHydroGenRaw[n][t] for t in sc)
+                    push!(fixed_profiles, FixedProfile(val))
+                end
+                push!(scen_profiles, ScenarioProfile(fixed_profiles))
+            end
+            push!(profiles, RepresentativeProfile(scen_profiles))
         end
-        params.maxRegHydroGen[n] = ScenarioProfile(profiles)
+        params.maxRegHydroGen[n] = StrategicProfile(profiles)
     end
 end
