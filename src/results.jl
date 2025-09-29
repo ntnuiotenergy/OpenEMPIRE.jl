@@ -9,13 +9,20 @@ function sol_invest_cost(emp, sets, par, periods, discounter::Discounter)
     SP = strat_periods(periods)
     N = sets.Node
 
-    inv_cost = sum(objective_weight(sp, discounter) * (
-            sum(gen_invest_cost(par, g, sp) * value(genInvCap[n, g, sp]) for n in N for g in generators(sets, n); init = 0) +
-            sum(trans_invest_cost(par, m, n, sp) * value(transInvCap[m, n, sp]) for (m, n) in arcs(sets); init = 0) +
-            sum(stor_pw_invest_cost(par, s, sp) * value(storInvCapPow[n, s, sp]) for n in N for s in storages(sets, n); init = 0) +
+    gen_cost = sum(objective_weight(sp, discounter) *
+            sum(gen_invest_cost(par, g, sp) * value(genInvCap[n, g, sp]) for n in N for g in generators(sets, n); init = 0)
+            for sp in SP)
+    trans_cost = sum(objective_weight(sp, discounter) * (
+            sum(trans_invest_cost(par, m, n, sp) * value(transInvCap[m, n, sp]) for (m, n) in arcs(sets); init = 0)
+            ) for sp in SP)
+    stor_pw_cost = sum(objective_weight(sp, discounter) * (
+            sum(stor_pw_invest_cost(par, s, sp) * value(storInvCapPow[n, s, sp]) for n in N for s in storages(sets, n); init = 0)
+            ) for sp in SP)
+    stor_en_cost = sum(objective_weight(sp, discounter) * (
             sum(stor_en_invest_cost(par, s, sp) * value(storInvCapEn[n, s, sp]) for n in N for s in storages(sets, n); init = 0)
             ) for sp in SP)
-    return inv_cost
+
+    return gen_cost, trans_cost, stor_pw_cost, stor_en_cost
 end
 
 
@@ -27,11 +34,11 @@ function sol_operational_cost(emp, sets, par, periods, discounter::Discounter)
     T = periods
     N = sets.Node
 
-    gen_cost = sum(objective_weight(t, discounter) * (
+    gen_cost = sum(objective_weight(t, discounter; type = "avg_year") * (
             sum(gen_marginal_cost(par, g, t) * value(genOperational[n, g, t]) for n in N for g in generators(sets, n); init = 0)
             ) for t in T)
 
-    load_shed_cost = sum(objective_weight(t, discounter) * (
+    load_shed_cost = sum(objective_weight(t, discounter; type = "avg_year") * (
             sum(lost_load_cost(par, n, t) * value(loadShed[n, t]) for n in N; init = 0)
             ) for t in T)
 
