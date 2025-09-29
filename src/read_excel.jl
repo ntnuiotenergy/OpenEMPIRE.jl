@@ -11,7 +11,7 @@ function read_sets_xlsx(dirX)
         sets.HydroGenerator = filehandle["Generators"][:][2:end, 3]
         sets.RegHydroGenerator = filehandle["Generators"][:][2:end, 2]
         sets.Storage = filehandle["Storage"][:][2:end, 1]
-        sets.DependentStorage = filehandle["Storage"][:][4:end, 2]
+        sets.DependentStorage = filehandle["Storage"][:][2:end, 2]
         sets.Technology = filehandle["Technology"][:][2:end, 1]
         sets.Node = filehandle["Nodes"][:][2:end, 1]
         sets.DirectionalLink = filehandle["DirectionalLines"][:][4:end, 1:2] |> d -> Tuple.(eachrow(d))
