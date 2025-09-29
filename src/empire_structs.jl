@@ -148,6 +148,7 @@ power_to_energy(par, s) = get(par.storagePowToEnergy, s, 1.0)
 trans_cap_init(par, m, n, sp) = haskey(par.transmissionInitCap, (m, n)) ? par.transmissionInitCap[(m, n)][sp] : 0.0
 trans_lifetime(par, m, n) = get(par.transmissionLifetime, (m, n), 40)
 trans_max_build_cap(par, m, n, sp) = haskey(par.transmissionMaxBuiltCap, (m, n)) ? par.transmissionMaxBuiltCap[(m, n)][sp] : nothing
+trans_max_inst_cap(par, m, n, sp) = haskey(par.transmissionMaxInstalledCap, (m, n)) ? par.transmissionMaxInstalledCap[(m, n)][sp] : nothing
 line_eff(par, m, n) = get(par.lineEfficiency, (m, n), 1.0)
 
 # Cost properties

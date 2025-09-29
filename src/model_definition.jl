@@ -297,7 +297,7 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
     @constraint(
         emp,
         storage_couple_pow_en[n in N, s in storages(sets, n), sp in SP; s in dependent_storages(sets)],
-        storCapInvEn[n, s, sp] == power_to_energy(par, s) * storCapInvPow[n, s, sp]
+        storCapInvPow[n, s, sp] == power_to_energy(par, s) * storCapInvEn[n, s, sp]
     )
 
 end
@@ -332,6 +332,13 @@ function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::Ti
         emp,
         trans_max_capacity[(m, n) in bidir_arcs(sets), sp in SP; !isnothing(trans_max_build_cap(par, m, n, sp))],
         transCapInv[m, n, sp] <= trans_max_build_cap(par, m, n, sp)
+    )
+
+    # Constraints on maximum installed capacity for each transmission line
+    @constraint(
+        emp,
+        trans_installed_cap[(m, n) in bidir_arcs(sets), sp in SP; !isnothing(trans_max_inst_cap(par, m, n, sp))],
+        transCap[m, n, sp] <= trans_max_inst_cap(par, m, n, sp)
     )
 
 end
