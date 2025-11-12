@@ -9,7 +9,7 @@ function test_interface()
     config_file = "../OpenEMPIRE/config/run.yaml"
     data_folder = "../OpenEMPIRE/Data handler/europe_v51"
 
-    emp, periods, sets, params = OpenEMPIRE.create_model(config_file, data_folder; optimizer = HiGHS.Optimizer);
+    @time emp, periods, sets, params = OpenEMPIRE.create_model(config_file, data_folder; optimizer = Xpress.Optimizer);
     optimize!(emp)
 
     write_to_file(emp, "empire.lp")
@@ -123,14 +123,38 @@ function test_preproces()
 
 end
 
+function season_index(season)
+    if season == "winter"
+        return 1
+    elseif season == "spring"
+        return 2
+    elseif season == "summer"
+        return 3
+    elseif season == "fall"
+        return 4
+    elseif season == "peak1"
+        return 5
+    elseif season == "peak2"
+        return 6
+    else
+        error("Invalid season: $season")
+    end
+end
+
 function test_empire_sol()
 
     data_folder = joinpath(pkgdir(OpenEMPIRE), "data")
     config_file = joinpath(data_folder, "testrun.yaml")
 
-    emp, periods, sets, params = OpenEMPIRE.create_model(config_file, data_folder; optimizer = HiGHS.Optimizer);
-
+    emp, periods, sets, params = OpenEMPIRE.create_model(config_file, data_folder; optimizer = Xpress.Optimizer);
     sps = strat_periods(periods)
+
+
+    optimize!(emp)
+
+    genInvCap = Containers.rowtable(value, emp[:genInvCap]; header = [:Node, :Generator, :Period, :Investment])
+    pretty_table(filter(r -> r.Investment > 0, genInvCap))
+
 
     empire_res = "../OpenEMPIRE/Results/basic_run/dataset_test/Output"
 
@@ -169,9 +193,18 @@ function test_empire_sol()
         println("Setting storPWInvCap for $n, $ss, $sp to $cap")
         @constraint(emp, emp[:storPWInvCap][n, ss, sps[sp]] == cap)
     end
-|
-    transm_data = CSV.File(joinpath(empire_res, "transmisionInvCap.tab"); delim = '\t')
 
+    optimize!(emp)
+    storeInvPow = Containers.rowtable(value, emp[:storPWInvCap]; header = [:Node, :Storage, :Period, :PowerCapacity])
+    pretty_table(filter(r -> r.PowerCapacity > 0, storeInvPow))
+    storeInvEnergy = Containers.rowtable(value, emp[:storENInvCap]; header = [:Node, :Storage, :Period, :EnergyCapacity])
+    pretty_table(filter(r -> r.EnergyCapacity > 0, storeInvEnergy))
+    transmCap = Containers.rowtable(value, emp[:transmissionInvCap]; header = [:Node1, :Node2, :Period, :Capacity])
+    pretty_table(filter(r -> r.Capacity > 0, transmCap))
+    invest_cost = OpenEMPIRE.sol_invest_cost(emp, sets, params, periods, Discounter(params.discountRate, 1, periods))
+    op_cost = OpenEMPIRE.sol_operational_cost(emp, sets, params, periods, Discounter(params.discountRate, 1, periods))
+
+    transm_data = CSV.File(joinpath(empire_res, "transmisionInvCap.tab"); delim = '\t')
     for r in transm_data
         n1 = String(r.FromNode)
         n2 = String(r.ToNode)
@@ -179,6 +212,55 @@ function test_empire_sol()
         cap = Float64(r.transmisionInvCap)
         println("Setting transInvCap for $n1, $n2, $sp to $cap")
         @constraint(emp, emp[:transmissionInvCap][n1, n2, sps[sp]] == cap)
+    end
+
+
+
+    optimize!(emp)
+    transmCap = Containers.rowtable(value, emp[:transmissionInvCap]; header = [:Node1, :Node2, :Period, :Capacity])
+    pretty_table(filter(r -> r.Capacity > 0, transmCap))
+    invest_cost = OpenEMPIRE.sol_invest_cost(emp, sets, params, periods, Discounter(params.discountRate, 1, periods))
+    op_cost = OpenEMPIRE.sol_operational_cost(emp, sets, params, periods, Discounter(params.discountRate, 1, periods))
+
+    genOp_data = CSV.File(joinpath(empire_res, "genOperational.tab"); delim = '\t')
+    for r in genOp_data
+        n = String(r.Node)
+        g = String(r.Generator)
+        if g != "Hydrorun-of-the-river" # Temporary fix for a data issue
+            continue
+        end
+        h = Int(r.Hour)
+        per = Int(r.Period)
+        season = String(r.Season)
+        sid = OpenEMPIRE.scenario_id(String(r.Scenario))
+
+        gg = [gen  for gen in sets.Generator if no_space(gen) == g][1]
+        sp = sps[per]
+        rp = collect(repr_periods(sp))[season_index(season)]
+        sc = collect(opscenarios(rp))[sid]
+        t = sc[mod1(h, 24)]
+        prod = Float64(r.genOperational)
+        println("Setting genOperational for $n, $gg, $t to $prod")
+        @constraint(emp, emp[:genOperational][n, gg, t] == prod)
+    end
+
+    storeOp_data = CSV.File(joinpath(empire_res, "storageOperational.tab"); delim = '\t')
+    for r in storeOp_data
+        n = String(r.Node)
+        s = String(r.Storage)
+        h = Int(r.Hour)
+        per = Int(r.Period)
+        season = String(r.Season)
+        sid = OpenEMPIRE.scenario_id(String(r.Scenario))
+
+        ss = [sto  for sto in sets.Storage if no_space(sto) == s][1]
+        sp = sps[per]
+        rp = collect(repr_periods(sp))[season_index(season)]
+        sc = collect(opscenarios(rp))[sid]
+        t = sc[mod1(h, 24)]
+        prod = Float64(r.storOperational)
+        println("Setting storOperational for $n, $ss, $t to $prod")
+        @constraint(emp, emp[:storOperational][n, ss, t] == prod)
     end
 
     write_to_file(emp, "empire_test.lp")
@@ -190,6 +272,7 @@ function test_empire_sol()
     inv_cost = OpenEMPIRE.sol_invest_cost(emp, sets, params, periods, Discounter(params.discountRate, 1, periods))
     gen_cost, load_shed_cost = OpenEMPIRE.sol_operational_cost(emp, sets, params, periods, Discounter(params.discountRate, 1, periods))
 
+    total_cost = inv_cost + gen_cost + load_shed_cost
 
     df = DataFrame(CSV.File(joinpath(empire_res, "results_output_Operational.csv"); delim = ','))
 
@@ -197,4 +280,8 @@ function test_empire_sol()
 
     ls = DataFrame(Containers.rowtable(value, emp[:loadShed]; header = [:Node, :Time, :Shed]))
     gen = DataFrame(Containers.rowtable(value, emp[:genOperational]; header = [:Node, :Generator, :Time, :Production]))
+    store = DataFrame(Containers.rowtable(value, emp[:storOperational]; header = [:Node, :Storage, :Time, :Charge]))
+    charge = DataFrame(Containers.rowtable(value, emp[:storCharge]; header = [:Node, :Storage, :Time, :Charge]))
+    discharge = DataFrame(Containers.rowtable(value, emp[:storDischarge]; header = [:Node, :Storage, :Time, :Discharge]))
+    transm = DataFrame(Containers.rowtable(value, emp[:transmissionOperational]; header = [:Node1, :Node2, :Time, :Flow]))
 end

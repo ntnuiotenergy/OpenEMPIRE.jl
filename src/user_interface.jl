@@ -1,4 +1,4 @@
-function create_model(config_file, data_folder; optimizer = nothing)
+function create_model(config_file, data_folder; optimizer = nothing, include_string_names = true)
 
     config = YAML.load_file(config_file)
 
@@ -43,9 +43,10 @@ function create_model(config_file, data_folder; optimizer = nothing)
     OpenEMPIRE.preprocess_params(params, sets, periods)
 
     emp = isnothing(optimizer) ? JuMP.Model() : JuMP.direct_model(optimizer_with_attributes(optimizer))
-    OpenEMPIRE.create_variables(emp, sets, periods)
-    OpenEMPIRE.create_constraints(emp, sets, params, periods)
-    OpenEMPIRE.create_objective(emp, sets, params, periods, Discounter(params.discountRate, 1, periods))
+    set_string_names_on_creation(emp, include_string_names)
+    @time OpenEMPIRE.create_variables(emp, sets, periods)
+    @time OpenEMPIRE.create_constraints(emp, sets, params, periods)
+    @time OpenEMPIRE.create_objective(emp, sets, params, periods, Discounter(params.discountRate, 1, periods))
 
    return emp, periods, sets, params
 
