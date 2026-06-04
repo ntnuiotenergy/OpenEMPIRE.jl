@@ -26,8 +26,8 @@ function preprocess_invest_cost(params::EmpireParams, sets, periods)
     @info "Preprocessing investment costs based on WACC and discount rate"
 
     # Calculate investment costs per strategic period based on annuity and present value
-    wacc = params.WACC
-    ρ = params.discountRate
+    wacc = OpenEMPIRE.wacc(params)
+    ρ = OpenEMPIRE.discount_rate(params)
 
     SP = strat_periods(periods)
 
@@ -171,10 +171,10 @@ function preprocess_operational_cost(params::EmpireParams, sets, periods)
             ccs_remove_frac = 0.9
 
             if ("CCS", g) in sets.GeneratorsOfTechnology
-                carbon_cost = (1 - ccs_remove_frac) * params.CO2price[sp] * params.genCO2Content[g] +
-                 ccs_remove_frac * params.genCO2Content[g] * params.CCSCostTSVariable[sp]
+                carbon_cost = (1 - ccs_remove_frac) * co2_price(params, sp) * co2_content(params, g) +
+                 ccs_remove_frac * co2_content(params, g) * ccs_cost_variable(params, sp)
             else
-                carbon_cost = params.CO2price[sp] * params.genCO2Content[g]
+                carbon_cost = co2_price(params, sp) * co2_content(params, g)
             end
 
             # Convert fuel cost from €/GJ to €/MWh and add variable O&M cost and CO2 cost

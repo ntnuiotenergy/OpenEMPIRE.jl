@@ -7,7 +7,7 @@ function sol_invest_cost(emp, sets, par, periods, discounter::Discounter)
     storInvCapEn = emp[:storENInvCap]
 
     SP = strat_periods(periods)
-    N = sets.Node
+    N = nodes(sets)
 
     gen_cost = sum(objective_weight(sp, discounter) *
             sum(gen_invest_cost(par, g, sp) * value(genInvCap[n, g, sp]) for n in N for g in generators(sets, n); init = 0)
@@ -32,7 +32,7 @@ function sol_operational_cost(emp, sets, par, periods, discounter::Discounter)
     loadShed = emp[:loadShed]
 
     T = periods
-    N = sets.Node
+    N = nodes(sets)
 
     gen_cost = sum(objective_weight(t, discounter; type = "avg_year") * (
             sum(gen_marginal_cost(par, g, t) * value(genOperational[n, g, t]) for n in N for g in generators(sets, n); init = 0)
