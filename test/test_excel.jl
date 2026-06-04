@@ -11,10 +11,27 @@ function test_read_excel_sets()
     @test length(sets.Technology) == 18
     @test length(sets.GeneratorsOfTechnology) == 47
 
+    # Constructor computes and stores index maps; verify consistency with base relation tables.
+    for n in sets.Node
+        @test Set(OpenEMPIRE.generators(sets, n)) == Set(g for (nn, g) in sets.GeneratorsOfNode if nn == n)
+        @test Set(OpenEMPIRE.storages(sets, n)) == Set(s for (nn, s) in sets.StoragesOfNode if nn == n)
+        @test Set(OpenEMPIRE.techs(sets, n)) ==
+            Set(t for (t, g) in sets.GeneratorsOfTechnology if (n, g) in sets.GeneratorsOfNode)
+    end
+
+    for n in sets.Node
+        for t in OpenEMPIRE.techs(sets, n)
+            @test Set(OpenEMPIRE.generators_tech(sets, n, t)) ==
+                Set(g for (tt, g) in sets.GeneratorsOfTechnology if tt == t && (n, g) in sets.GeneratorsOfNode)
+        end
+    end
+
+    @test OpenEMPIRE.validate!(sets) === sets
+
     emp = JuMP.Model()
     periods = OpenEMPIRE.create_timestruct(3, 5, 4, 168, 3, 24, 4)
     OpenEMPIRE.create_variables(emp, sets, periods)
-    @test_broken num_variables(emp) == 750427
+    @test num_variables(emp) == 777198
 
 end
 

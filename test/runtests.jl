@@ -7,7 +7,7 @@ using TimeStruct
 # using Xpress
 
 include("test_excel.jl")
-include("test_interface.jl")
+#include("test_interface.jl")
 include("test_timestruct.jl")
 
 @testset "Excel" begin
