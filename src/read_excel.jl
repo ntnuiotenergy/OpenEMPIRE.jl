@@ -3,32 +3,66 @@ function read_sets_xlsx(dirX)
     # Read the data from the xlsx files
     @info "Reading sets from $dirX"
 
-    sets = OpenEMPIRE.EmpireSets()
-
     XLSX.openxlsx(joinpath(dirX, "Sets.xlsx")) do filehandle
-        sets.Generator = filehandle["Generators"][:][2:end, 1]
-        sets.ThermalGenerators = filehandle["Generators"][:][2:end, 4]
-        sets.HydroGenerator = filehandle["Generators"][:][2:end, 3]
-        sets.RegHydroGenerator = filehandle["Generators"][:][2:end, 2]
-        sets.Storage = filehandle["Storage"][:][2:end, 1]
-        sets.DependentStorage = filehandle["Storage"][:][2:end, 2]
-        sets.Technology = filehandle["Technology"][:][2:end, 1]
-        sets.Node = filehandle["Nodes"][:][2:end, 1]
-        sets.DirectionalLink = filehandle["DirectionalLines"][:][4:end, 1:2] |> d -> Tuple.(eachrow(d))
-        sets.TransmissionType = filehandle["LineType"][:][2:end, 1]
-        sets.TransmissionTypeOfDirectionalLink = filehandle["LineTypeOfDirectionalLines"][:][4:end, 1:3] |> d -> Tuple.(eachrow(d))
-        sets.GeneratorsOfTechnology = filehandle["GeneratorsOfTechnology"][:][4:end, 1:2] |> d -> Tuple.(eachrow(d))
-        sets.GeneratorsOfNode = filehandle["GeneratorsOfNode"][:][4:end, 1:2] |> d -> Tuple.(eachrow(d))
-        sets.StoragesOfNode = filehandle["StorageOfNodes"][:][4:end, 1:2] |> d -> Tuple.(eachrow(d))
+        generators = [String(x) for x in filehandle["Generators"][:][2:end, 1] if !ismissing(x)]
+        thermal_generators = [String(x) for x in filehandle["Generators"][:][2:end, 4] if !ismissing(x)]
+        hydro_generators = [String(x) for x in filehandle["Generators"][:][2:end, 3] if !ismissing(x)]
+        reg_hydro_generators = [String(x) for x in filehandle["Generators"][:][2:end, 2] if !ismissing(x)]
+
+        storages = [String(x) for x in filehandle["Storage"][:][2:end, 1] if !ismissing(x)]
+        dependent_storages = [String(x) for x in filehandle["Storage"][:][2:end, 2] if !ismissing(x)]
+
+        technologies = [String(x) for x in filehandle["Technology"][:][2:end, 1] if !ismissing(x)]
+        nodes = [String(x) for x in filehandle["Nodes"][:][2:end, 1] if !ismissing(x)]
+        transmission_types = [String(x) for x in filehandle["LineType"][:][2:end, 1] if !ismissing(x)]
+
+        directional_links_data = filehandle["DirectionalLines"][:][4:end, 1:2]
+        directional_links = [
+            (String(r[1]), String(r[2])) for r in eachrow(directional_links_data)
+            if !ismissing(r[1]) && !ismissing(r[2])
+        ]
+
+        link_types_data = filehandle["LineTypeOfDirectionalLines"][:][4:end, 1:3]
+        link_types = [
+            (String(r[1]), String(r[2]), String(r[3])) for r in eachrow(link_types_data)
+            if !ismissing(r[1]) && !ismissing(r[2]) && !ismissing(r[3])
+        ]
+
+        generators_of_technology_data = filehandle["GeneratorsOfTechnology"][:][4:end, 1:2]
+        generators_of_technology = [
+            (String(r[1]), String(r[2])) for r in eachrow(generators_of_technology_data)
+            if !ismissing(r[1]) && !ismissing(r[2])
+        ]
+
+        generators_of_node_data = filehandle["GeneratorsOfNode"][:][4:end, 1:2]
+        generators_of_node = [
+            (String(r[1]), String(r[2])) for r in eachrow(generators_of_node_data)
+            if !ismissing(r[1]) && !ismissing(r[2])
+        ]
+
+        storages_of_node_data = filehandle["StorageOfNodes"][:][4:end, 1:2]
+        storages_of_node = [
+            (String(r[1]), String(r[2])) for r in eachrow(storages_of_node_data)
+            if !ismissing(r[1]) && !ismissing(r[2])
+        ]
+
+        return OpenEMPIRE.EmpireSets(
+            Generator = generators,
+            ThermalGenerators = thermal_generators,
+            HydroGenerator = hydro_generators,
+            RegHydroGenerator = reg_hydro_generators,
+            Storage = storages,
+            DependentStorage = dependent_storages,
+            Technology = technologies,
+            Node = nodes,
+            DirectionalLink = directional_links,
+            TransmissionType = transmission_types,
+            TransmissionTypeOfDirectionalLink = link_types,
+            GeneratorsOfTechnology = generators_of_technology,
+            GeneratorsOfNode = generators_of_node,
+            StoragesOfNode = storages_of_node,
+        )
     end
-
-    # Clear missing values from sets
-    sets.ThermalGenerators = filter(!ismissing, sets.ThermalGenerators)
-    sets.HydroGenerator = filter(!ismissing, sets.HydroGenerator)
-    sets.RegHydroGenerator = filter(!ismissing, sets.RegHydroGenerator)
-    sets.DependentStorage = filter(!ismissing, sets.DependentStorage)
-
-    return sets
 end
 
 # Remove rows where there are missing values in the first column

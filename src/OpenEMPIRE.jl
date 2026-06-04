@@ -8,6 +8,7 @@ using CSV
 using DelimitedFiles
 using YAML
 
+include("empire_sets.jl")
 include("empire_structs.jl")
 include("scenario.jl")
 include("read_excel.jl")

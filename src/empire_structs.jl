@@ -1,48 +1,4 @@
-# Structs used to store parameters and sets for an EMPIRE model
-
-mutable struct EmpireSets
-    Generator
-    ThermalGenerators
-    HydroGenerator
-    RegHydroGenerator
-    Storage
-    DependentStorage
-    Technology
-    Node
-    DirectionalLink
-    TransmissionType
-    TransmissionTypeOfDirectionalLink
-    GeneratorsOfTechnology
-    GeneratorsOfNode
-    StoragesOfNode
-
-    EmpireSets() = new()
-end
-
-nodes(sets::EmpireSets) = sets.Node
-generators(sets::EmpireSets) = sets.Generator
-thermal_generators(sets::EmpireSets) = sets.ThermalGenerators
-hydro_generators(sets::EmpireSets) = sets.HydroGenerator
-reg_hydro_generators(sets::EmpireSets) = sets.RegHydroGenerator
-storages(sets::EmpireSets) = sets.Storage
-dependent_storages(sets::EmpireSets) = sets.DependentStorage
-techs(sets::EmpireSets) = sets.Technology
-transmission_types(sets::EmpireSets) = sets.TransmissionType
-arcs(sets::EmpireSets) = sets.DirectionalLink
-bidir_arcs(sets::EmpireSets) = [(m,n) for (m,n) in sets.DirectionalLink if m < n]
-is_bidir(m, n) = m < n
-
-generators(sets::EmpireSets, n) = [g for (nn, g) in sets.GeneratorsOfNode if nn == n]
-node_generators(sets::EmpireSets) = sets.GeneratorsOfNode
-is_thermal(sets::EmpireSets, g) = g in sets.ThermalGenerators
-is_hydro(sets::EmpireSets, g) = g in sets.HydroGenerator
-is_reg_hydro(sets::EmpireSets, g) = g in sets.RegHydroGenerator
-storages(sets::EmpireSets, n) = [s for (nn, s) in sets.StoragesOfNode if nn == n]
-node_storages(sets::EmpireSets) = sets.StoragesOfNode
-techs(sets::EmpireSets, n) = unique([t for (t, g) in sets.GeneratorsOfTechnology if (n, g) in sets.GeneratorsOfNode])
-generators_tech(sets::EmpireSets, n, t) =
-    unique([g for (tt, g) in sets.GeneratorsOfTechnology if tt == t && (n, g) in sets.GeneratorsOfNode])
-
+# Structs used to store parameters for an EMPIRE model
 
 mutable struct EmpireParams
     # Financial parameters
