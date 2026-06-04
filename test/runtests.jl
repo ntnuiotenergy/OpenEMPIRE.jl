@@ -15,6 +15,10 @@ include("test_timestruct.jl")
     test_read_excel_params()
 end
 
+@testset "Validate" begin
+    test_validate_params()
+end
+
 # @testset "Interface" begin
 #     test_interface()
 # end
