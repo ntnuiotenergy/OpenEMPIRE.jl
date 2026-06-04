@@ -145,6 +145,16 @@ const DEFAULT_LOST_LOAD_COST     = 1000.0
 # Helper functions to get parameter values with default fallbacks, the model should
 # only use these functions to access parameter values
 
+# Financial properties
+wacc(par) = par.WACC
+discount_rate(par) = par.discountRate
+
+# Emission / CCS properties
+co2_price(par, sp) = par.CO2price === nothing ? 0.0 : par.CO2price[sp]
+co2_cap(par, sp) = par.CO2cap === nothing ? nothing : par.CO2cap[sp]
+co2_content(par, g) = get(par.genCO2Content, g, 0.0)
+ccs_cost_variable(par, sp) = par.CCSCostTSVariable === nothing ? 0.0 : par.CCSCostTSVariable[sp]
+
 # General properties
 load(par, n, t) = haskey(par.sload, n) ? par.sload[n][t] : DEFAULT_LOAD
 

@@ -165,7 +165,7 @@ end
 
 function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure)
     @info "Creating generator constraints"
-    N = sets.Node
+    N = nodes(sets)
     SP = strat_periods(periods)
 
     genOp = emp[:genOperational]
@@ -173,7 +173,7 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
     genInv = emp[:genInvCap]
 
     # Generation capacity constraints
-    @info " - capacity constraints: $(length(sets.GeneratorsOfNode) * length(periods))"
+    @info " - capacity constraints: $(length(node_generators(sets)) * length(periods))"
     @constraint(
         emp,
         gen_max_prod[n in N, g in generators(sets, n), sp in SP, t in sp],
@@ -204,7 +204,7 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
 
     # Tracking installed capacity from investments across strategic periods that are within
     # the technology lifetime
-    @info " - installed capacity constraints: $(length(sets.GeneratorsOfNode) * length(SP))"
+    @info " - installed capacity constraints: $(length(node_generators(sets)) * length(SP))"
     @constraint(
         emp,
         installed_cap_gen[n in N, g in generators(sets, n), sp in SP],
@@ -213,7 +213,7 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
     )
 
     # Constraints on maximum capacity that can be built and installed for each technology
-    @info " - maximum investment constraints: $(length(sets.GeneratorsOfNode) * length(SP))"
+    @info " - maximum investment constraints: $(length(node_generators(sets)) * length(SP))"
     @constraint(
         emp,
         max_inv_tech[n in N, tc in techs(sets, n), sp in SP; max_build_cap(par, n, tc, sp) !== nothing],
@@ -221,7 +221,7 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
     )
 
     # Constraints on maximum installed capacity for each technology
-    @info " - maximum installed capacity constraints: $(length(sets.GeneratorsOfNode) * length(SP))"
+    @info " - maximum installed capacity constraints: $(length(node_generators(sets)) * length(SP))"
     @constraint(
         emp,
         max_inst_tech[n in N, tc in techs(sets, n), sp in SP; max_inst_cap(par, n, tc, sp) !== nothing],
@@ -231,7 +231,7 @@ end
 
 function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure)
     @info "Creating storage constraints"
-    N = sets.Node
+    N = nodes(sets)
     SP = strat_periods(periods)
 
     storOp = emp[:storOperational]
@@ -243,7 +243,7 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
     storCapInvPow = emp[:storPWInvCap]
 
     # Storage energy balance constraints
-    @info " - energy balance constraints: $(length(sets.StoragesOfNode) * length(periods))"
+    @info " - energy balance constraints: $(length(node_storages(sets)) * length(periods))"
     @constraint(
         emp,
         storage_bal[n in N, s in storages(sets, n), sp in SP, (prev, t) in withprev(sp)],
@@ -260,13 +260,13 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
     )
 
     # Storage operational and power capacity constraints
-    @info " - operational capacity constraints energy: $(length(sets.StoragesOfNode) * length(periods))"
+    @info " - operational capacity constraints energy: $(length(node_storages(sets)) * length(periods))"
     @constraint(
         emp,
         storage_op_cap_en[n in N, s in storages(sets, n), sp in SP, t in sp],
         storOp[n, s, t] <= storCapEn[n, s, sp]
     )
-    @info " - operational capacity constraints power: $(length(sets.StoragesOfNode) * length(periods))"
+    @info " - operational capacity constraints power: $(length(node_storages(sets)) * length(periods))"
     @constraint(
         emp,
         storage_op_cap_pow[n in N, s in storages(sets, n), sp in SP, t in sp],
@@ -304,7 +304,7 @@ end
 
 function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure)
     @info "Creating transmission constraints"
-    N = sets.Node
+    N = nodes(sets)
     SP = strat_periods(periods)
 
     transOp = emp[:transmissionOperational]
