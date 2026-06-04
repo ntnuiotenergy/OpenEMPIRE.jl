@@ -42,6 +42,8 @@ function create_model(config_file, data_folder; optimizer = nothing, include_str
 
     OpenEMPIRE.preprocess_params(params, sets, periods)
 
+    OpenEMPIRE.validate(params; sets, periods, strict = false)
+
     emp = isnothing(optimizer) ? JuMP.Model() : JuMP.direct_model(optimizer_with_attributes(optimizer))
     set_string_names_on_creation(emp, include_string_names)
     @time OpenEMPIRE.create_variables(emp, sets, periods)
