@@ -1,4 +1,4 @@
-function create_model(config_file, data_folder; optimizer = nothing, include_string_names = true)
+function create_model(config_file, data_folder; optimizer = nothing, include_string_names = true, input_format = :auto)
 
     config = YAML.load_file(config_file)
 
@@ -32,9 +32,8 @@ function create_model(config_file, data_folder; optimizer = nothing, include_str
     periods = OpenEMPIRE.create_timestruct(strat_pers, sp_dur_years, seasons, hours_reg_season, peaks, hours_peak, scenarios)
 
 
-    sets = OpenEMPIRE.read_sets_xlsx(data_folder)
-    params = OpenEMPIRE.read_params_xlsx(data_folder)
-    OpenEMPIRE.read_scenario_tab(data_folder, periods, params, season_for_hour)
+    sets, params = OpenEMPIRE.read_data(data_folder; format = input_format)
+    OpenEMPIRE.read_scenario_tab(OpenEMPIRE.input_path(data_folder), periods, params, season_for_hour)
 
     # Financial parameters
     params.WACC = config["wacc"]

@@ -15,11 +15,20 @@ function read_scenario_tab(data_folder, periods, params::EmpireParams, season_fo
 
     el_file = joinpath(data_folder, "ScenarioData", "Stochastic_ElectricLoadRaw.tab")
     hydro_file = joinpath(data_folder, "ScenarioData", "Stochastic_HydroGenMaxSeasonalProduction.tab")
+    avail_file = joinpath(data_folder, "ScenarioData", "Stochastic_StochasticAvailability.tab")
+
+    missing_files = filter(!isfile, [el_file, hydro_file, avail_file])
+    if !isempty(missing_files)
+        throw(ArgumentError(
+            "Generated stochastic .tab scenario files are required by the Julia model. " *
+            "Raw ScenarioData CSV files must first be converted/generated. Missing files: " *
+            join(missing_files, ", ")
+        ))
+    end
 
     read_scenario_data(el_file, params.sloadRaw, periods, season_for_hour, 5)
     read_scenario_data(hydro_file, params.maxRegHydroGenRaw, periods, season_for_hour, 6)
 
-    avail_file = joinpath(data_folder, "ScenarioData", "Stochastic_StochasticAvailability.tab")
     params.genCapAvail = Dict{Tuple{String,String}, TimeProfile}()
     read_scenario_data_gen(avail_file, params.genCapAvail, periods, season_for_hour, 6)
 
