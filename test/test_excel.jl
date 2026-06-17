@@ -128,6 +128,16 @@ function test_validate_params()
     bad.genInitCap[("B", "gas")] = FixedProfile(10.0)
     @test_throws ArgumentError OpenEMPIRE.validate(bad; sets = sets)
 
+    # Valid generation capacity limits are keyed by (node, technology), not
+    # by (node, generator).
+    good = deepcopy(params)
+    good.genMaxBuiltCap[("A", "thermal")] = FixedProfile(100.0)
+    @test OpenEMPIRE.validate(good; sets = sets, periods = periods) === good
+
+    bad = deepcopy(params)
+    bad.genMaxBuiltCap[("A", "unknown_tech")] = FixedProfile(100.0)
+    @test_throws ArgumentError OpenEMPIRE.validate(bad; sets = sets)
+
     # Unknown arc in transmission dict
     bad = deepcopy(params)
     bad.lineEfficiency[("A", "C")] = 0.9

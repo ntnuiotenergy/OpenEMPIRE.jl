@@ -85,8 +85,75 @@ sets_xlsx, params_xlsx = OpenEMPIRE.read_data(joinpath(pkgdir(OpenEMPIRE), "data
 Additional source/unit columns extracted from the Excel workbooks are stored
 under `data_extra/`, mirroring the dataset names in `data/`.
 
-The generation of scenario data is not available yet in the Julia version
-and needs to be generated in Python and read in as `.tab` files.
+The Julia version can generate stochastic scenario CSV files directly from raw
+`ScenarioData/*.csv` inputs. The generated files are written to the dataset's
+`ScenarioData` folder as `sloadRaw.csv`, `maxRegHydroGenRaw.csv`, and
+`genCapAvailStochRaw.csv`. If `use_fixed_sample: true`, the sampler uses
+`sampling_key.csv`; otherwise it writes a new key alongside the generated
+scenario CSVs.
+
+## Running on Solstorm
+
+The repository includes a small Julia runner and a Solstorm SGE wrapper for a
+first cluster smoke test.
+
+To test locally without solving:
+
+```bash
+julia --project=. scripts/run_julia_empire.jl \
+  --dataset=test \
+  --config=data/test_excel/testrun.yaml \
+  --format=csv \
+  --solver=HiGHS \
+  --no-optimize
+```
+
+To run directly on Solstorm after copying the repo there:
+
+```bash
+sh scripts/run_empire_julia_basic_sge.sh test
+```
+
+The script selects one of the high-memory Solstorm nodes, instantiates the
+Julia project with `Pkg.instantiate()`, and runs:
+
+```bash
+julia --project=. scripts/run_julia_empire.jl --dataset=test
+```
+
+Results from the Julia runner are written under `results/julia_runs/`. At the
+moment the runner writes a compact `summary.txt`; systematic result export is
+still under development.
+
+For one-command local-to-Solstorm deployment, create a cluster config:
+
+```bash
+cp config/cluster.sample.json config/cluster.json
+```
+
+Edit `config/cluster.json` with your Solstorm username and remote directory,
+then run:
+
+```bash
+sh scripts/copy_and_run_julia_on_hpc.sh Solstorm
+```
+
+The default solver for this first Julia smoke test is HiGHS. Gurobi is loaded
+by the SGE script when available and can be selected with:
+
+```bash
+JULIA_SOLVER=Gurobi sh scripts/run_empire_julia_basic_sge.sh test
+```
+
+For one-command deployment, set this in `config/cluster.json`:
+
+```json
+"JULIA_SOLVER": "Gurobi"
+```
+
+The Julia project includes `Gurobi.jl`; on Solstorm, the script tries to load
+`gurobi/13.0` first and then `gurobi/12.0`. If Gurobi license discovery fails,
+check `GRB_LICENSE_FILE` in the job log and verify the Solstorm Gurobi module.
 
 ### Time structure
 

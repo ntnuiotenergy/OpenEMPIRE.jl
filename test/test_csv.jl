@@ -79,6 +79,7 @@ function _write_toy_csv_dataset(root)
 
     _write_csv(joinpath(dataset, "General", "CO2cap.csv"), "Period,Value\n1,100\n")
     _write_csv(joinpath(dataset, "General", "CO2price.csv"), "Period,Value\n1,10\n")
+    _write_csv(joinpath(dataset, "General", "seasScale.csv"), "Season,seasonScale\nwinter,3\nspring,4\n")
     mkpath(joinpath(dataset, "ScenarioData"))
 
     return dataset
@@ -104,6 +105,8 @@ function test_read_csv_dataset()
         @test params.transmissionLength[("A", "B")] == 10.0
         @test params.storageChargeEff["battery"] == 0.9
         @test params.maxHydroNode["A"] == 0.0
+        @test params.seasScale["winter"] == 3.0
+        @test OpenEMPIRE.season_scale(params, 1) == 1.0
 
         sets2, params2 = OpenEMPIRE.read_data(dataset; format = :csv)
         @test OpenEMPIRE.nodes(sets2) == OpenEMPIRE.nodes(sets)
@@ -133,4 +136,31 @@ function test_read_bundled_csv_datasets()
     @test length(OpenEMPIRE.generators(europe_sets)) == 28
     @test length(OpenEMPIRE.arcs(europe_sets)) == 380
     @test length(europe_params.genCapitalCost) == 23
+end
+
+function test_python_style_operational_weights()
+    periods = OpenEMPIRE.create_timestruct(1, 5, 4, 2, 2, 1, 2)
+    sp = first(strat_periods(periods))
+    representatives = collect(repr_periods(sp))
+    first_time = first(first(opscenarios(first(representatives))))
+    discounter = Discounter(0.05, 1, periods)
+
+    params = OpenEMPIRE.EmpireParams(
+        WACC = 0.05,
+        discountRate = 0.05,
+        seasScale = Dict("winter" => 3.0, "spring" => 4.0),
+        seasonNames = ["winter", "spring", "summer", "fall", "peak1", "peak2"],
+        regularSeasonCount = 4,
+    )
+
+    op_discount = sum((1 + 0.05)^(-j) for j in 0:4)
+
+    @test OpenEMPIRE.season_scale(params, 1) == 3.0
+    @test OpenEMPIRE.season_scale(params, 3) == 1.0
+    @test OpenEMPIRE.regular_season_count(params, length(representatives)) == 4
+    @test OpenEMPIRE.operational_discount_scale(params, sp) ≈ op_discount
+    @test OpenEMPIRE.seasonal_probability_weight(params, 1, first_time) ≈
+          3.0 * probability(first_time)
+    @test OpenEMPIRE.operational_objective_weight(params, sp, 1, first_time, discounter) ≈
+          objective_weight(sp, discounter) * op_discount * 3.0 * probability(first_time)
 end

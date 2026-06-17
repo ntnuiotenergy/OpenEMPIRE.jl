@@ -13,7 +13,7 @@ function sol_invest_cost(emp, sets, par, periods, discounter::Discounter)
             sum(gen_invest_cost(par, g, sp) * value(genInvCap[n, g, sp]) for n in N for g in generators(sets, n); init = 0)
             for sp in SP)
     trans_cost = sum(objective_weight(sp, discounter) * (
-            sum(trans_invest_cost(par, m, n, sp) * value(transInvCap[m, n, sp]) for (m, n) in arcs(sets); init = 0)
+            sum(trans_invest_cost(par, m, n, sp) * value(transInvCap[m, n, sp]) for (m, n) in bidir_arcs(sets); init = 0)
             ) for sp in SP)
     stor_pw_cost = sum(objective_weight(sp, discounter) * (
             sum(stor_pw_invest_cost(par, s, sp) * value(storInvCapPow[n, s, sp]) for n in N for s in storages(sets, n); init = 0)
@@ -31,16 +31,24 @@ function sol_operational_cost(emp, sets, par, periods, discounter::Discounter)
     genOperational = emp[:genOperational]
     loadShed = emp[:loadShed]
 
-    T = periods
+    SP = strat_periods(periods)
     N = nodes(sets)
 
-    gen_cost = sum(objective_weight(t, discounter; type = "avg_year") * (
+    gen_cost = sum(operational_objective_weight(par, sp, representative_index, t, discounter) * (
             sum(gen_marginal_cost(par, g, t) * value(genOperational[n, g, t]) for n in N for g in generators(sets, n); init = 0)
-            ) for t in T)
+            )
+        for sp in SP
+        for (representative_index, rp) in enumerate(repr_periods(sp))
+        for sc in opscenarios(rp)
+        for t in sc)
 
-    load_shed_cost = sum(objective_weight(t, discounter; type = "avg_year") * (
+    load_shed_cost = sum(operational_objective_weight(par, sp, representative_index, t, discounter) * (
             sum(lost_load_cost(par, n, t) * value(loadShed[n, t]) for n in N; init = 0)
-            ) for t in T)
+            )
+        for sp in SP
+        for (representative_index, rp) in enumerate(repr_periods(sp))
+        for sc in opscenarios(rp)
+        for t in sc)
 
     return gen_cost, load_shed_cost
 end

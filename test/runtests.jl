@@ -1,13 +1,18 @@
 
+using CSV
 using HiGHS
 using JuMP
 using OpenEMPIRE
+using Dates
+using Random
 using Test
 using TimeStruct
+using YAML
 # using Xpress
 
 include("test_excel.jl")
 include("test_csv.jl")
+include("test_scenario_csv.jl")
 #include("test_interface.jl")
 include("test_timestruct.jl")
 
@@ -19,6 +24,18 @@ end
 @testset "CSV" begin
     test_read_csv_dataset()
     test_read_bundled_csv_datasets()
+    test_python_style_operational_weights()
+end
+
+@testset "CSV scenarios" begin
+    test_read_raw_csv_scenarios()
+    test_fixed_sample_raw_csv_scenarios()
+    test_configurable_regular_scenario_seasons()
+    test_python_fixed_sample_scenario_parity()
+    test_create_model_with_raw_csv_scenarios()
+    test_create_model_accepts_optimizer_type()
+    test_storage_constraints_match_python_formulation()
+    test_create_model_adds_storage_max_constraints()
 end
 
 @testset "Validate" begin

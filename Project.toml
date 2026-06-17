@@ -5,9 +5,12 @@ authors = ["Gerardo A Perez-Valdes <GerardoA.Perez-Valdes@sintef.no>", "Truls Fl
 
 [deps]
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
+Gurobi = "2e9cd046-0924-5485-92f1-d5272153d98b"
 HiGHS = "87dc4568-4c63-4d18-b0c0-bb2238e4078b"
 JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SparseVariables = "2749762c-80ed-4b14-8f33-f0736679b02b"
 TimeStruct = "f9ed5ce0-9f41-4eaa-96da-f38ab8df101c"
 XLSX = "fdbf4ff8-1666-58a4-91e7-1b58723a45e0"
@@ -16,6 +19,7 @@ YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
 [compat]
 CSV = "0.10.15"
 DelimitedFiles = "1.9.1"
+Gurobi = "1.9.2"
 HiGHS = "1.19.0"
 JuMP = "1.29.1"
 SparseVariables = "0.7.4"

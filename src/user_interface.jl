@@ -1,4 +1,14 @@
-function create_model(config_file, data_folder; optimizer = nothing, include_string_names = true, input_format = :auto)
+_optimizer_constructor(optimizer) =
+    optimizer isa DataType ? (() -> Base.invokelatest(optimizer)) : optimizer
+
+function create_model(
+    config_file,
+    data_folder;
+    optimizer = nothing,
+    include_string_names = true,
+    input_format = :auto,
+    scenario_rng = Random.default_rng(),
+)
 
     config = YAML.load_file(config_file)
 
@@ -9,31 +19,51 @@ function create_model(config_file, data_folder; optimizer = nothing, include_str
 
     season_for_hour = Dict{Int, Int}()
 
-    seasons = 4
+    regular_seasons = OpenEMPIRE.regular_scenario_seasons(config)
+    season_count = length(regular_seasons)
     hours_reg_season = config["length_of_regular_season"]
-    for s in 1:seasons
-        start_hour = (s - 1) * hours_reg_season + 1
-        end_hour = s * hours_reg_season
+    for season_index in 1:season_count
+        start_hour = (season_index - 1) * hours_reg_season + 1
+        end_hour = season_index * hours_reg_season
         for h in start_hour:end_hour
-            season_for_hour[h] = s
+            season_for_hour[h] = season_index
         end
     end
-    peaks = 2
-    hours_peak = 24
-    for p in 1:peaks
-        start_hour = seasons * hours_reg_season + (p - 1) * hours_peak + 1
-        end_hour = seasons * hours_reg_season + p * hours_peak
+    peak_count = OpenEMPIRE.scenario_peak_count(config)
+    hours_peak = OpenEMPIRE.scenario_peak_hours(config)
+    for peak_index in 1:peak_count
+        start_hour = season_count * hours_reg_season + (peak_index - 1) * hours_peak + 1
+        end_hour = season_count * hours_reg_season + peak_index * hours_peak
         for h in start_hour:end_hour
-            season_for_hour[h] = seasons + p
+            season_for_hour[h] = season_count + peak_index
         end
     end
     scenarios = config["number_of_scenarios"]
 
-    periods = OpenEMPIRE.create_timestruct(strat_pers, sp_dur_years, seasons, hours_reg_season, peaks, hours_peak, scenarios)
+    periods = OpenEMPIRE.create_timestruct(
+        strat_pers,
+        sp_dur_years,
+        season_count,
+        hours_reg_season,
+        peak_count,
+        hours_peak,
+        scenarios,
+    )
 
 
     sets, params = OpenEMPIRE.read_data(data_folder; format = input_format)
-    OpenEMPIRE.read_scenario_tab(OpenEMPIRE.input_path(data_folder), periods, params, season_for_hour)
+    params.seasonNames = vcat(collect(regular_seasons), ["peak$(i)" for i in 1:peak_count])
+    params.regularSeasonCount = season_count
+
+    OpenEMPIRE.read_scenario_data!(
+        OpenEMPIRE.input_path(data_folder),
+        periods,
+        params,
+        sets,
+        config,
+        season_for_hour;
+        rng = scenario_rng,
+    )
 
     # Financial parameters
     params.WACC = config["wacc"]
@@ -43,12 +73,16 @@ function create_model(config_file, data_folder; optimizer = nothing, include_str
 
     OpenEMPIRE.validate(params; sets, periods, strict = false)
 
-    emp = isnothing(optimizer) ? JuMP.Model() : JuMP.direct_model(optimizer_with_attributes(optimizer))
+    emp = if isnothing(optimizer)
+        JuMP.Model()
+    else
+        JuMP.direct_model(optimizer_with_attributes(_optimizer_constructor(optimizer)))
+    end
     set_string_names_on_creation(emp, include_string_names)
     @time OpenEMPIRE.create_variables(emp, sets, periods)
     @time OpenEMPIRE.create_constraints(emp, sets, params, periods)
     @time OpenEMPIRE.create_objective(emp, sets, params, periods, Discounter(OpenEMPIRE.discount_rate(params), 1, periods))
 
-   return emp, periods, sets, params
+    return emp, periods, sets, params
 
 end
