@@ -7,6 +7,7 @@ using TimeStruct
 # using Xpress
 
 include("test_excel.jl")
+include("test_csv.jl")
 # include("test_interface.jl")
 include("test_timestruct.jl")
 include("test_solve.jl")
@@ -14,6 +15,11 @@ include("test_solve.jl")
 @testset "Excel" begin
     test_read_excel_sets()
     test_read_excel_params()
+end
+
+@testset "CSV" begin
+    test_read_csv_dataset()
+    test_read_bundled_csv_datasets()
 end
 
 @testset "Validate" begin

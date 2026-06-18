@@ -3,7 +3,7 @@
 
 function test_interface()
 
-    data_folder = joinpath(pkgdir(OpenEMPIRE), "data")
+    data_folder = joinpath(pkgdir(OpenEMPIRE), "data", "test_excel")
     config_file = joinpath(data_folder, "testrun.yaml")
 
     config_file = "../OpenEMPIRE/config/run.yaml"
@@ -143,7 +143,7 @@ end
 
 function test_empire_sol()
 
-    data_folder = joinpath(pkgdir(OpenEMPIRE), "data")
+    data_folder = joinpath(pkgdir(OpenEMPIRE), "data", "test_excel")
     config_file = joinpath(data_folder, "testrun.yaml")
 
     emp, periods, sets, params = OpenEMPIRE.create_model(config_file, data_folder; optimizer = Xpress.Optimizer);

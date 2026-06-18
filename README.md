@@ -32,7 +32,7 @@ using OpenEMPIRE
 using HiGHS
 using JuMP
 
-data_folder = joinpath(pkgdir(OpenEMPIRE), "data")
+data_folder = joinpath(pkgdir(OpenEMPIRE), "data", "test_excel")
 config_file = joinpath(data_folder, "testrun.yaml")
 
 emp, periods, sets, params = OpenEMPIRE.create_model(
@@ -69,7 +69,21 @@ The input is split into a structural part (sets,
 technology parameters, topology, cost data) and a stochastic part
 (time-dependent scenario data for load and renewable generation).
 These input data can be input from the same data used for the Python version.
-Currently, only Excel support is implemented.  
+The repository stores bundled datasets under `data/`. CSV datasets follow the
+same component layout as the Python CSV version, for example
+`data/test/Sets/Node.csv`, `data/test/Generator/genCapitalCost.csv` and
+`data/test/ScenarioData/electricload.csv`. The older Excel-based sample data is
+kept under `data/test_excel`.
+
+Structural inputs can be read from CSV or Excel:
+
+```julia
+sets, params = OpenEMPIRE.read_data(joinpath(pkgdir(OpenEMPIRE), "data", "test"); format = :csv)
+sets_xlsx, params_xlsx = OpenEMPIRE.read_data(joinpath(pkgdir(OpenEMPIRE), "data", "test_excel"); format = :xlsx)
+```
+
+Additional source/unit columns extracted from the Excel workbooks are stored
+under `data_extra/`, mirroring the dataset names in `data/`.
 
 The generation of scenario data is not available yet in the Julia version
 and needs to be generated in Python and read in as `.tab` files.
@@ -134,4 +148,3 @@ Python reference implementation are tracked in [TODO.md](TODO.md). Notable
 open points include the North Sea extensions and the implementation of
 emission limits, as well as a documented discrepancy in the annuity / present
 value calculation for investment costs.
-

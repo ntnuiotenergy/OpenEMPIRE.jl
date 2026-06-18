@@ -1,6 +1,6 @@
 function test_read_excel_sets()
 
-    sets = OpenEMPIRE.read_sets_xlsx(joinpath(pkgdir(OpenEMPIRE), "data"))
+    sets = OpenEMPIRE.read_sets_xlsx(joinpath(pkgdir(OpenEMPIRE), "data", "test_excel"))
 
     @test length(sets.Node) == 3
     @test length(sets.Generator) == 27
@@ -37,9 +37,9 @@ end
 
 function test_read_excel_params()
 
-    params = OpenEMPIRE.read_params_xlsx(joinpath(pkgdir(OpenEMPIRE),"data"))
+    params = OpenEMPIRE.read_params_xlsx(joinpath(pkgdir(OpenEMPIRE), "data", "test_excel"))
 
-    sets = OpenEMPIRE.read_sets_xlsx(joinpath(pkgdir(OpenEMPIRE), "data"))
+    sets = OpenEMPIRE.read_sets_xlsx(joinpath(pkgdir(OpenEMPIRE), "data", "test_excel"))
     periods = OpenEMPIRE.create_timestruct(2, 5, 4, 24, 2, 24, 2)
     params.WACC = 0.05
     params.discountRate = 0.03
