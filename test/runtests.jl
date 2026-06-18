@@ -25,6 +25,7 @@ end
     test_read_csv_dataset()
     test_read_bundled_csv_datasets()
     test_python_style_operational_weights()
+    test_write_solution_csv_tables()
 end
 
 @testset "CSV scenarios" begin

@@ -25,7 +25,14 @@ function create_timestruct(npers, years_period, nseasons, hours_season, npeaks, 
     return TwoLevel(npers, years_period, repr_periods; op_per_strat = 8760)
 end
 
-function create_variables(emp::JuMP.Model, sets, periods::TimeStruct.TimeStructure)
+_report_progress(::Nothing, message) = nothing
+
+function _report_progress(progress, message)
+    progress(message)
+    return nothing
+end
+
+function create_variables(emp::JuMP.Model, sets, periods::TimeStruct.TimeStructure; progress = nothing)
 
     # Index sets
     N = nodes(sets)
@@ -36,6 +43,7 @@ function create_variables(emp::JuMP.Model, sets, periods::TimeStruct.TimeStructu
     SP = strat_periods(periods)
 
     @info "Declaring variables"
+    _report_progress(progress, "Declaring JuMP variables")
     # Investments in new generator capacity and tracking installed capacity
     @variable(emp, genInvCap[N, G, SP] >= 0; container = IndexedVarArray)
     @variable(emp, genInstalledCap[N, G, SP] >= 0; container = IndexedVarArray)
@@ -60,6 +68,7 @@ function create_variables(emp::JuMP.Model, sets, periods::TimeStruct.TimeStructu
 
     # Insert sparse variables
     @info "Inserting variables into sparse arrays - strategic variables"
+    _report_progress(progress, "Indexing strategic variables")
     for (n, g) in node_generators(sets), sp in SP
         unsafe_insertvar!(genInvCap, n, g, sp)
         unsafe_insertvar!(genInstalledCap, n, g, sp)
@@ -77,28 +86,36 @@ function create_variables(emp::JuMP.Model, sets, periods::TimeStruct.TimeStructu
     @info "Inserting variables into sparse arrays - operational variables"
     @info "Total time periods: $(length(T))"
     @info "Generator operational variables: $(length(node_generators(sets)) * length(T))"
+    _report_progress(
+        progress,
+        "Indexing operational variables ($(length(T)) time steps, $(length(node_generators(sets)) * length(T)) generator entries)",
+    )
     for (n, g) in node_generators(sets), t in T
         unsafe_insertvar!(genOperational, n, g, t)
     end
     @info "Transmission operational variables: $(length(arcs(sets)) * length(T))"
+    _report_progress(progress, "Indexing transmission operational variables ($(length(arcs(sets)) * length(T)) entries)")
     for (n, m) in arcs(sets), t in T
         unsafe_insertvar!(transmissionOperational, n, m, t)
     end
     @info "Storage operational variables: $(length(node_storages(sets)) * length(T))"
+    _report_progress(progress, "Indexing storage operational variables ($(length(node_storages(sets)) * length(T)) entries)")
     for (n, s) in node_storages(sets), t in T
         unsafe_insertvar!(storCharge, n, s, t)
         unsafe_insertvar!(storDischarge, n, s, t)
         unsafe_insertvar!(storOperational, n, s, t)
     end
     @info "Load shedding variables: $(length(N) * length(T))"
+    _report_progress(progress, "Indexing load-shedding variables ($(length(N) * length(T)) entries)")
     for n in N, t in T
         unsafe_insertvar!(loadShed, n, t)
     end
     return
 end
 
-function create_objective(emp::JuMP.Model, sets, par, periods::TimeStructure, discounter::Discounter)
+function create_objective(emp::JuMP.Model, sets, par, periods::TimeStructure, discounter::Discounter; progress = nothing)
     @info "Creating objective function"
+    _report_progress(progress, "Creating objective function")
     N = nodes(sets)
     SP = strat_periods(periods)
 
@@ -135,8 +152,9 @@ function create_objective(emp::JuMP.Model, sets, par, periods::TimeStructure, di
 end
 
 # Create all constraints in the model
-function create_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure)
+function create_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
     @info "Creating constraints"
+    _report_progress(progress, "Creating constraints")
 
     N = nodes(sets)
     G = generators(sets)
@@ -149,6 +167,7 @@ function create_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure)
     shed = emp[:loadShed]
 
     @info "Flow balance constraints: $((length(N)) * length(T))"
+    _report_progress(progress, "Creating flow-balance constraints ($(length(N) * length(T)) constraints)")
     @constraint(
         emp,
         flow_balance[n in N, t in T],
@@ -157,9 +176,9 @@ function create_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure)
             shed[n, t] == load(par, n, t)
     )
 
-    create_generator_constraints(emp, sets, par, periods)
-    create_storage_constraints(emp, sets, par, periods)
-    return create_transmission_constraints(emp, sets, par, periods)
+    create_generator_constraints(emp, sets, par, periods; progress)
+    create_storage_constraints(emp, sets, par, periods; progress)
+    return create_transmission_constraints(emp, sets, par, periods; progress)
 
 end
 
@@ -170,8 +189,9 @@ function duration_aggr(sp, spp, strat_periods)
     return sum(duration_strat(p) for p in strat_periods if p >= sp && p < spp; init = 0)
 end
 
-function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure)
+function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
     @info "Creating generator constraints"
+    _report_progress(progress, "Creating generator constraints")
     N = nodes(sets)
     SP = strat_periods(periods)
 
@@ -181,6 +201,7 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
 
     # Generation capacity constraints
     @info " - capacity constraints: $(length(node_generators(sets)) * length(periods))"
+    _report_progress(progress, "Creating generator capacity constraints ($(length(node_generators(sets)) * length(periods)) constraints)")
     @constraint(
         emp,
         gen_max_prod[n in N, g in generators(sets, n), sp in SP, t in sp],
@@ -189,6 +210,7 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
 
     # Ramping Constraints (thermal generators only)
     @info " - ramping constraints (thermal generators only)"
+    _report_progress(progress, "Creating generator ramping constraints")
     @constraint(
         emp,
         gen_ramping[n in N, g in generators(sets, n), sp in SP, (prev, t) in withprev(sp); !isnothing(prev) && is_thermal(sets, g)],
@@ -197,12 +219,14 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
 
     # Generation limit for hydropower plants
     @info " - generation limit constraints for regulated hydropower for each operational scenario"
+    _report_progress(progress, "Creating regulated hydropower scenario constraints")
     @constraint(
         emp,
         gen_hydro_limit[n in N, g in generators(sets, n), sc in opscenarios(periods); is_reg_hydro(sets, g)],
         sum(genOp[n, g, t] for t in sc) <= max_hydro_gen(par, n, sc)
     )
     @info " - generation limit constraints for hydropower for each node and strategic period"
+    _report_progress(progress, "Creating node hydropower limit constraints")
     @constraint(
         emp,
         gen_hydro_node_limit[n in N, sp in SP; !isnothing(max_hydro_node(par, n))],
@@ -218,6 +242,7 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
     # Tracking installed capacity from investments across strategic periods that are within
     # the technology lifetime
     @info " - installed capacity constraints: $(length(node_generators(sets)) * length(SP))"
+    _report_progress(progress, "Creating generator installed-capacity tracking constraints ($(length(node_generators(sets)) * length(SP)) constraints)")
     @constraint(
         emp,
         installed_cap_gen[n in N, g in generators(sets, n), sp in SP],
@@ -227,6 +252,7 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
 
     # Constraints on maximum capacity that can be built and installed for each technology
     @info " - maximum investment constraints: $(length(N) * length(techs(sets)) * length(SP))"
+    _report_progress(progress, "Creating generator maximum-investment constraints ($(length(N) * length(techs(sets)) * length(SP)) constraints)")
     @constraint(
         emp,
         max_inv_tech[n in N, tc in techs(sets), sp in SP],
@@ -235,6 +261,7 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
 
     # Constraints on maximum installed capacity for each technology
     @info " - maximum installed capacity constraints: $(length(N) * length(techs(sets)) * length(SP))"
+    _report_progress(progress, "Creating generator maximum-installed-capacity constraints ($(length(N) * length(techs(sets)) * length(SP)) constraints)")
     return @constraint(
         emp,
         max_inst_tech[n in N, tc in techs(sets), sp in SP],
@@ -242,8 +269,9 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
     )
 end
 
-function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure)
+function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
     @info "Creating storage constraints"
+    _report_progress(progress, "Creating storage constraints")
     N = nodes(sets)
     SP = strat_periods(periods)
 
@@ -257,6 +285,7 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
 
     # Storage energy balance constraints
     @info " - energy balance constraints: $(length(node_storages(sets)) * length(periods))"
+    _report_progress(progress, "Creating storage energy-balance constraints ($(length(node_storages(sets)) * length(periods)) constraints)")
     @constraint(
         emp,
         storage_bal[n in N, s in storages(sets, n), sp in SP, (prev, t) in withprev(sp)],
@@ -266,6 +295,7 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
 
     # Cyclic condition for storage at the end of each operational scenario
     @info " - cyclic condition constraints"
+    _report_progress(progress, "Creating storage cyclic-condition constraints")
     @constraint(
         emp,
         storage_cyclic[n in N, s in storages(sets, n), sp in SP, sc in opscenarios(sp)],
@@ -274,12 +304,14 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
 
     # Storage operational and power capacity constraints
     @info " - operational capacity constraints energy: $(length(node_storages(sets)) * length(periods))"
+    _report_progress(progress, "Creating storage energy-capacity constraints ($(length(node_storages(sets)) * length(periods)) constraints)")
     @constraint(
         emp,
         storage_op_cap_en[n in N, s in storages(sets, n), sp in SP, t in sp],
         storOp[n, s, t] <= storCapEn[n, s, sp]
     )
     @info " - operational capacity constraints power: $(length(node_storages(sets)) * length(periods))"
+    _report_progress(progress, "Creating storage power-capacity constraints ($(length(node_storages(sets)) * length(periods)) constraints)")
     @constraint(
         emp,
         storage_op_cap_pow[n in N, s in storages(sets, n), sp in SP, t in sp],
@@ -292,6 +324,7 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
     )
 
     @info " - investment constraints"
+    _report_progress(progress, "Creating storage installed-capacity tracking constraints")
     # Tracking installed capacity from investments
     @constraint(
         emp,
@@ -307,6 +340,7 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
     )
 
     @info " - maximum storage investment constraints: $(2 * length(node_storages(sets)) * length(SP))"
+    _report_progress(progress, "Creating storage maximum-investment constraints ($(2 * length(node_storages(sets)) * length(SP)) potential constraints)")
     @constraint(
         emp,
         storage_max_inv_pow[n in N, s in storages(sets, n), sp in SP; stor_pw_max_build_cap(par, n, s, sp) !== nothing],
@@ -319,6 +353,7 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
     )
 
     @info " - maximum storage installed constraints: $(2 * length(node_storages(sets)) * length(SP))"
+    _report_progress(progress, "Creating storage maximum-installed-capacity constraints ($(2 * length(node_storages(sets)) * length(SP)) potential constraints)")
     @constraint(
         emp,
         storage_max_inst_pow[n in N, s in storages(sets, n), sp in SP; stor_pw_max_inst_cap(par, n, s, sp) !== nothing],
@@ -339,8 +374,9 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
 
 end
 
-function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure)
+function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
     @info "Creating transmission constraints"
+    _report_progress(progress, "Creating transmission constraints")
     N = nodes(sets)
     SP = strat_periods(periods)
 

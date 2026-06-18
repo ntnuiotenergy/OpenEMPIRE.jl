@@ -14,7 +14,7 @@
 #
 # Examples:
 #   sh scripts/run_empire_julia_basic_sge.sh test
-#   sh scripts/run_empire_julia_basic_sge.sh europe_v51 data/test_excel/testrun.yaml csv
+#   sh scripts/run_empire_julia_basic_sge.sh europe_v51 config/testrun.yaml csv
 #
 # Environment variables:
 #   JULIA_CMD       Julia executable, default: julia
@@ -26,7 +26,7 @@
 #                       --fixed-sample and require ScenarioData/sampling_key.csv.
 
 DATASET=${1:-test}
-CONFIG_FILE=${2:-data/test_excel/testrun.yaml}
+CONFIG_FILE=${2:-config/testrun.yaml}
 INPUT_FORMAT=${3:-csv}
 JULIA_CMD=${JULIA_CMD:-julia}
 JULIA_SOLVER=${JULIA_SOLVER:-HiGHS}
@@ -137,6 +137,8 @@ function instantiate_julia_project() {
 echo "Checking Julia project dependencies..."
 if ! check_julia_project >/dev/null 2>&1; then
 	echo "Dependencies are not ready; instantiating Julia project..."
+	echo "Dependency setup start time: $(date)"
+	echo "This can take several minutes on a fresh Solstorm environment."
 	if ! instantiate_julia_project; then
 		echo "Julia project instantiation failed with:"
 		$JULIA_CMD --version || true
@@ -160,6 +162,7 @@ if ! check_julia_project >/dev/null 2>&1; then
 			exit 1
 		fi
 	fi
+	echo "Dependency setup finished: $(date)"
 else
 	echo "Julia project dependencies are already available."
 fi

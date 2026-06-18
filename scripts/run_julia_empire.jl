@@ -12,13 +12,15 @@ using YAML
 function _parse_args(args)
     options = Dict{String, String}(
         "dataset" => "test",
-        "config" => joinpath("data", "test_excel", "testrun.yaml"),
+        "config" => joinpath("config", "testrun.yaml"),
         "format" => "csv",
         "solver" => "HiGHS",
         "seed" => "1",
         "results" => joinpath("results", "julia_runs"),
         "optimize" => "true",
         "fixed-sample" => "auto",
+        "gurobi-method" => "",
+        "gurobi-crossover" => "",
     )
 
     for arg in args
@@ -55,6 +57,58 @@ function _optimizer(value)
     ))
 end
 
+function _optional_int(value, key)
+    (value === nothing || ismissing(value)) && return nothing
+    value isa Integer && return Int(value)
+    text = strip(string(value))
+    isempty(text) && return nothing
+    try
+        return parse(Int, text)
+    catch err
+        throw(ArgumentError("Unsupported integer value for $key: $value"))
+    end
+end
+
+function _set_optimizer_attribute!(attributes, name, value)
+    parsed = _optional_int(value, name)
+    parsed === nothing && return attributes
+    for index in eachindex(attributes)
+        if first(attributes[index]) == name
+            attributes[index] = name => parsed
+            return attributes
+        end
+    end
+    push!(attributes, name => parsed)
+    return attributes
+end
+
+function _optimizer_attributes(value, config, options)
+    if value == "Gurobi"
+        attributes = Pair{String, Int}[]
+        config_attribute_names = (
+            "solver_method" => "Method",
+            "solver_crossover" => "Crossover",
+            "solver_presolve" => "Presolve",
+            "solver_threads" => "Threads",
+            "solver_scaleflag" => "ScaleFlag",
+            "solver_numericfocus" => "NumericFocus",
+            "solver_barhomogeneous" => "BarHomogeneous",
+        )
+        for (config_key, gurobi_name) in config_attribute_names
+            _set_optimizer_attribute!(attributes, gurobi_name, get(config, config_key, nothing))
+        end
+        _set_optimizer_attribute!(attributes, "Method", options["gurobi-method"])
+        _set_optimizer_attribute!(attributes, "Crossover", options["gurobi-crossover"])
+        return Tuple(attributes)
+    end
+    return ()
+end
+
+function _optimizer_attribute_summary(attributes)
+    isempty(attributes) && return "(none)"
+    return join(("$name=$value" for (name, value) in attributes), ", ")
+end
+
 function _boolean_option(value, name)
     normalized = lowercase(value)
     normalized in ("true", "1", "yes") && return true
@@ -80,6 +134,22 @@ function _write_summary(path, lines)
         end
     end
     return path
+end
+
+function _log_line(message)
+    println(message)
+    flush(stdout)
+    return nothing
+end
+
+function _progress_logger()
+    run_start = time()
+    step = Ref(0)
+    return function (message)
+        step[] += 1
+        elapsed = round(time() - run_start; digits = 1)
+        _log_line("[progress $(step[]) | +$(elapsed)s | $(now())] $message")
+    end
 end
 
 function main(args = ARGS)
@@ -113,6 +183,8 @@ function main(args = ARGS)
             ))
         end
     end
+    run_config = YAML.load_file(config_file)
+    optimizer_attributes = _optimizer_attributes(solver_name, run_config, options)
 
     println("================================================")
     println("OpenEMPIRE.jl run")
@@ -122,25 +194,35 @@ function main(args = ARGS)
     println("Config file:  $config_file")
     println("Input format: $format")
     println("Solver:       $solver_name")
+    println("Solver attrs: $(_optimizer_attribute_summary(optimizer_attributes))")
     println("Seed:         $seed")
     println("Fixed sample: $fixed_sample_option")
     println("Optimize:     $optimize_model")
     println("Result dir:   $result_dir")
     println("Start time:   $(now())")
     println("================================================")
+    flush(stdout)
+
+    progress = _progress_logger()
+    progress("Runner initialized")
 
     build_start = time()
+    progress("Starting model build")
     emp, periods, sets, params = OpenEMPIRE.create_model(
         config_file,
         data_folder;
         optimizer,
+        optimizer_attributes,
         input_format = format,
         scenario_rng = MersenneTwister(seed),
+        progress,
     )
     build_seconds = time() - build_start
     println("Model build seconds: $(round(build_seconds; digits = 2))")
     println("Variables: $(JuMP.num_variables(emp))")
     println("Constraints: $(JuMP.num_constraints(emp; count_variable_in_set_constraints = false))")
+    flush(stdout)
+    progress("Model build finished in $(round(build_seconds; digits = 2)) seconds")
 
     termination = nothing
     objective = nothing
@@ -148,10 +230,13 @@ function main(args = ARGS)
     solve_seconds = 0.0
     if optimize_model
         solve_start = time()
+        progress("Starting solver optimization")
         JuMP.optimize!(emp)
         solve_seconds = time() - solve_start
+        progress("Solver optimization finished in $(round(solve_seconds; digits = 2)) seconds")
         termination = JuMP.termination_status(emp)
         objective = JuMP.objective_value(emp)
+        progress("Computing objective component diagnostics")
         objective_components = OpenEMPIRE.objective_component_values(
             emp,
             sets,
@@ -165,6 +250,17 @@ function main(args = ARGS)
         println("Objective components:")
         for (name, value) in pairs(objective_components)
             println("  $name: $value")
+        end
+        flush(stdout)
+        if JuMP.is_solved_and_feasible(emp)
+            progress("Writing solution CSV tables")
+            output_dir = OpenEMPIRE.write_solution_tables(result_dir, emp, sets, params, periods)
+            println("Solution CSVs written to: $output_dir")
+            flush(stdout)
+            progress("Solution CSV tables written to $output_dir")
+        else
+            println("Solution CSVs skipped because the solved model is not feasible.")
+            flush(stdout)
         end
     end
 
@@ -180,6 +276,7 @@ function main(args = ARGS)
         ["objective_component_$name=$value" for (name, value) in pairs(objective_components)]
     end
 
+    progress("Writing run summary")
     summary_path = _write_summary(
         joinpath(result_dir, "summary.txt"),
         vcat([
@@ -189,6 +286,7 @@ function main(args = ARGS)
             "config_file=$config_file",
             "input_format=$format",
             "solver=$solver_name",
+            "solver_attributes=$(_optimizer_attribute_summary(optimizer_attributes))",
             "seed=$seed",
             "fixed_sample=$fixed_sample_option",
             "optimize=$optimize_model",
@@ -203,6 +301,8 @@ function main(args = ARGS)
     )
     println("Summary written to: $summary_path")
     println("End time: $(now())")
+    flush(stdout)
+    progress("Run complete")
 
     return termination
 end

@@ -164,3 +164,75 @@ function test_python_style_operational_weights()
     @test OpenEMPIRE.operational_objective_weight(params, sp, 1, first_time, discounter) ≈
           objective_weight(sp, discounter) * op_discount * 3.0 * probability(first_time)
 end
+
+function test_write_solution_csv_tables()
+    sets = OpenEMPIRE.EmpireSets(
+        Generator = ["gas"],
+        Storage = ["battery"],
+        Technology = ["thermal"],
+        Node = ["A", "B"],
+        DirectionalLink = [("A", "B"), ("B", "A")],
+        TransmissionType = ["HVDC"],
+        TransmissionTypeOfDirectionalLink = [("A", "B", "HVDC"), ("B", "A", "HVDC")],
+        GeneratorsOfTechnology = [("thermal", "gas")],
+        GeneratorsOfNode = [("A", "gas")],
+        StoragesOfNode = [("A", "battery")],
+    )
+    periods = OpenEMPIRE.create_timestruct(1, 5, 1, 2, 0, 0, 1)
+    sp = first(strat_periods(periods))
+    first_time = first(periods)
+    params = OpenEMPIRE.EmpireParams(
+        seasonNames = ["winter"],
+        regularSeasonCount = 1,
+    )
+
+    emp = JuMP.Model(HiGHS.Optimizer)
+    JuMP.set_silent(emp)
+    OpenEMPIRE.create_variables(emp, sets, periods)
+    @constraint(emp, emp[:genInvCap]["A", "gas", sp] == 3.0)
+    @constraint(emp, emp[:genOperational]["A", "gas", first_time] == 4.0)
+    @objective(emp, Min, emp[:genInvCap]["A", "gas", sp])
+    optimize!(emp)
+
+    @test JuMP.is_solved_and_feasible(emp)
+
+    mktempdir() do result_dir
+        output_dir = OpenEMPIRE.write_solution_tables(result_dir, emp, sets, params, periods)
+        expected_files = [
+            "genInstalledCap.csv",
+            "genInvCap.csv",
+            "genOperational.csv",
+            "loadShed.csv",
+            "storCharge.csv",
+            "storDischarge.csv",
+            "storENInstalledCap.csv",
+            "storENInvCap.csv",
+            "storPWInstalledCap.csv",
+            "storPWInvCap.csv",
+            "storageOperational.csv",
+            "transmisionInvCap.csv",
+            "transmisionOperational.csv",
+            "transmissionInstalledCap.csv",
+        ]
+
+        @test sort(readdir(output_dir)) == expected_files
+        @test all(endswith(file, ".csv") for file in readdir(output_dir))
+
+        gen_inv = collect(CSV.File(joinpath(output_dir, "genInvCap.csv")))
+        @test propertynames(first(gen_inv)) == [:Node, :Generator, :Period, :genInvCap]
+        @test length(gen_inv) == 1
+        @test gen_inv[1].Node == "A"
+        @test gen_inv[1].Generator == "gas"
+        @test gen_inv[1].Period == 1
+        @test gen_inv[1].genInvCap ≈ 3.0
+
+        gen_operational = collect(CSV.File(joinpath(output_dir, "genOperational.csv")))
+        @test propertynames(first(gen_operational)) ==
+              [:Node, :Generator, :Period, :Scenario, :Season, :Hour, :genOperational]
+        @test length(gen_operational) == 2
+        @test gen_operational[1].Season == "winter"
+        @test gen_operational[1].Scenario == 1
+        @test gen_operational[1].Hour == 1
+        @test gen_operational[1].genOperational ≈ 4.0
+    end
+end

@@ -102,7 +102,7 @@ To test locally without solving:
 ```bash
 julia --project=. scripts/run_julia_empire.jl \
   --dataset=test \
-  --config=data/test_excel/testrun.yaml \
+  --config=config/testrun.yaml \
   --format=csv \
   --solver=HiGHS \
   --no-optimize
