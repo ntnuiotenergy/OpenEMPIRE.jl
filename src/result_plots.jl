@@ -38,7 +38,7 @@ function write_result_plots(
     )
     mkpath(plot_dir)
 
-    result_specs = _available_result_plot_specs(output_dir)
+    result_specs = _available_result_plot_specs(output_dir, input_dir)
     input_specs = NamedTuple[]
     if input_dir !== nothing
         input_specs = _available_input_plot_specs(input_dir)
@@ -56,13 +56,14 @@ function write_result_plots(
     dashboard_path = joinpath(plot_dir, "dashboard.html")
     n_result_specs = length(result_specs)
     result_html_plots = html_plots[1:n_result_specs]
-    input_html_plots = html_plots[(n_result_specs + 1):end]
+    input_html_plots = n_result_specs < length(html_plots) ? html_plots[(n_result_specs + 1):end] : NamedTuple[]
     _write_dashboard_html(dashboard_path, result_html_plots, input_html_plots)
     return dashboard_path
 end
 
-function _available_result_plot_specs(output_dir::AbstractString)
+function _available_result_plot_specs(output_dir::AbstractString, input_dir::Union{Nothing, AbstractString})
     specs = NamedTuple[]
+    node_coordinates = _read_node_coordinates(input_dir)
 
     gen_investment = joinpath(output_dir, "genInvCap.csv")
     if isfile(gen_investment)
@@ -161,6 +162,14 @@ function _available_result_plot_specs(output_dir::AbstractString)
             filename = "transmission_installed_capacity.html",
             note = "Shows total installed transmission capacity on each modelled corridor.",
         ))
+        map_spec = _transmission_map_spec(
+            transmission_capacity,
+            node_coordinates,
+            "Installed Transmission Capacity Map";
+            filename = "transmission_installed_capacity_map.html",
+            note = "Shows modelled interconnectors in the latest exported period. Line width is scaled by installed capacity.",
+        )
+        map_spec === nothing || push!(specs, map_spec)
     end
 
     load_shed = joinpath(output_dir, "loadShed.csv")
@@ -177,6 +186,19 @@ function _available_result_plot_specs(output_dir::AbstractString)
     end
 
     return specs
+end
+
+function _read_node_coordinates(input_dir::Union{Nothing, AbstractString})
+    coords = Dict{String, NamedTuple{(:lat, :lon), Tuple{Float64, Float64}}}()
+    input_dir === nothing && return coords
+
+    coords_path = joinpath(input_dir, "Sets", "Coords.csv")
+    isfile(coords_path) || return coords
+
+    for row in CSV.File(coords_path; normalizenames = false)
+        coords[string(row.Location)] = (lat = Float64(row.Latitude), lon = Float64(row.Longitude))
+    end
+    return coords
 end
 
 function _available_input_plot_specs(input_dir::AbstractString)
@@ -317,6 +339,75 @@ function _line_spec(
         ))
     end
     layout = _layout(title, "Period", y_title; x_values = x_labels)
+    return (filename = filename, title = title, traces = traces, layout = layout, note = note)
+end
+
+function _transmission_map_spec(
+        csv_path::AbstractString,
+        node_coordinates::Dict{String, NamedTuple{(:lat, :lon), Tuple{Float64, Float64}}},
+        title::AbstractString;
+        filename::AbstractString,
+        note::AbstractString = "",
+    )
+    isempty(node_coordinates) && return nothing
+
+    rows = collect(CSV.File(csv_path; normalizenames = false))
+    isempty(rows) && return nothing
+
+    latest_period = maximum(Int(row.Period) for row in rows)
+    period_rows = [row for row in rows if Int(row.Period) == latest_period && Float64(row.transmissionInstalledCap) > 1.0]
+    isempty(period_rows) && return nothing
+
+    nodes_on_map = Set{String}()
+    line_traces = String[]
+    max_capacity = maximum(Float64(row.transmissionInstalledCap) for row in period_rows)
+    for row in period_rows
+        from_node = string(row.FromNode)
+        to_node = string(row.ToNode)
+        from_coord = get(node_coordinates, from_node, nothing)
+        to_coord = get(node_coordinates, to_node, nothing)
+        (from_coord === nothing || to_coord === nothing) && continue
+
+        capacity = Float64(row.transmissionInstalledCap)
+        width = max(1.0, min(8.0, 1.0 + 7.0 * capacity / max_capacity))
+        push!(nodes_on_map, from_node)
+        push!(nodes_on_map, to_node)
+        push!(
+            line_traces,
+            _scattergeo_trace(
+                ;
+                lon = [from_coord.lon, to_coord.lon],
+                lat = [from_coord.lat, to_coord.lat],
+                name = "$from_node-$to_node",
+                mode = "lines",
+                line_color = "#2E86AB",
+                line_width = width,
+                text = ["$from_node-$to_node<br>Period: $latest_period<br>Installed capacity: $(round(capacity; digits = 1)) MW"],
+                hoverinfo = "text",
+            ),
+        )
+    end
+
+    isempty(line_traces) && return nothing
+
+    sorted_nodes = sort!(collect(nodes_on_map))
+    lons = [node_coordinates[node].lon for node in sorted_nodes]
+    lats = [node_coordinates[node].lat for node in sorted_nodes]
+    node_trace = _scattergeo_trace(
+        ;
+        lon = lons,
+        lat = lats,
+        name = "Nodes",
+        mode = "markers+text",
+        text = sorted_nodes,
+        marker_color = "#1f78b4",
+        marker_size = 9,
+        textposition = "bottom center",
+        hoverinfo = "text",
+    )
+
+    traces = vcat([node_trace], line_traces)
+    layout = _geo_layout("$title - Period $latest_period")
     return (filename = filename, title = title, traces = traces, layout = layout, note = note)
 end
 
@@ -496,6 +587,45 @@ function _trace(
     return "{" * join(fields, ", ") * "}"
 end
 
+function _scattergeo_trace(
+        ;
+        lon,
+        lat,
+        name::AbstractString,
+        mode::AbstractString,
+        text = nothing,
+        line_color::Union{Nothing, AbstractString} = nothing,
+        line_width::Union{Nothing, Real} = nothing,
+        marker_color::Union{Nothing, AbstractString} = nothing,
+        marker_size::Union{Nothing, Real} = nothing,
+        textposition::Union{Nothing, AbstractString} = nothing,
+        hoverinfo::Union{Nothing, AbstractString} = nothing,
+    )
+    fields = [
+        "\"type\": \"scattergeo\"",
+        "\"lon\": $(_js_array(lon))",
+        "\"lat\": $(_js_array(lat))",
+        "\"name\": $(_js_string(name))",
+        "\"mode\": $(_js_string(mode))",
+    ]
+    text === nothing || push!(fields, "\"text\": $(_js_array(text))")
+    textposition === nothing || push!(fields, "\"textposition\": $(_js_string(textposition))")
+    hoverinfo === nothing || push!(fields, "\"hoverinfo\": $(_js_string(hoverinfo))")
+    if line_color !== nothing || line_width !== nothing
+        line_fields = String[]
+        line_color === nothing || push!(line_fields, "\"color\": $(_js_string(line_color))")
+        line_width === nothing || push!(line_fields, "\"width\": $(_js_value(line_width))")
+        push!(fields, "\"line\": {" * join(line_fields, ", ") * "}")
+    end
+    if marker_color !== nothing || marker_size !== nothing
+        marker_fields = String[]
+        marker_color === nothing || push!(marker_fields, "\"color\": $(_js_string(marker_color))")
+        marker_size === nothing || push!(marker_fields, "\"size\": $(_js_value(marker_size))")
+        push!(fields, "\"marker\": {" * join(marker_fields, ", ") * "}")
+    end
+    return "{" * join(fields, ", ") * "}"
+end
+
 function _layout(
         title::AbstractString,
         x_title::AbstractString,
@@ -516,6 +646,16 @@ function _layout(
         "\"margin\": {\"l\": 70, \"r\": 20, \"t\": 70, \"b\": 70}",
     ]
     barmode === nothing || push!(fields, "\"barmode\": $(_js_string(barmode))")
+    return "{" * join(fields, ", ") * "}"
+end
+
+function _geo_layout(title::AbstractString)
+    fields = [
+        "\"title\": $(_js_string(title))",
+        "\"geo\": {\"scope\": \"europe\", \"showland\": true, \"landcolor\": \"#f5f5f5\", \"showcountries\": true, \"countrycolor\": \"#bbbbbb\", \"projection\": {\"type\": \"natural earth\"}}",
+        "\"legend\": {\"orientation\": \"h\"}",
+        "\"margin\": {\"l\": 20, \"r\": 20, \"t\": 70, \"b\": 20}",
+    ]
     return "{" * join(fields, ", ") * "}"
 end
 
