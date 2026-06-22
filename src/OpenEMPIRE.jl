@@ -19,5 +19,6 @@ include("utils.jl")
 include("model_definition.jl")
 include("user_interface.jl")
 include("results.jl")
+include("result_plots.jl")
 
 end # module OpenEMPIRE
