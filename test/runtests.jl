@@ -15,6 +15,7 @@ include("test_csv.jl")
 include("test_scenario_csv.jl")
 #include("test_interface.jl")
 include("test_timestruct.jl")
+include("test_solve.jl")
 
 @testset "Excel" begin
     test_read_excel_sets()
@@ -52,4 +53,8 @@ end
     test_variables()
     test_variable_large()
     test_constraints()
+end
+
+@testset "Solve" begin
+    test_solve()
 end
