@@ -30,6 +30,11 @@ const RESULT_SERIES_COLORS = Dict(
     "Existing" => "#9e9e9e",
 )
 
+const TRANSMISSION_TYPE_COLORS = Dict(
+    "HVAC_OverheadLine" => "#32213A",
+    "HVDC_Cable" => "#2E86AB",
+)
+
 function write_result_plots(
         result_dir::AbstractString;
         output_dir::AbstractString = joinpath(result_dir, "Output"),
@@ -64,34 +69,9 @@ end
 function _available_result_plot_specs(output_dir::AbstractString, input_dir::Union{Nothing, AbstractString})
     specs = NamedTuple[]
     node_coordinates = _read_node_coordinates(input_dir)
+    transmission_line_types = _read_transmission_line_types(input_dir)
 
     gen_investment = joinpath(output_dir, "genInvCap.csv")
-    if isfile(gen_investment)
-        push!(specs, _stacked_bar_spec(
-            gen_investment,
-            "New Generation Investment Capacity",
-            :Period,
-            :Generator,
-            :genInvCap,
-            "New investment capacity [MW]";
-            filename = "generator_investment_capacity.html",
-            series_mapper = _generator_family,
-            note = "Shows capacity the model chooses to build in each strategic period.",
-        ))
-        push!(specs, _node_investment_bar_spec(
-            gen_investment,
-            "New Generation Investment Capacity by Node",
-            :Period,
-            :Node,
-            :Generator,
-            :genInvCap,
-            "New investment capacity [MW]";
-            filename = "generator_investment_capacity_by_node.html",
-            series_mapper = _generator_family,
-            note = "Splits new generation investments by node to show where capacity is built.",
-        ))
-    end
-
     gen_capacity = joinpath(output_dir, "genInstalledCap.csv")
     if isfile(gen_capacity)
         push!(specs, _stacked_bar_spec(
@@ -107,18 +87,29 @@ function _available_result_plot_specs(output_dir::AbstractString, input_dir::Uni
         ))
     end
 
-    gen_operation = joinpath(output_dir, "genOperational.csv")
-    if isfile(gen_operation)
+    if isfile(gen_investment)
+        push!(specs, _node_investment_bar_spec(
+            gen_investment,
+            "New Generation Investment Capacity by Node",
+            :Period,
+            :Node,
+            :Generator,
+            :genInvCap,
+            "New investment capacity [MW]";
+            filename = "generator_investment_capacity_by_node.html",
+            series_mapper = _generator_family,
+            note = "Splits new generation investments by node to show where capacity is built.",
+        ))
         push!(specs, _stacked_bar_spec(
-            gen_operation,
-            "Operational Generation Over Exported Hours",
+            gen_investment,
+            "New Generation Investment Capacity",
             :Period,
             :Generator,
-            :genOperational,
-            "Sum over exported operational hours [MW-hour rows]";
-            filename = "generator_operational.html",
+            :genInvCap,
+            "New investment capacity [MW]";
+            filename = "generator_investment_capacity.html",
             series_mapper = _generator_family,
-            note = "Diagnostic plot: this sums raw exported operational rows and is not scenario/season weighted annual generation.",
+            note = "Shows capacity the model chooses to build in each strategic period.",
         ))
     end
 
@@ -152,6 +143,15 @@ function _available_result_plot_specs(output_dir::AbstractString, input_dir::Uni
 
     transmission_capacity = joinpath(output_dir, "transmissionInstalledCap.csv")
     if isfile(transmission_capacity)
+        map_spec = _transmission_map_spec(
+            transmission_capacity,
+            node_coordinates,
+            transmission_line_types,
+            "Installed Transmission Capacity Map";
+            filename = "transmission_installed_capacity_map.html",
+            note = "Shows modelled interconnectors by selected period. Line width is scaled by installed capacity and color indicates line type when available.",
+        )
+        map_spec === nothing || push!(specs, map_spec)
         push!(specs, _line_spec(
             transmission_capacity,
             "Installed Transmission Capacity",
@@ -162,14 +162,6 @@ function _available_result_plot_specs(output_dir::AbstractString, input_dir::Uni
             filename = "transmission_installed_capacity.html",
             note = "Shows total installed transmission capacity on each modelled corridor.",
         ))
-        map_spec = _transmission_map_spec(
-            transmission_capacity,
-            node_coordinates,
-            "Installed Transmission Capacity Map";
-            filename = "transmission_installed_capacity_map.html",
-            note = "Shows modelled interconnectors in the latest exported period. Line width is scaled by installed capacity.",
-        )
-        map_spec === nothing || push!(specs, map_spec)
     end
 
     load_shed = joinpath(output_dir, "loadShed.csv")
@@ -182,6 +174,21 @@ function _available_result_plot_specs(output_dir::AbstractString, input_dir::Uni
             :loadShed,
             "Sum over exported operational hours [MW-hour rows]";
             filename = "load_shed.html",
+        ))
+    end
+
+    gen_operation = joinpath(output_dir, "genOperational.csv")
+    if isfile(gen_operation)
+        push!(specs, _stacked_bar_spec(
+            gen_operation,
+            "Operational Generation Diagnostic",
+            :Period,
+            :Generator,
+            :genOperational,
+            "Sum over exported operational hours [MW-hour rows]";
+            filename = "generator_operational.html",
+            series_mapper = _generator_family,
+            note = "Diagnostic plot: this sums raw exported operational rows and is not scenario/season weighted annual generation.",
         ))
     end
 
@@ -201,8 +208,33 @@ function _read_node_coordinates(input_dir::Union{Nothing, AbstractString})
     return coords
 end
 
+function _read_transmission_line_types(input_dir::Union{Nothing, AbstractString})
+    line_types = Dict{Tuple{String, String}, String}()
+    input_dir === nothing && return line_types
+
+    line_types_path = joinpath(input_dir, "Sets", "TransmissionTypeOfDirectionalLink.csv")
+    isfile(line_types_path) || return line_types
+
+    for row in CSV.File(line_types_path; normalizenames = false)
+        from_node = string(row.FromNode)
+        to_node = string(row.ToNode)
+        line_types[(from_node, to_node)] = string(row.LineType)
+    end
+    return line_types
+end
+
 function _available_input_plot_specs(input_dir::AbstractString)
     specs = NamedTuple[]
+    node_coordinates = _read_node_coordinates(input_dir)
+    transmission_line_types = _read_transmission_line_types(input_dir)
+
+    input_transmission_map = _input_transmission_map_spec(
+        input_dir,
+        node_coordinates,
+        transmission_line_types;
+        filename = "input_transmission_map.html",
+    )
+    input_transmission_map === nothing || push!(specs, input_transmission_map)
 
     co2_price = joinpath(input_dir, "General", "CO2price.csv")
     if isfile(co2_price)
@@ -246,6 +278,108 @@ function _available_input_plot_specs(input_dir::AbstractString)
     return specs
 end
 
+function _input_transmission_map_spec(
+        input_dir::AbstractString,
+        node_coordinates::Dict{String, NamedTuple{(:lat, :lon), Tuple{Float64, Float64}}},
+        transmission_line_types::Dict{Tuple{String, String}, String};
+        filename::AbstractString,
+    )
+    isempty(node_coordinates) && return nothing
+
+    init_capacity = _read_arc_period_values(
+        joinpath(input_dir, "Transmission", "transmissionInitCap.csv"),
+        :InterconnectorLinks,
+        :ToNode,
+        :Period,
+        :TransmissionInitialCapacity,
+    )
+    max_built_capacity = _read_arc_period_values(
+        joinpath(input_dir, "Transmission", "transmissionMaxBuiltCap.csv"),
+        :InterconnectorLinks,
+        :ToNode,
+        :Period,
+        :TransmissionMaxBuiltCapacity_in_MW,
+    )
+    lengths = _read_arc_values(
+        joinpath(input_dir, "Transmission", "transmissionLength.csv"),
+        :FromNode,
+        :ToNode,
+        :lineLength_in_km,
+    )
+    efficiencies = _read_arc_values(
+        joinpath(input_dir, "Transmission", "lineEfficiency.csv"),
+        :FromNode,
+        :ToNode,
+        :lineEfficiency,
+    )
+
+    isempty(transmission_line_types) && return nothing
+    traces = String[]
+    nodes_on_map = Set{String}()
+    line_traces = String[]
+    periods = sort!(collect(unique(period for (_, _, period) in keys(init_capacity))))
+    period = isempty(periods) ? 1 : first(periods)
+    max_capacity = maximum(vcat(collect(values(init_capacity)), collect(values(max_built_capacity)), [1.0]))
+    corridors = sort!(collect(unique(_corridor_key(from_node, to_node) for (from_node, to_node) in keys(transmission_line_types))))
+    for (from_node, to_node) in corridors
+        from_coord = get(node_coordinates, from_node, nothing)
+        to_coord = get(node_coordinates, to_node, nothing)
+        (from_coord === nothing || to_coord === nothing) && continue
+
+        line_type = _line_type_for_corridor(transmission_line_types, from_node, to_node)
+        initial = _value_for_corridor_period(init_capacity, from_node, to_node, period)
+        max_built = _value_for_corridor_period(max_built_capacity, from_node, to_node, period)
+        length = _value_for_corridor(lengths, from_node, to_node)
+        efficiency = _value_for_corridor(efficiencies, from_node, to_node)
+        width_basis = max(initial, max_built)
+        width = max(1.0, min(8.0, 1.0 + 7.0 * width_basis / max_capacity))
+
+        push!(nodes_on_map, from_node)
+        push!(nodes_on_map, to_node)
+        push!(
+            line_traces,
+            _scattergeo_trace(
+                ;
+                lon = [from_coord.lon, to_coord.lon],
+                lat = [from_coord.lat, to_coord.lat],
+                name = "$from_node-$to_node",
+                mode = "lines",
+                line_color = _transmission_type_color(line_type),
+                line_width = width,
+                text = ["$from_node-$to_node<br>Type: $line_type<br>Initial capacity: $(_format_value(initial)) MW<br>Max build capacity: $(_format_value(max_built)) MW<br>Length: $(_format_value(length)) km<br>Efficiency: $(_format_value(efficiency))"],
+                hoverinfo = "text",
+            ),
+        )
+    end
+
+    isempty(line_traces) && return nothing
+
+    sorted_nodes = sort!(collect(nodes_on_map))
+    node_trace = _scattergeo_trace(
+        ;
+        lon = [node_coordinates[node].lon for node in sorted_nodes],
+        lat = [node_coordinates[node].lat for node in sorted_nodes],
+        name = "Nodes",
+        mode = "markers+text",
+        text = sorted_nodes,
+        marker_color = "#1f78b4",
+        marker_size = 9,
+        textposition = "bottom center",
+        hoverinfo = "text",
+    )
+
+    traces = vcat([node_trace], line_traces)
+    title = "Input Transmission Assumptions"
+    layout = _geo_layout(title)
+    return (
+        filename = filename,
+        title = title,
+        traces = traces,
+        layout = layout,
+        note = "Shows input transmission assumptions. Line width is scaled by initial or maximum build capacity from the first input period.",
+    )
+end
+
 function _stacked_bar_spec(
         csv_path::AbstractString,
         title::AbstractString,
@@ -264,7 +398,16 @@ function _stacked_bar_spec(
     traces = String[]
     for series in series_values
         y_values = [get(grouped, (x, series), 0.0) for x in x_values]
-        push!(traces, _trace(; x = x_labels, y = y_values, name = series, type = "bar", color = _series_color(series)))
+        _has_nonzero(y_values) || continue
+        push!(traces, _trace(
+            ;
+            x = x_labels,
+            y = y_values,
+            name = series,
+            type = "bar",
+            color = _series_color(series),
+            hovertemplate = _hover_template(y_title),
+        ))
     end
     layout = _layout(title, "Period", y_title; barmode = "stack", x_values = x_labels)
     return (filename = filename, title = title, traces = traces, layout = layout, note = note)
@@ -298,7 +441,16 @@ function _node_investment_bar_spec(
     traces = String[]
     for series in series_values
         y_values = [get(grouped, (period, node, series), 0.0) for (period, node) in period_nodes]
-        push!(traces, _trace(; x = x_labels, y = y_values, name = series, type = "bar", color = _series_color(series)))
+        _has_nonzero(y_values) || continue
+        push!(traces, _trace(
+            ;
+            x = x_labels,
+            y = y_values,
+            name = series,
+            type = "bar",
+            color = _series_color(series),
+            hovertemplate = _hover_template(y_title),
+        ))
     end
 
     layout = _layout(title, "Period / Node", y_title; barmode = "stack", x_values = x_labels)
@@ -328,6 +480,7 @@ function _line_spec(
     traces = String[]
     for series in series_values
         y_values = [get(grouped, (x, series), 0.0) for x in x_values]
+        _has_nonzero(y_values) || continue
         push!(traces, _trace(
             ;
             x = x_labels,
@@ -336,6 +489,7 @@ function _line_spec(
             type = "scatter",
             mode = "lines+markers",
             color = _series_color(series),
+            hovertemplate = _hover_template(y_title),
         ))
     end
     layout = _layout(title, "Period", y_title; x_values = x_labels)
@@ -345,6 +499,7 @@ end
 function _transmission_map_spec(
         csv_path::AbstractString,
         node_coordinates::Dict{String, NamedTuple{(:lat, :lon), Tuple{Float64, Float64}}},
+        transmission_line_types::Dict{Tuple{String, String}, String},
         title::AbstractString;
         filename::AbstractString,
         note::AbstractString = "",
@@ -354,61 +509,101 @@ function _transmission_map_spec(
     rows = collect(CSV.File(csv_path; normalizenames = false))
     isempty(rows) && return nothing
 
-    latest_period = maximum(Int(row.Period) for row in rows)
-    period_rows = [row for row in rows if Int(row.Period) == latest_period && Float64(row.transmissionInstalledCap) > 1.0]
-    isempty(period_rows) && return nothing
+    periods = sort!(collect(unique(Int(row.Period) for row in rows)))
+    max_capacity = maximum(Float64(row.transmissionInstalledCap) for row in rows)
+    latest_period = maximum(periods)
 
-    nodes_on_map = Set{String}()
-    line_traces = String[]
-    max_capacity = maximum(Float64(row.transmissionInstalledCap) for row in period_rows)
+    traces = String[]
+    period_trace_indices = Dict{Int, Vector{Int}}()
+    for period in periods
+        period_rows = [row for row in rows if Int(row.Period) == period && Float64(row.transmissionInstalledCap) > 1.0]
+        isempty(period_rows) && continue
+
+        visible = period == latest_period
+        corridors = _transmission_corridors(period_rows, transmission_line_types)
+        isempty(corridors) && continue
+
+        period_indices = Int[]
+        nodes_on_map = Set{String}()
+        line_traces = String[]
+        for corridor in corridors
+            from_node = corridor.from_node
+            to_node = corridor.to_node
+            from_coord = get(node_coordinates, from_node, nothing)
+            to_coord = get(node_coordinates, to_node, nothing)
+            (from_coord === nothing || to_coord === nothing) && continue
+
+            capacity = corridor.capacity
+            line_type = corridor.line_type
+            width = max(1.0, min(8.0, 1.0 + 7.0 * capacity / max_capacity))
+            push!(nodes_on_map, from_node)
+            push!(nodes_on_map, to_node)
+            push!(
+                line_traces,
+                _scattergeo_trace(
+                    ;
+                    lon = [from_coord.lon, to_coord.lon],
+                    lat = [from_coord.lat, to_coord.lat],
+                    name = "$from_node-$to_node",
+                    mode = "lines",
+                    line_color = _transmission_type_color(line_type),
+                    line_width = width,
+                    text = ["$from_node-$to_node<br>Type: $line_type<br>Period: $period<br>Installed capacity: $(round(capacity; digits = 1)) MW"],
+                    hoverinfo = "text",
+                    visible,
+                ),
+            )
+        end
+
+        isempty(line_traces) && continue
+
+        sorted_nodes = sort!(collect(nodes_on_map))
+        lons = [node_coordinates[node].lon for node in sorted_nodes]
+        lats = [node_coordinates[node].lat for node in sorted_nodes]
+        node_trace = _scattergeo_trace(
+            ;
+            lon = lons,
+            lat = lats,
+            name = "Nodes",
+            mode = "markers+text",
+            text = sorted_nodes,
+            marker_color = "#1f78b4",
+            marker_size = 9,
+            textposition = "bottom center",
+            hoverinfo = "text",
+            visible,
+        )
+
+        push!(traces, node_trace)
+        push!(period_indices, length(traces))
+        for trace in line_traces
+            push!(traces, trace)
+            push!(period_indices, length(traces))
+        end
+        period_trace_indices[period] = period_indices
+    end
+
+    isempty(traces) && return nothing
+
+    visible_periods = sort!(collect(keys(period_trace_indices)))
+    layout = _geo_layout("$title - Period $latest_period", visible_periods, period_trace_indices, length(traces), title, latest_period)
+    return (filename = filename, title = title, traces = traces, layout = layout, note = note)
+end
+
+function _transmission_corridors(period_rows, transmission_line_types::Dict{Tuple{String, String}, String})
+    corridors = Dict{Tuple{String, String}, NamedTuple{(:from_node, :to_node, :capacity, :line_type), Tuple{String, String, Float64, String}}}()
     for row in period_rows
         from_node = string(row.FromNode)
         to_node = string(row.ToNode)
-        from_coord = get(node_coordinates, from_node, nothing)
-        to_coord = get(node_coordinates, to_node, nothing)
-        (from_coord === nothing || to_coord === nothing) && continue
-
+        from_to = from_node <= to_node ? (from_node, to_node) : (to_node, from_node)
+        line_type = get(transmission_line_types, (from_node, to_node), get(transmission_line_types, (to_node, from_node), "Unknown"))
         capacity = Float64(row.transmissionInstalledCap)
-        width = max(1.0, min(8.0, 1.0 + 7.0 * capacity / max_capacity))
-        push!(nodes_on_map, from_node)
-        push!(nodes_on_map, to_node)
-        push!(
-            line_traces,
-            _scattergeo_trace(
-                ;
-                lon = [from_coord.lon, to_coord.lon],
-                lat = [from_coord.lat, to_coord.lat],
-                name = "$from_node-$to_node",
-                mode = "lines",
-                line_color = "#2E86AB",
-                line_width = width,
-                text = ["$from_node-$to_node<br>Period: $latest_period<br>Installed capacity: $(round(capacity; digits = 1)) MW"],
-                hoverinfo = "text",
-            ),
-        )
+        current = get(corridors, from_to, nothing)
+        if current === nothing || capacity > current.capacity
+            corridors[from_to] = (from_node = from_to[1], to_node = from_to[2], capacity = capacity, line_type = line_type)
+        end
     end
-
-    isempty(line_traces) && return nothing
-
-    sorted_nodes = sort!(collect(nodes_on_map))
-    lons = [node_coordinates[node].lon for node in sorted_nodes]
-    lats = [node_coordinates[node].lat for node in sorted_nodes]
-    node_trace = _scattergeo_trace(
-        ;
-        lon = lons,
-        lat = lats,
-        name = "Nodes",
-        mode = "markers+text",
-        text = sorted_nodes,
-        marker_color = "#1f78b4",
-        marker_size = 9,
-        textposition = "bottom center",
-        hoverinfo = "text",
-    )
-
-    traces = vcat([node_trace], line_traces)
-    layout = _geo_layout("$title - Period $latest_period")
-    return (filename = filename, title = title, traces = traces, layout = layout, note = note)
+    return sort!(collect(values(corridors)); by = corridor -> (corridor.from_node, corridor.to_node))
 end
 
 function _single_line_spec(
@@ -428,7 +623,7 @@ function _single_line_spec(
     sort!(points)
     x_labels = string.(first.(points))
     y_values = last.(points)
-    traces = [_trace(; x = x_labels, y = y_values, name = series_name, type = "scatter", mode = "lines+markers")]
+    traces = [_trace(; x = x_labels, y = y_values, name = series_name, type = "scatter", mode = "lines+markers", hovertemplate = _hover_template(y_title))]
     layout = _layout(title, "Period", y_title; x_values = x_labels)
     return (filename = filename, title = title, traces = traces, layout = layout, note = note)
 end
@@ -455,7 +650,16 @@ function _multi_series_bar_spec(
     traces = String[]
     for series in series_values
         y_values = [get(grouped, (x, series), 0.0) for x in x_values]
-        push!(traces, _trace(; x = x_labels, y = y_values, name = series, type = "bar", color = _series_color(_generator_family(series))))
+        _has_nonzero(y_values) || continue
+        push!(traces, _trace(
+            ;
+            x = x_labels,
+            y = y_values,
+            name = series,
+            type = "bar",
+            color = _series_color(_generator_family(series)),
+            hovertemplate = _hover_template(y_title),
+        ))
     end
 
     layout = _layout(title, "Period", y_title; barmode = "group", x_values = x_labels)
@@ -484,7 +688,16 @@ function _node_technology_bar_spec(
     traces = String[]
     for series in series_values
         y_values = [get(grouped, (node, series), 0.0) for node in nodes]
-        push!(traces, _trace(; x = nodes, y = y_values, name = series, type = "bar", color = _series_color(series)))
+        _has_nonzero(y_values) || continue
+        push!(traces, _trace(
+            ;
+            x = nodes,
+            y = y_values,
+            name = series,
+            type = "bar",
+            color = _series_color(series),
+            hovertemplate = _hover_template(y_title),
+        ))
     end
 
     layout = _layout(title, "Node", y_title; barmode = "stack", x_values = nodes)
@@ -504,6 +717,51 @@ function _group_sum(
         grouped[key] = get(grouped, key, 0.0) + Float64(row[value_col])
     end
     return grouped
+end
+
+function _read_arc_period_values(
+        csv_path::AbstractString,
+        from_col::Symbol,
+        to_col::Symbol,
+        period_col::Symbol,
+        value_col::Symbol,
+    )
+    values = Dict{Tuple{String, String, Int}, Float64}()
+    isfile(csv_path) || return values
+
+    for row in CSV.File(csv_path; normalizenames = false)
+        from_node = string(row[from_col])
+        to_node = string(row[to_col])
+        period = Int(row[period_col])
+        values[(from_node, to_node, period)] = Float64(row[value_col])
+    end
+    return values
+end
+
+function _read_arc_values(csv_path::AbstractString, from_col::Symbol, to_col::Symbol, value_col::Symbol)
+    values = Dict{Tuple{String, String}, Float64}()
+    isfile(csv_path) || return values
+
+    for row in CSV.File(csv_path; normalizenames = false)
+        values[(string(row[from_col]), string(row[to_col]))] = Float64(row[value_col])
+    end
+    return values
+end
+
+function _corridor_key(from_node::AbstractString, to_node::AbstractString)
+    return from_node <= to_node ? (String(from_node), String(to_node)) : (String(to_node), String(from_node))
+end
+
+function _value_for_corridor_period(values::Dict{Tuple{String, String, Int}, Float64}, from_node::AbstractString, to_node::AbstractString, period::Integer)
+    return get(values, (String(from_node), String(to_node), Int(period)), get(values, (String(to_node), String(from_node), Int(period)), 0.0))
+end
+
+function _value_for_corridor(values::Dict{Tuple{String, String}, Float64}, from_node::AbstractString, to_node::AbstractString)
+    return get(values, (String(from_node), String(to_node)), get(values, (String(to_node), String(from_node)), 0.0))
+end
+
+function _line_type_for_corridor(transmission_line_types::Dict{Tuple{String, String}, String}, from_node::AbstractString, to_node::AbstractString)
+    return get(transmission_line_types, (String(from_node), String(to_node)), get(transmission_line_types, (String(to_node), String(from_node)), "Unknown"))
 end
 
 function _generator_family(generator::AbstractString)
@@ -543,6 +801,31 @@ function _series_color(series::AbstractString)
     return get(RESULT_SERIES_COLORS, series, _fallback_color(series))
 end
 
+function _transmission_type_color(line_type::AbstractString)
+    return get(TRANSMISSION_TYPE_COLORS, line_type, "#2E86AB")
+end
+
+function _has_nonzero(values)
+    return any(value -> abs(Float64(value)) > 1.0e-9, values)
+end
+
+function _hover_template(y_title::AbstractString)
+    unit = _unit_suffix(y_title)
+    value = isempty(unit) ? "%{y:,.1f}" : "%{y:,.1f} $unit"
+    return "%{x}<br>%{fullData.name}: $value<extra></extra>"
+end
+
+function _unit_suffix(y_title::AbstractString)
+    start_index = findfirst('[', y_title)
+    end_index = findfirst(']', y_title)
+    (start_index === nothing || end_index === nothing || end_index <= start_index) && return ""
+    return y_title[nextind(y_title, start_index):prevind(y_title, end_index)]
+end
+
+function _format_value(value::Real)
+    return string(round(Float64(value); digits = 2))
+end
+
 function _fallback_color(series::AbstractString)
     palette = (
         "#1f77b4",
@@ -568,6 +851,7 @@ function _trace(
         type::AbstractString,
         mode::Union{Nothing, AbstractString} = nothing,
         color::Union{Nothing, AbstractString} = nothing,
+        hovertemplate::Union{Nothing, AbstractString} = nothing,
     )
     fields = [
         "\"x\": $(_js_array(x))",
@@ -576,6 +860,7 @@ function _trace(
         "\"type\": $(_js_string(type))",
     ]
     mode === nothing || push!(fields, "\"mode\": $(_js_string(mode))")
+    hovertemplate === nothing || push!(fields, "\"hovertemplate\": $(_js_string(hovertemplate))")
     if color !== nothing
         if type == "bar"
             push!(fields, "\"marker\": {\"color\": $(_js_string(color))}")
@@ -600,6 +885,7 @@ function _scattergeo_trace(
         marker_size::Union{Nothing, Real} = nothing,
         textposition::Union{Nothing, AbstractString} = nothing,
         hoverinfo::Union{Nothing, AbstractString} = nothing,
+        visible::Bool = true,
     )
     fields = [
         "\"type\": \"scattergeo\"",
@@ -611,6 +897,7 @@ function _scattergeo_trace(
     text === nothing || push!(fields, "\"text\": $(_js_array(text))")
     textposition === nothing || push!(fields, "\"textposition\": $(_js_string(textposition))")
     hoverinfo === nothing || push!(fields, "\"hoverinfo\": $(_js_string(hoverinfo))")
+    visible || push!(fields, "\"visible\": false")
     if line_color !== nothing || line_width !== nothing
         line_fields = String[]
         line_color === nothing || push!(line_fields, "\"color\": $(_js_string(line_color))")
@@ -649,14 +936,59 @@ function _layout(
     return "{" * join(fields, ", ") * "}"
 end
 
-function _geo_layout(title::AbstractString)
+function _geo_layout(
+        title::AbstractString,
+        periods::AbstractVector{<:Integer} = Int[],
+        period_trace_indices::Dict{Int, Vector{Int}} = Dict{Int, Vector{Int}}(),
+        trace_count::Integer = 0,
+        base_title::AbstractString = title,
+        active_period::Integer = isempty(periods) ? 0 : last(periods),
+    )
+    updatemenus = isempty(periods) ? nothing : _period_dropdown(periods, period_trace_indices, trace_count, base_title, active_period)
     fields = [
         "\"title\": $(_js_string(title))",
         "\"geo\": {\"scope\": \"europe\", \"showland\": true, \"landcolor\": \"#f5f5f5\", \"showcountries\": true, \"countrycolor\": \"#bbbbbb\", \"projection\": {\"type\": \"natural earth\"}}",
         "\"legend\": {\"orientation\": \"h\"}",
         "\"margin\": {\"l\": 20, \"r\": 20, \"t\": 70, \"b\": 20}",
     ]
+    updatemenus === nothing || push!(fields, "\"updatemenus\": $updatemenus")
     return "{" * join(fields, ", ") * "}"
+end
+
+function _period_dropdown(
+        periods::AbstractVector{<:Integer},
+        period_trace_indices::Dict{Int, Vector{Int}},
+        trace_count::Integer,
+        base_title::AbstractString,
+        active_period::Integer,
+    )
+    buttons = String[]
+    for period in periods
+        visible = falses(trace_count)
+        for trace_index in get(period_trace_indices, Int(period), Int[])
+            visible[trace_index] = true
+        end
+        push!(
+            buttons,
+            "{" *
+            join([
+                "\"label\": $(_js_string("Period $period"))",
+                "\"method\": \"update\"",
+                "\"args\": [{\"visible\": $(_js_array(visible))}, {\"title\": $(_js_string("$base_title - Period $period"))}]",
+            ], ", ") *
+            "}",
+        )
+    end
+    return "[" * "{" * join([
+        "\"buttons\": [" * join(buttons, ", ") * "]",
+        "\"direction\": \"down\"",
+        "\"showactive\": true",
+        "\"active\": $(findfirst(==(active_period), periods) - 1)",
+        "\"x\": 0.02",
+        "\"xanchor\": \"left\"",
+        "\"y\": 1.08",
+        "\"yanchor\": \"top\"",
+    ], ", ") * "}" * "]"
 end
 
 function _write_plotly_html(path::AbstractString, title::AbstractString, traces, layout::AbstractString)
