@@ -547,6 +547,61 @@ function test_create_model_with_raw_csv_scenarios()
     end
 end
 
+function test_write_scenario_sampling_key_artifacts()
+    mktempdir() do root
+        dataset = joinpath(root, "dataset")
+        scenario_dir = joinpath(dataset, "ScenarioData")
+        sampling_key = _write_csv(
+            joinpath(scenario_dir, "sampling_key.csv"),
+            """
+Period,Scenario,Season,Year,Month,Hour
+1,1,winter,2020,1,4
+""",
+        )
+        _write_csv(joinpath(scenario_dir, "sloadRaw.csv"), "Node,Operationalhour,Scenario,Period,ElectricLoadRaw_in_MW\n")
+
+        config = Dict(
+            "use_scenario_generation" => true,
+            "use_fixed_sample" => false,
+            "number_of_scenarios" => 1,
+            "length_of_regular_season" => 24,
+            "regular_seasons" => ["winter"],
+        )
+        config_file = joinpath(root, "run.yaml")
+        YAML.write_file(config_file, config)
+
+        result_dir = joinpath(root, "results")
+        archived_key = OpenEMPIRE.write_scenario_artifacts(
+            result_dir,
+            dataset,
+            config;
+            config_file = config_file,
+            dataset = "dataset",
+            input_format = :csv,
+            seed = 11,
+        )
+
+        expected_key = joinpath(result_dir, "Input", "ScenarioData", "sampling_key.csv")
+        @test archived_key == expected_key
+        @test read(expected_key, String) == read(sampling_key, String)
+        @test isfile(joinpath(result_dir, "Input", "config.yaml"))
+
+        metadata = YAML.load_file(joinpath(result_dir, "Input", "scenario_metadata.yaml"))
+        @test metadata["dataset"] == "dataset"
+        @test metadata["seed"] == 11
+        @test metadata["input_format"] == "csv"
+        @test metadata["use_scenario_generation"] == true
+        @test metadata["use_fixed_sample"] == false
+        @test metadata["archived_sampling_key"] == joinpath("Input", "ScenarioData", "sampling_key.csv")
+        @test metadata["generated_scenario_files_present"]["sloadRaw.csv"] == true
+
+        disabled_result = joinpath(root, "disabled")
+        disabled_config = merge(config, Dict("use_scenario_generation" => false))
+        @test OpenEMPIRE.write_scenario_artifacts(disabled_result, dataset, disabled_config) === nothing
+        @test !ispath(joinpath(disabled_result, "Input", "ScenarioData", "sampling_key.csv"))
+    end
+end
+
 function test_create_model_accepts_optimizer_type()
     mktempdir() do root
         dataset = joinpath(root, "test")
@@ -621,5 +676,148 @@ function test_create_model_adds_storage_max_constraints()
         @test _sparse_axis_length(emp[:storage_max_inst_pow]) == expected
         @test _sparse_axis_length(emp[:storage_max_inst_en]) == expected
         @test JuMP.num_constraints(emp; count_variable_in_set_constraints = false) == 81190
+    end
+end
+
+function test_emission_constraints_match_python_formulation()
+    sets = OpenEMPIRE.EmpireSets(
+        Generator = ["gas", "wind"],
+        Technology = ["thermal", "renewable"],
+        Node = ["A"],
+        GeneratorsOfNode = [("A", "gas"), ("A", "wind")],
+        GeneratorsOfTechnology = [("thermal", "gas"), ("renewable", "wind")],
+    )
+    periods = OpenEMPIRE.create_timestruct(1, 5, 2, 2, 0, 0, 2)
+    sp = first(strat_periods(periods))
+    representatives = collect(repr_periods(sp))
+    winter_scenarios = collect(opscenarios(first(representatives)))
+    winter_scenario_1 = first(winter_scenarios[1])
+    winter_scenario_2 = first(winter_scenarios[2])
+
+    params = OpenEMPIRE.EmpireParams(
+        CO2cap = StrategicProfile([0.001]),
+        genCO2Content = Dict("gas" => 0.2, "wind" => 0.0),
+        genEfficiency = Dict(
+            "gas" => StrategicProfile([0.5]),
+            "wind" => StrategicProfile([1.0]),
+        ),
+        seasonNames = ["winter", "spring"],
+    )
+
+    emp = JuMP.Model()
+    OpenEMPIRE.create_variables(emp, sets, periods)
+    OpenEMPIRE.create_emission_constraints(emp, sets, params, periods)
+
+    emission_cap_1 = emp[:emission_cap][sp, 1]
+    node_emission_1 = emp[:node_emission]["A", sp, 1]
+    node_emission_2 = emp[:node_emission]["A", sp, 2]
+    gas_coefficient = multiple_strat(sp, winter_scenario_1) * 0.2 * (3.6 / 0.5)
+
+    @test JuMP.normalized_coefficient(
+        emission_cap_1,
+        emp[:nodeEmission]["A", sp, 1],
+    ) == 1.0
+    @test JuMP.normalized_coefficient(
+        node_emission_1,
+        emp[:nodeEmission]["A", sp, 1],
+    ) == 1.0
+    @test JuMP.normalized_coefficient(
+        node_emission_1,
+        emp[:genOperational]["A", "gas", winter_scenario_1],
+    ) ≈ -gas_coefficient
+    @test JuMP.normalized_coefficient(
+        node_emission_1,
+        emp[:genOperational]["A", "wind", winter_scenario_1],
+    ) == 0.0
+    @test JuMP.normalized_coefficient(
+        node_emission_1,
+        emp[:genOperational]["A", "gas", winter_scenario_2],
+    ) == 0.0
+    @test JuMP.normalized_coefficient(
+        node_emission_2,
+        emp[:genOperational]["A", "gas", winter_scenario_2],
+    ) ≈ -gas_coefficient
+    @test JuMP.normalized_rhs(emission_cap_1) ≈ 1000.0
+end
+
+function test_native_dual_weight_normalization()
+    periods = OpenEMPIRE.create_timestruct(2, 5, 1, 2, 0, 0, 2)
+    sp = collect(strat_periods(periods))[2]
+    t = first(first(opscenarios(first(repr_periods(sp)))))
+    discounter = Discounter(0.05, 1, periods)
+    operational_weight = objective_weight(t, discounter; type = "avg_year")
+    strategic_weight = objective_weight(sp, discounter)
+
+    flow_model = JuMP.Model(HiGHS.Optimizer)
+    JuMP.set_silent(flow_model)
+    @variable(flow_model, flow >= 0)
+    @constraint(flow_model, flow_balance[n in ["A"], time in [t]], flow >= 1)
+    @objective(flow_model, Min, operational_weight * flow)
+    optimize!(flow_model)
+
+    @test JuMP.is_solved_and_feasible(flow_model)
+    @test OpenEMPIRE._flow_balance_price(flow_model, "A", sp, t, discounter) ≈
+          strategic_weight
+
+    params = OpenEMPIRE.EmpireParams(CO2cap = StrategicProfile([1.0, 1.0]))
+    annual_multiple = multiple_strat(sp, t)
+    emission_model = JuMP.Model(HiGHS.Optimizer)
+    JuMP.set_silent(emission_model)
+    @variable(emission_model, generation >= 0)
+    @constraint(
+        emission_model,
+        emission_cap[strategic_period in [sp], scenario in 1:1],
+        annual_multiple * generation <= annual_multiple,
+    )
+    @objective(emission_model, Min, -operational_weight * generation)
+    optimize!(emission_model)
+
+    @test JuMP.is_solved_and_feasible(emission_model)
+    @test OpenEMPIRE._emission_price(
+        emission_model,
+        params,
+        sp,
+        1,
+        t,
+        discounter,
+    ) ≈ -strategic_weight
+end
+
+function test_create_model_respects_emission_cap_config()
+    mktempdir() do root
+        dataset = joinpath(root, "test")
+        cp(joinpath(pkgdir(OpenEMPIRE), "data", "test"), dataset)
+
+        base_config = YAML.load_file(joinpath(pkgdir(OpenEMPIRE), "data", "test_excel", "testrun.yaml"))
+
+        false_config = joinpath(root, "emission_cap_false.yaml")
+        base_config["use_emission_cap"] = false
+        YAML.write_file(false_config, base_config)
+        emp_false, _, _, params_false = OpenEMPIRE.create_model(
+            false_config,
+            dataset;
+            input_format = :csv,
+            scenario_rng = MersenneTwister(1),
+        )
+
+        @test params_false.CO2cap === nothing
+        @test params_false.CO2price !== nothing
+        @test !haskey(JuMP.object_dictionary(emp_false), :emission_cap)
+
+        true_config = joinpath(root, "emission_cap_true.yaml")
+        base_config["use_emission_cap"] = true
+        YAML.write_file(true_config, base_config)
+        emp_true, periods, _, params_true = OpenEMPIRE.create_model(
+            true_config,
+            dataset;
+            input_format = :csv,
+            scenario_rng = MersenneTwister(1),
+        )
+
+        @test params_true.CO2cap !== nothing
+        @test params_true.CO2price === nothing
+        @test haskey(JuMP.object_dictionary(emp_true), :emission_cap)
+        expected = length(strat_periods(periods)) * base_config["number_of_scenarios"]
+        @test _sparse_axis_length(emp_true[:emission_cap]) == expected
     end
 end

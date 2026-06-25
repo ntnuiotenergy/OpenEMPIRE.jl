@@ -221,15 +221,19 @@ function preprocess_stoch_load(params::EmpireParams, sets, periods)
         repr_profiles = RepresentativeProfile[]
         for sp in strat_periods(periods)
             representatives = collect(repr_periods(sp))
+            # Match Python (empire.py): the annual-demand normalization denominator is summed
+            # over REGULAR seasons only. Peak seasons are excluded here (the resulting factor
+            # is still applied to peak hours below). Including peaks would inflate the
+            # denominator and scale every load down (~0.7% on europe_v51), because peak hours
+            # carry above-average demand.
             regular_count = regular_season_count(params, length(representatives))
-            load_raw = 0.0
-            for (representative_index, rp) in enumerate(representatives)
-                representative_index > regular_count && break
-                scale = season_scale(params, representative_index)
-                for sc in opscenarios(rp), t in sc
-                    load_raw += probability(t) * scale * params.sloadRaw[n][t]
-                end
-            end
+            regular_reps = representatives[1:regular_count]
+            load_raw = sum(
+                multiple_strat(sp, t) * probability(t) * params.sloadRaw[n][t]
+                for rp in regular_reps
+                for sc in opscenarios(rp)
+                for t in sc
+            )
             scale_factor = 0.0
             if haskey(params.sloadAnnualDemand, n)
                 scale_factor = params.sloadAnnualDemand[n][sp] / load_raw

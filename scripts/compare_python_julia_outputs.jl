@@ -28,11 +28,11 @@ const TABLE_SPECS = (
         value_col = :genInstalledCap,
     ),
     (
-        name = "transmisionInvCap",
+        name = "transmissionInvCap",
         python_file = "transmisionInvCap.tab",
-        julia_file = "transmisionInvCap.csv",
+        julia_file = "transmissionInvCap.csv",
         key_cols = (:FromNode, :ToNode, :Period),
-        value_col = :transmisionInvCap,
+        value_col = :transmissionInvCap,
     ),
     (
         name = "transmissionInstalledCap",
@@ -71,6 +71,85 @@ const TABLE_SPECS = (
     ),
 )
 
+const REPORT_SPECS = (
+    (
+        name = "results_output_gen",
+        python_file = "results_output_gen.csv",
+        julia_file = "results_output_gen.csv",
+        key_cols = (:Node, :GeneratorType, :Period),
+    ),
+    (
+        name = "results_output_stor",
+        python_file = "results_output_stor.csv",
+        julia_file = "results_output_stor.csv",
+        key_cols = (:Node, :StorageType, :Period),
+    ),
+    (
+        name = "results_output_transmission",
+        python_file = "results_output_transmision.csv",
+        julia_file = "results_output_transmission.csv",
+        key_cols = (:BetweenNode, :AndNode, :Period),
+    ),
+    (
+        name = "results_output_transmission_operational",
+        python_file = "results_output_transmision_operational.csv",
+        julia_file = "results_output_transmission_operational.csv",
+        key_cols = (:FromNode, :ToNode, :Period, :Season, :Scenario, :Hour),
+    ),
+    (
+        name = "results_output_Operational",
+        python_file = "results_output_Operational.csv",
+        julia_file = "results_output_Operational.csv",
+        key_cols = (:Node, :Period, :Scenario, :Season, :Hour),
+    ),
+    (
+        name = "results_output_curtailed_operational",
+        python_file = "results_output_curtailed_operational.csv",
+        julia_file = "results_output_curtailed_operational.csv",
+        key_cols = (:Node, :Period, :Scenario, :Season, :Hour, :RESGeneratorType),
+    ),
+    (
+        name = "results_output_curtailed_prod",
+        python_file = "results_output_curtailed_prod.csv",
+        julia_file = "results_output_curtailed_prod.csv",
+        key_cols = (:Node, :RESGeneratorType, :Period),
+    ),
+    (
+        name = "results_output_EuropeSummary",
+        python_file = "results_output_EuropeSummary.csv",
+        julia_file = "results_output_EuropeSummary.csv",
+        key_cols = (:Period, :Scenario),
+    ),
+    (
+        name = "marginal_costs",
+        python_file = "marginal_costs.csv",
+        julia_file = "marginal_costs.csv",
+        key_cols = (:Generator, :Period),
+    ),
+    (
+        name = "investment_costs",
+        python_file = "investment_costs.csv",
+        julia_file = "investment_costs.csv",
+        key_cols = (:Generator, :Period),
+    ),
+)
+
+const WIDE_REPORT_SPECS = (
+    (
+        name = "results_output_EuropePlot",
+        python_file = "results_output_EuropePlot.csv",
+        julia_file = "results_output_EuropePlot.csv",
+    ),
+)
+
+const COLUMN_ALIASES = Dict{Symbol, Symbol}(
+    :transmisionInvCap => :transmissionInvCap,
+    :transmisionInvCap_MW => :transmissionInvCap_MW,
+    :transmisionExpectedAnnualVolume_GWh => :transmissionExpectedAnnualVolume_GWh,
+    :TransmissionRecieved_MW => :TransmissionReceived_MW,
+    :storENInstalledCap_MW => :storENInstalledCap_MWh,
+)
+
 function _parse_args(args)
     options = Dict{String, String}(
         "python-output" => DEFAULT_PYTHON_OUTPUT,
@@ -102,7 +181,7 @@ function _usage()
     Usage:
       julia --project=. scripts/compare_python_julia_outputs.jl \\
         --python-output=../OpenEMPIRE-csv/Results/basic_run/dataset_test/Output \\
-        --julia-output=results/julia_runs/<timestamp>_test/Output
+        --julia-output=results/julia_runs/<timestamp>_test/output
 
     Optional:
       --report-dir=<path>  Defaults to <julia-output>/comparison
@@ -125,7 +204,7 @@ function _latest_julia_output(root::AbstractString = joinpath("results", "julia_
     isdir(root) || return ""
     candidates = String[]
     for entry in readdir(root; join = true)
-        output_dir = joinpath(entry, "Output")
+        output_dir = joinpath(entry, "output")
         isdir(output_dir) && push!(candidates, output_dir)
     end
     isempty(candidates) && return ""
@@ -136,9 +215,14 @@ end
 function _header_map(row)
     mapping = Dict{Symbol, Symbol}()
     for name in propertynames(row)
-        mapping[Symbol(strip(String(name)))] = name
+        mapping[_canonical_col(name)] = name
     end
     return mapping
+end
+
+function _canonical_col(name)
+    col = Symbol(strip(String(name)))
+    return get(COLUMN_ALIASES, col, col)
 end
 
 function _value(row, col::Symbol, mapping)
@@ -172,6 +256,107 @@ function _read_value_table(path::AbstractString, delim::Char, key_cols, value_co
         end
         table[key] = value
     end
+    return table, duplicates
+end
+
+function _parse_float_value(value, path::AbstractString, row_index::Integer, col::Symbol)
+    if value === missing
+        throw(ArgumentError("Missing numeric value in $path row $(_row_number(row_index)), column $col"))
+    end
+    parsed = tryparse(Float64, strip(string(value)))
+    parsed === nothing &&
+        throw(ArgumentError("Could not parse numeric value in $path row $(_row_number(row_index)), column $col: $value"))
+    return parsed
+end
+
+function _read_report_table(path::AbstractString, key_cols)
+    table = Dict{Tuple{Vararg{String}}, Dict{Symbol, Float64}}()
+    duplicates = Tuple{Vararg{String}}[]
+    value_cols = Symbol[]
+    mapping = nothing
+
+    for (index, row) in enumerate(CSV.File(IOBuffer(_first_csv_block(path)); delim = ',', stripwhitespace = true))
+        if mapping === nothing
+            mapping = _header_map(row)
+            key_set = Set(key_cols)
+            value_cols = sort!(collect(setdiff(Set(keys(mapping)), key_set)); by = string)
+        end
+
+        key = _row_key(row, key_cols, mapping)
+        values = Dict{Symbol, Float64}()
+        for col in value_cols
+            values[col] = _parse_float_value(_value(row, col, mapping), path, index, col)
+        end
+
+        if haskey(table, key)
+            push!(duplicates, key)
+        end
+        table[key] = values
+    end
+
+    return table, duplicates, value_cols
+end
+
+function _first_csv_block(path::AbstractString)
+    lines = String[]
+    for line in eachline(path)
+        stripped = strip(line)
+        (isempty(stripped) || stripped == "\"\"") && break
+        push!(lines, line)
+    end
+    return join(lines, '\n')
+end
+
+function _split_simple_csv_line(line::AbstractString)
+    return [strip(strip(cell), '"') for cell in split(chomp(line), ',')]
+end
+
+function _is_block_separator(line::AbstractString)
+    stripped = strip(line)
+    return isempty(stripped) || stripped == "\"\""
+end
+
+function _read_wide_report(path::AbstractString)
+    table = Dict{Tuple{Vararg{String}}, Float64}()
+    duplicates = Tuple{Vararg{String}}[]
+    lines = readlines(path)
+    index = 1
+
+    while index <= length(lines)
+        while index <= length(lines) && _is_block_separator(lines[index])
+            index += 1
+        end
+        index > length(lines) && break
+
+        block_header = _split_simple_csv_line(lines[index])
+        length(block_header) >= 2 ||
+            throw(ArgumentError("Malformed wide report block header in $path line $index"))
+        metric = string(_canonical_col(Symbol(block_header[2])))
+        index += 1
+        index <= length(lines) ||
+            throw(ArgumentError("Missing column header row after $path block $metric"))
+
+        column_headers = _split_simple_csv_line(lines[index])
+        index += 1
+        while index <= length(lines) && !_is_block_separator(lines[index])
+            row = _split_simple_csv_line(lines[index])
+            isempty(row) && (index += 1; continue)
+            row_label = first(row)
+            last_col = min(length(row), length(column_headers))
+            for col_index in 2:last_col
+                col_label = column_headers[col_index]
+                isempty(col_label) && continue
+                key = (metric, row_label, col_label)
+                value = _parse_float_value(row[col_index], path, index, Symbol(col_label))
+                if haskey(table, key)
+                    push!(duplicates, key)
+                end
+                table[key] = value
+            end
+            index += 1
+        end
+    end
+
     return table, duplicates
 end
 
@@ -288,8 +473,8 @@ function _compare_table(spec, python_output, julia_output, atol::Float64, rtol::
     common_keys = intersect(python_keys, julia_keys)
 
     mismatches = NamedTuple{
-        (:table, :key, :python_value, :julia_value, :abs_diff, :rel_diff),
-        Tuple{String, String, Float64, Float64, Float64, Float64},
+        (:table, :key, :column, :python_value, :julia_value, :abs_diff, :rel_diff),
+        Tuple{String, String, String, Float64, Float64, Float64, Float64},
     }[]
 
     max_abs_diff = 0.0
@@ -305,6 +490,7 @@ function _compare_table(spec, python_output, julia_output, atol::Float64, rtol::
             push!(mismatches, (
                 table = spec.name,
                 key = _key_string(key),
+                column = string(spec.value_col),
                 python_value = python_value,
                 julia_value = julia_value,
                 abs_diff = abs_diff,
@@ -314,6 +500,7 @@ function _compare_table(spec, python_output, julia_output, atol::Float64, rtol::
     end
 
     summary = (
+        category = "raw",
         table = spec.name,
         python_file = spec.python_file,
         julia_file = spec.julia_file,
@@ -322,6 +509,154 @@ function _compare_table(spec, python_output, julia_output, atol::Float64, rtol::
         common_rows = length(common_keys),
         missing_in_julia = length(missing_in_julia),
         extra_in_julia = length(extra_in_julia),
+        common_columns = 1,
+        missing_columns_in_julia = 0,
+        extra_columns_in_julia = 0,
+        value_mismatches = length(mismatches),
+        python_duplicate_keys = length(python_duplicates),
+        julia_duplicate_keys = length(julia_duplicates),
+        max_abs_diff = max_abs_diff,
+        max_rel_diff = max_rel_diff,
+        equal_approx = isempty(missing_in_julia) && isempty(extra_in_julia) &&
+            isempty(mismatches) && isempty(python_duplicates) && isempty(julia_duplicates),
+    )
+
+    return summary, mismatches
+end
+
+function _compare_report(spec, python_output, julia_output, atol::Float64, rtol::Float64)
+    python_path = joinpath(python_output, spec.python_file)
+    julia_path = joinpath(julia_output, spec.julia_file)
+    isfile(python_path) || throw(ArgumentError("Missing Python report file: $python_path"))
+    isfile(julia_path) || throw(ArgumentError("Missing Julia report file: $julia_path"))
+
+    python_rows, python_duplicates, python_value_cols = _read_report_table(python_path, spec.key_cols)
+    julia_rows, julia_duplicates, julia_value_cols = _read_report_table(julia_path, spec.key_cols)
+
+    python_keys = Set(keys(python_rows))
+    julia_keys = Set(keys(julia_rows))
+    missing_in_julia = setdiff(python_keys, julia_keys)
+    extra_in_julia = setdiff(julia_keys, python_keys)
+    common_keys = intersect(python_keys, julia_keys)
+
+    python_cols = Set(python_value_cols)
+    julia_cols = Set(julia_value_cols)
+    missing_cols = setdiff(python_cols, julia_cols)
+    extra_cols = setdiff(julia_cols, python_cols)
+    common_cols = sort!(collect(intersect(python_cols, julia_cols)); by = string)
+
+    mismatches = NamedTuple{
+        (:table, :key, :column, :python_value, :julia_value, :abs_diff, :rel_diff),
+        Tuple{String, String, String, Float64, Float64, Float64, Float64},
+    }[]
+
+    max_abs_diff = 0.0
+    max_rel_diff = 0.0
+    for key in sort!(collect(common_keys); by = _key_string)
+        python_values = python_rows[key]
+        julia_values = julia_rows[key]
+        for col in common_cols
+            python_value = python_values[col]
+            julia_value = julia_values[col]
+            abs_diff = abs(python_value - julia_value)
+            rel_diff = _relative_diff(python_value, julia_value)
+            max_abs_diff = max(max_abs_diff, abs_diff)
+            max_rel_diff = max(max_rel_diff, rel_diff)
+            if !isapprox(python_value, julia_value; atol, rtol)
+                push!(mismatches, (
+                    table = spec.name,
+                    key = _key_string(key),
+                    column = string(col),
+                    python_value = python_value,
+                    julia_value = julia_value,
+                    abs_diff = abs_diff,
+                    rel_diff = rel_diff,
+                ))
+            end
+        end
+    end
+
+    summary = (
+        category = "report",
+        table = spec.name,
+        python_file = spec.python_file,
+        julia_file = spec.julia_file,
+        python_rows = length(python_rows),
+        julia_rows = length(julia_rows),
+        common_rows = length(common_keys),
+        missing_in_julia = length(missing_in_julia),
+        extra_in_julia = length(extra_in_julia),
+        common_columns = length(common_cols),
+        missing_columns_in_julia = length(missing_cols),
+        extra_columns_in_julia = length(extra_cols),
+        value_mismatches = length(mismatches),
+        python_duplicate_keys = length(python_duplicates),
+        julia_duplicate_keys = length(julia_duplicates),
+        max_abs_diff = max_abs_diff,
+        max_rel_diff = max_rel_diff,
+        equal_approx = isempty(missing_in_julia) && isempty(extra_in_julia) &&
+            isempty(missing_cols) && isempty(extra_cols) &&
+            isempty(mismatches) && isempty(python_duplicates) && isempty(julia_duplicates),
+    )
+
+    return summary, mismatches
+end
+
+function _compare_wide_report(spec, python_output, julia_output, atol::Float64, rtol::Float64)
+    python_path = joinpath(python_output, spec.python_file)
+    julia_path = joinpath(julia_output, spec.julia_file)
+    isfile(python_path) || throw(ArgumentError("Missing Python wide report file: $python_path"))
+    isfile(julia_path) || throw(ArgumentError("Missing Julia wide report file: $julia_path"))
+
+    python_rows, python_duplicates = _read_wide_report(python_path)
+    julia_rows, julia_duplicates = _read_wide_report(julia_path)
+
+    python_keys = Set(keys(python_rows))
+    julia_keys = Set(keys(julia_rows))
+    missing_in_julia = setdiff(python_keys, julia_keys)
+    extra_in_julia = setdiff(julia_keys, python_keys)
+    common_keys = intersect(python_keys, julia_keys)
+
+    mismatches = NamedTuple{
+        (:table, :key, :column, :python_value, :julia_value, :abs_diff, :rel_diff),
+        Tuple{String, String, String, Float64, Float64, Float64, Float64},
+    }[]
+
+    max_abs_diff = 0.0
+    max_rel_diff = 0.0
+    for key in sort!(collect(common_keys); by = _key_string)
+        python_value = python_rows[key]
+        julia_value = julia_rows[key]
+        abs_diff = abs(python_value - julia_value)
+        rel_diff = _relative_diff(python_value, julia_value)
+        max_abs_diff = max(max_abs_diff, abs_diff)
+        max_rel_diff = max(max_rel_diff, rel_diff)
+        if !isapprox(python_value, julia_value; atol, rtol)
+            push!(mismatches, (
+                table = spec.name,
+                key = _key_string(key[1:2]),
+                column = key[3],
+                python_value = python_value,
+                julia_value = julia_value,
+                abs_diff = abs_diff,
+                rel_diff = rel_diff,
+            ))
+        end
+    end
+
+    summary = (
+        category = "wide",
+        table = spec.name,
+        python_file = spec.python_file,
+        julia_file = spec.julia_file,
+        python_rows = length(python_rows),
+        julia_rows = length(julia_rows),
+        common_rows = length(common_keys),
+        missing_in_julia = length(missing_in_julia),
+        extra_in_julia = length(extra_in_julia),
+        common_columns = 1,
+        missing_columns_in_julia = 0,
+        extra_columns_in_julia = 0,
         value_mismatches = length(mismatches),
         python_duplicate_keys = length(python_duplicates),
         julia_duplicate_keys = length(julia_duplicates),
@@ -375,18 +710,22 @@ function _write_report_text(path, python_output, julia_output, report_dir, prove
         println(io)
         _write_provenance_section(io, provenance)
         println(io)
-        println(io, "Compared direct variable tables:")
+        println(io, "Compared tables and reports:")
         for summary in summaries
             status = summary.equal_approx ? "OK" : "DIFF"
             println(
                 io,
                 @sprintf(
-                    "  %-30s %s rows(py=%d,jl=%d,common=%d) missing=%d extra=%d mismatches=%d max_abs=%.12g max_rel=%.12g",
+                    "  %-42s %-6s %s rows(py=%d,jl=%d,common=%d) cols(common=%d,missing=%d,extra=%d) missing=%d extra=%d mismatches=%d max_abs=%.12g max_rel=%.12g",
                     summary.table,
+                    summary.category,
                     status,
                     summary.python_rows,
                     summary.julia_rows,
                     summary.common_rows,
+                    summary.common_columns,
+                    summary.missing_columns_in_julia,
+                    summary.extra_columns_in_julia,
                     summary.missing_in_julia,
                     summary.extra_in_julia,
                     summary.value_mismatches,
@@ -465,9 +804,25 @@ function main(args = ARGS)
         push!(summaries, summary)
         append!(all_mismatches, mismatches)
     end
+    for spec in REPORT_SPECS
+        summary, mismatches = _compare_report(spec, python_output, julia_output, atol, rtol)
+        push!(summaries, summary)
+        append!(all_mismatches, mismatches)
+    end
+    for spec in WIDE_REPORT_SPECS
+        summary, mismatches = _compare_wide_report(spec, python_output, julia_output, atol, rtol)
+        push!(summaries, summary)
+        append!(all_mismatches, mismatches)
+    end
 
     compared_python_files = Set(spec.python_file for spec in TABLE_SPECS)
+    union!(compared_python_files, (spec.python_file for spec in REPORT_SPECS))
+    union!(compared_python_files, (spec.python_file for spec in WIDE_REPORT_SPECS))
+    push!(compared_python_files, "results_objective.csv")
     compared_julia_files = Set(spec.julia_file for spec in TABLE_SPECS)
+    union!(compared_julia_files, (spec.julia_file for spec in REPORT_SPECS))
+    union!(compared_julia_files, (spec.julia_file for spec in WIDE_REPORT_SPECS))
+    push!(compared_julia_files, "results_objective.csv")
     if abspath(report_dir) == abspath(default_report_dir)
         push!(compared_julia_files, basename(default_report_dir))
     end
@@ -494,12 +849,15 @@ function main(args = ARGS)
         status = summary.equal_approx ? "OK" : "DIFF"
         println(
             @sprintf(
-                "%-30s %s mismatches=%d missing=%d extra=%d max_abs=%.12g",
+                "%-42s %-6s %s mismatches=%d missing=%d extra=%d col_missing=%d col_extra=%d max_abs=%.12g",
                 summary.table,
+                summary.category,
                 status,
                 summary.value_mismatches,
                 summary.missing_in_julia,
                 summary.extra_in_julia,
+                summary.missing_columns_in_julia,
+                summary.extra_columns_in_julia,
                 summary.max_abs_diff,
             ),
         )

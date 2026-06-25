@@ -78,7 +78,6 @@ Base.@kwdef mutable struct EmpireParams
     # General parameters from file
     CO2cap::Union{Nothing, TimeProfile}   = nothing
     CO2price::Union{Nothing, TimeProfile} = nothing
-    seasScale::Dict{String, Float64}      = Dict{String, Float64}()
     seasonNames::Vector{String}           = String[]
     regularSeasonCount::Int               = 0
 
@@ -106,7 +105,6 @@ end
 # Loads / generation quantities default to zero (no demand, no production)
 const DEFAULT_LOAD          = 0.0
 const DEFAULT_MAX_HYDRO_GEN = 0.0
-const DEFAULT_SEASON_SCALE  = 1.0
 
 # Initial installed capacities default to zero
 const DEFAULT_GEN_INIT_CAP     = 0.0
@@ -114,12 +112,16 @@ const DEFAULT_STOR_EN_INIT_CAP = 0.0
 const DEFAULT_STOR_PW_INIT_CAP = 0.0
 const DEFAULT_TRANS_INIT_CAP   = 0.0
 
-# Build / installed capacity limits. Generator defaults mirror the Python
-# formulation; other assets keep `nothing`, meaning no limit when data is absent.
+# Build / installed capacity limits. Defaults mirror the Python formulation:
+# storage build cap defaults to 500000 MW (Param default in empire.py) and the
+# storage installed cap defaults to 0.0 (storENMaxInstalledCapRaw/storPWMaxInstalledCapRaw
+# default 0.0 -> a storage absent from the cap data is NOT buildable, e.g. the
+# Finland/Macedonia HydroPumpStorage entries present in StoragesOfNode). Returning
+# `nothing` (no limit) here previously let Julia build storage that Python forbids.
 const DEFAULT_GEN_MAX_BUILD_CAP    = 500000.0
 const DEFAULT_GEN_MAX_INST_CAP_RAW = 0.0
-const DEFAULT_MAX_BUILD_CAP        = nothing
-const DEFAULT_MAX_INST_CAP         = nothing
+const DEFAULT_MAX_BUILD_CAP        = 500000.0
+const DEFAULT_MAX_INST_CAP         = 0.0
 const DEFAULT_TRANS_MAX_BUILD      = nothing
 const DEFAULT_TRANS_MAX_INST       = nothing
 const DEFAULT_MAX_HYDRO_NODE       = nothing
@@ -168,24 +170,8 @@ ccs_cost_variable(par, sp) = par.CCSCostTSVariable === nothing ? 0.0 : par.CCSCo
 load(par, n, t) = haskey(par.sload, n) ? par.sload[n][t] : DEFAULT_LOAD
 season_name(par, representative_index::Integer) =
     1 <= representative_index <= length(par.seasonNames) ? par.seasonNames[representative_index] : ""
-function season_scale(par, representative_index::Integer)
-    name = season_name(par, representative_index)
-    return isempty(name) ? DEFAULT_SEASON_SCALE : get(par.seasScale, name, DEFAULT_SEASON_SCALE)
-end
 regular_season_count(par, representative_count::Integer) =
     par.regularSeasonCount > 0 ? min(par.regularSeasonCount, representative_count) : representative_count
-function operational_discount_scale(discount_rate_value, sp)
-    years = round(Int, duration_strat(sp))
-    return sum((1 + discount_rate_value)^(-j) for j in 0:(years - 1); init = 0.0)
-end
-operational_discount_scale(par::EmpireParams, sp) = operational_discount_scale(discount_rate(par), sp)
-function operational_objective_weight(par, sp, representative_index::Integer, t, discounter)
-    discount_rate_value = isnothing(discount_rate(par)) ? discounter.discount_rate : discount_rate(par)
-    return objective_weight(sp, discounter) * operational_discount_scale(discount_rate_value, sp) *
-        season_scale(par, representative_index) * probability(t)
-end
-seasonal_probability_weight(par, representative_index::Integer, t) =
-    season_scale(par, representative_index) * probability(t)
 
 # Generator properties
 gencap_avail(par, n, g, t) =
@@ -221,17 +207,44 @@ stor_pw_max_inst_cap(par, n, s, sp) =
 power_to_energy(par, s) = get(par.storagePowToEnergy, s, DEFAULT_POWER_TO_ENERGY)
 
 # Transmission properties
-trans_cap_init(par, m, n, sp) = haskey(par.transmissionInitCap, (m, n)) ? par.transmissionInitCap[(m, n)][sp] : DEFAULT_TRANS_INIT_CAP
-trans_lifetime(par, m, n) = get(par.transmissionLifetime, (m, n), DEFAULT_TRANS_LIFETIME)
-trans_max_build_cap(par, m, n, sp) = haskey(par.transmissionMaxBuiltCap, (m, n)) ? par.transmissionMaxBuiltCap[(m, n)][sp] : DEFAULT_TRANS_MAX_BUILD
-trans_max_inst_cap(par, m, n, sp) = haskey(par.transmissionMaxInstalledCap, (m, n)) ? par.transmissionMaxInstalledCap[(m, n)][sp] : DEFAULT_TRANS_MAX_INST
-line_eff(par, m, n) = get(par.lineEfficiency, (m, n), DEFAULT_LINE_EFF)
+#
+# A transmission corridor is a single physical line whose data (capacity, cost,
+# lifetime, efficiency, length) is symmetric in its two flow directions, but each
+# value is stored under a single (from, to) orientation in the CSV input. The model
+# uses one capacity variable and one investment cost per corridor, indexed by the
+# canonical orientation `bidir_arcs` assigns via `is_bidir` (min, max) — which need
+# not match the orientation present in the data. Every per-corridor accessor must
+# therefore resolve the value from either stored orientation; otherwise the canonical
+# key misses, the `nothing`/default leaks in, and (for caps) the constraint is silently
+# skipped or (for cost) the line becomes free. Python avoids this entirely by collapsing
+# both links into one orientation-independent BidirectionalArc; see
+# DIAGNOSIS_parity_test_dataset.md.
+_corridor_profile(dict, m, n) =
+    haskey(dict, (m, n)) ? dict[(m, n)] : get(dict, (n, m), nothing)
+
+function trans_cap_init(par, m, n, sp)
+    p = _corridor_profile(par.transmissionInitCap, m, n)
+    return p === nothing ? DEFAULT_TRANS_INIT_CAP : p[sp]
+end
+trans_lifetime(par, m, n) =
+    haskey(par.transmissionLifetime, (m, n)) ? par.transmissionLifetime[(m, n)] :
+    get(par.transmissionLifetime, (n, m), DEFAULT_TRANS_LIFETIME)
+trans_max_build_cap(par, m, n, sp) =
+    (p = _corridor_profile(par.transmissionMaxBuiltCap, m, n)) === nothing ? DEFAULT_TRANS_MAX_BUILD : p[sp]
+trans_max_inst_cap(par, m, n, sp) =
+    (p = _corridor_profile(par.transmissionMaxInstalledCap, m, n)) === nothing ? DEFAULT_TRANS_MAX_INST : p[sp]
+line_eff(par, m, n) =
+    haskey(par.lineEfficiency, (m, n)) ? par.lineEfficiency[(m, n)] :
+    get(par.lineEfficiency, (n, m), DEFAULT_LINE_EFF)
 
 # Cost properties
 gen_invest_cost(par, g, sp) = haskey(par.genInvCost, g) ? par.genInvCost[g][sp] : DEFAULT_GEN_INVEST_COST
 stor_en_invest_cost(par, s, sp) = haskey(par.storENInvCost, s) ? par.storENInvCost[s][sp] : DEFAULT_STOR_EN_INVEST_COST
 stor_pw_invest_cost(par, s, sp) = haskey(par.storPWInvCost, s) ? par.storPWInvCost[s][sp] : DEFAULT_STOR_PW_INVEST_COST
-trans_invest_cost(par, m, n, sp) = haskey(par.transmissionInvCost, (m, n)) ? par.transmissionInvCost[(m, n)][sp] : DEFAULT_TRANS_INVEST_COST
+function trans_invest_cost(par, m, n, sp)
+    p = _corridor_profile(par.transmissionInvCost, m, n)
+    return p === nothing ? DEFAULT_TRANS_INVEST_COST : p[sp]
+end
 
 lost_load_cost(par, n, t) = haskey(par.nodeLostLoadCost, n) ? par.nodeLostLoadCost[n][t] : DEFAULT_LOST_LOAD_COST
 sload(par, n, t) = haskey(par.sload, n) ? par.sload[n][t] : DEFAULT_LOAD
@@ -444,7 +457,6 @@ function validate(
     _check_profile_scalar!(errs, "CCSCostTSVariable", par.CCSCostTSVariable, periods; min = 0.0)
     _check_profile_scalar!(errs, "CO2cap", par.CO2cap, periods; min = 0.0)
     _check_profile_scalar!(errs, "CO2price", par.CO2price, periods; min = 0.0)
-    _check_float_dict!(errs, "seasScale", par.seasScale; min = 0.0)
 
     # Index checks (only if a set is provided)
     if sets !== nothing

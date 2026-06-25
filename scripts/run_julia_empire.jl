@@ -116,6 +116,12 @@ function _boolean_option(value, name)
     throw(ArgumentError("Unsupported $name value: $value. Expected true or false."))
 end
 
+function _config_bool(config, key, default)
+    value = get(config, key, default)
+    value isa Bool && return value
+    return _boolean_option(string(value), key)
+end
+
 function _config_with_fixed_sample(config_file, result_dir)
     config = YAML.load_file(config_file)
     config["use_scenario_generation"] = true
@@ -185,6 +191,7 @@ function main(args = ARGS)
     end
     run_config = YAML.load_file(config_file)
     optimizer_attributes = _optimizer_attributes(solver_name, run_config, options)
+    deterministic_tiebreak = _config_bool(run_config, "deterministic_operational_tiebreak", false)
 
     println("================================================")
     println("OpenEMPIRE.jl run")
@@ -198,6 +205,7 @@ function main(args = ARGS)
     println("Seed:         $seed")
     println("Fixed sample: $fixed_sample_option")
     println("Optimize:     $optimize_model")
+    println("Tie-break:    $deterministic_tiebreak")
     println("Result dir:   $result_dir")
     println("Start time:   $(now())")
     println("================================================")
@@ -223,10 +231,24 @@ function main(args = ARGS)
     println("Constraints: $(JuMP.num_constraints(emp; count_variable_in_set_constraints = false))")
     flush(stdout)
     progress("Model build finished in $(round(build_seconds; digits = 2)) seconds")
+    scenario_artifact = OpenEMPIRE.write_scenario_artifacts(
+        result_dir,
+        data_folder,
+        run_config;
+        config_file = config_file,
+        dataset = dataset,
+        input_format = format,
+        seed = seed,
+    )
+    if scenario_artifact !== nothing
+        println("Scenario sampling key archived to: $scenario_artifact")
+        flush(stdout)
+    end
 
     termination = nothing
     objective = nothing
     objective_components = nothing
+    tiebreak_diagnostics = nothing
     solve_seconds = 0.0
     if optimize_model
         solve_start = time()
@@ -244,12 +266,37 @@ function main(args = ARGS)
             periods,
             Discounter(OpenEMPIRE.discount_rate(params), 1, periods),
         )
+        if deterministic_tiebreak && JuMP.is_solved_and_feasible(emp)
+            progress("Starting deterministic fixed-investment operational tie-break")
+            tiebreak_diagnostics = OpenEMPIRE.deterministic_operational_tiebreak!(
+                emp,
+                sets,
+                params,
+                periods,
+                Discounter(OpenEMPIRE.discount_rate(params), 1, periods);
+                cost_absolute_tolerance = Float64(get(run_config, "deterministic_tiebreak_cost_absolute_tolerance", 1.0)),
+                cost_relative_tolerance = Float64(get(run_config, "deterministic_tiebreak_cost_relative_tolerance", 1.0e-10)),
+                marginal_weight = Float64(get(run_config, "deterministic_tiebreak_marginal_weight", 1.0)),
+                power_scale = Float64(get(run_config, "deterministic_tiebreak_power_scale_mw", 1.0e6)),
+                energy_scale = Float64(get(run_config, "deterministic_tiebreak_energy_scale_mwh", 1.0e7)),
+                investment_round_digits = Int(get(run_config, "deterministic_tiebreak_investment_round_digits", 6)),
+            )
+            termination = JuMP.termination_status(emp)
+            solve_seconds = time() - solve_start
+            progress("Deterministic operational tie-break finished")
+        end
         println("Solve seconds: $(round(solve_seconds; digits = 2))")
         println("Termination status: $termination")
         println("Objective value: $objective")
         println("Objective components:")
         for (name, value) in pairs(objective_components)
             println("  $name: $value")
+        end
+        if tiebreak_diagnostics !== nothing
+            println("Deterministic tie-break diagnostics:")
+            for (name, value) in pairs(tiebreak_diagnostics)
+                println("  $name: $value")
+            end
         end
         flush(stdout)
         if JuMP.is_solved_and_feasible(emp)
@@ -275,6 +322,14 @@ function main(args = ARGS)
     else
         ["objective_component_$name=$value" for (name, value) in pairs(objective_components)]
     end
+    tiebreak_lines = if tiebreak_diagnostics === nothing
+        ["deterministic_operational_tiebreak=$deterministic_tiebreak"]
+    else
+        vcat(
+            ["deterministic_operational_tiebreak=true"],
+            ["deterministic_tiebreak_$name=$value" for (name, value) in pairs(tiebreak_diagnostics)],
+        )
+    end
 
     progress("Writing run summary")
     summary_path = _write_summary(
@@ -297,7 +352,7 @@ function main(args = ARGS)
             "termination_status=$(termination === nothing ? "not_optimized" : string(termination))",
             "objective_value=$(objective === nothing ? "not_optimized" : string(objective))",
             "end_time=$(now())",
-        ], component_lines),
+        ], component_lines, tiebreak_lines),
     )
     println("Summary written to: $summary_path")
     println("End time: $(now())")

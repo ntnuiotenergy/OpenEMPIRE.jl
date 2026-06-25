@@ -25,8 +25,9 @@ end
 @testset "CSV" begin
     test_read_csv_dataset()
     test_read_bundled_csv_datasets()
-    test_python_style_operational_weights()
+    test_native_timestruct_operational_weights()
     test_write_solution_csv_tables()
+    test_europe_summary_uses_per_scenario_totals()
 end
 
 @testset "CSV scenarios" begin
@@ -35,9 +36,13 @@ end
     test_configurable_regular_scenario_seasons()
     test_python_fixed_sample_scenario_parity()
     test_create_model_with_raw_csv_scenarios()
+    test_write_scenario_sampling_key_artifacts()
     test_create_model_accepts_optimizer_type()
     test_storage_constraints_match_python_formulation()
     test_create_model_adds_storage_max_constraints()
+    test_emission_constraints_match_python_formulation()
+    test_native_dual_weight_normalization()
+    test_create_model_respects_emission_cap_config()
 end
 
 @testset "Validate" begin

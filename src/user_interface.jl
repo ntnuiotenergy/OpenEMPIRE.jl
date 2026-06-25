@@ -5,6 +5,18 @@ function _optimizer_with_attributes(optimizer, optimizer_attributes)
     return optimizer_with_attributes(_optimizer_constructor(optimizer), optimizer_attributes...)
 end
 
+function _config_bool(config, key::AbstractString, default::Bool)
+    value = get(config, key, default)
+    value isa Bool && return value
+    if value isa AbstractString
+        normalized = lowercase(strip(value))
+        normalized in ("true", "1", "yes") && return true
+        normalized in ("false", "0", "no") && return false
+        throw(ArgumentError("Unsupported boolean value for $key: $value"))
+    end
+    return Bool(value)
+end
+
 function create_model(
     config_file,
     data_folder;
@@ -65,6 +77,11 @@ function create_model(
         progress,
         "Build 4/12: input data loaded ($(length(nodes(sets))) nodes, $(length(generators(sets))) generators, $(length(storages(sets))) storages)",
     )
+    if _config_bool(config, "use_emission_cap", false)
+        params.CO2price = nothing
+    else
+        params.CO2cap = nothing
+    end
     params.seasonNames = vcat(collect(regular_seasons), ["peak$(i)" for i in 1:peak_count])
     params.regularSeasonCount = season_count
 
