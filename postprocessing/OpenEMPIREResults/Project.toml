@@ -1,0 +1,10 @@
+name = "OpenEMPIREResults"
+uuid = "832ea07b-35f7-4fb7-b20b-00fdf089e665"
+version = "0.1.0"
+authors = ["OpenEMPIRE contributors"]
+
+[deps]
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+
+[compat]
+CSV = "0.10.15"
