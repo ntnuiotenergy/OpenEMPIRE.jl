@@ -19,6 +19,8 @@ function _parse_args(args)
         "results" => joinpath("results", "julia_runs"),
         "optimize" => "true",
         "fixed-sample" => "auto",
+        "out-of-sample" => "false",
+        "fixed-investment-dir" => "",
         "gurobi-method" => "",
         "gurobi-crossover" => "",
     )
@@ -245,6 +247,23 @@ function main(args = ARGS)
         flush(stdout)
     end
 
+    if _boolean_option(options["out-of-sample"], "out-of-sample")
+        fixed_investment_dir = options["fixed-investment-dir"]
+
+        isempty(fixed_investment_dir) && throw(ArgumentError(
+            "--out-of-sample=true requires --fixed-investment-dir=..."
+        ))
+
+        progress("Fixing investments from previous result directory")
+        OpenEMPIRE.fix_investments_from_results!(
+            emp,
+            sets,
+            periods,
+            fixed_investment_dir;
+            fix_installed_capacities = true,
+        )
+    end
+
     termination = nothing
     objective = nothing
     objective_components = nothing
@@ -344,6 +363,8 @@ function main(args = ARGS)
             "solver_attributes=$(_optimizer_attribute_summary(optimizer_attributes))",
             "seed=$seed",
             "fixed_sample=$fixed_sample_option",
+            "out_of_sample=$(options["out-of-sample"])",
+            "fixed_investment_dir=$(options["fixed-investment-dir"])",
             "optimize=$optimize_model",
             "variables=$(JuMP.num_variables(emp))",
             "constraints=$(JuMP.num_constraints(emp; count_variable_in_set_constraints = false))",
