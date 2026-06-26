@@ -126,8 +126,15 @@ const DEFAULT_TRANS_MAX_BUILD      = nothing
 const DEFAULT_TRANS_MAX_INST       = nothing
 const DEFAULT_MAX_HYDRO_NODE       = nothing
 
+# Ramp-up cap for a thermal generator missing from genRampUpCap data defaults to 0.0,
+# matching Python (`genRampUpCap = Param(model.ThermalGenerators, default=0.0)` in empire.py).
+# A missing entry therefore forbids hour-to-hour ramp-up within a season (genOp[h] <= genOp[h-1]),
+# rather than leaving the generator unconstrained. This matters for europe_v51, where
+# `LigniteCCSsup` is in ThermalGenerators but absent from genRampUpCap.csv (the file duplicates
+# `LigniteCCSadv` and omits `LigniteCCSsup`); a 1.0 default left it effectively unrampable-limited
+# in Julia while Python pinned it to 0.0.
+const DEFAULT_RAMPUP_CAP                 = 0.0
 # Efficiencies / availability factors default to 1.0 (lossless / fully available)
-const DEFAULT_RAMPUP_CAP                 = 1.0
 const DEFAULT_BLEED_EFF                  = 1.0
 const DEFAULT_CHARGE_EFF                 = 1.0
 const DEFAULT_DISCHARGE_EFF              = 1.0
@@ -150,8 +157,14 @@ const DEFAULT_STOR_PW_INVEST_COST = 0.0
 const DEFAULT_TRANS_INVEST_COST   = 0.0
 const DEFAULT_GEN_MARGINAL_COST   = 0.0
 
-# Penalty cost for unserved load (high so it is rarely optimal to shed load)
-const DEFAULT_LOST_LOAD_COST = 1000.0
+# Penalty cost for unserved load (high so it is rarely optimal to shed load).
+# Must match Python's `nodeLostLoadCost = Param(model.Node, model.Period, default=22000.0)`
+# (empire.py). europe_v51's nodeLostLoadCost.csv lists only 35 of 49 nodes (period 1 only);
+# the 14 missing nodes fall back to this default. A 1000.0 default made shedding ~22x cheaper
+# than Python at those nodes, so Julia shed load instead of building generation (~36e9 less
+# generator investment) and reached a spuriously cheaper optimum — the bulk of the long-horizon
+# europe_v51 objective gap.
+const DEFAULT_LOST_LOAD_COST = 22000.0
 
 # Helper functions to get parameter values with default fallbacks, the model should
 # only use these functions to access parameter values
