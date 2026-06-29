@@ -31,5 +31,3 @@ time_format: "%d/%m/%Y %H:%M"
 solver_method: 2
 solver_crossover: 0
 solver_presolve: 2
-
-deterministic_operational_tiebreak: false

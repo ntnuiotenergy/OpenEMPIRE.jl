@@ -142,6 +142,66 @@ function _write_summary(path, lines)
     return path
 end
 
+# Minimal ordered JSON serializer for perf.json (avoids adding a JSON dependency).
+# `JObj` preserves key order so the artifact diffs cleanly across runs.
+struct JObj
+    pairs::Vector{Pair{String, Any}}
+end
+
+_json_escape(s) = replace(string(s), "\\" => "\\\\", "\"" => "\\\"", "\n" => "\\n", "\t" => "\\t")
+
+function _json(x)
+    if x === nothing
+        return "null"
+    elseif x isa Bool
+        return x ? "true" : "false"
+    elseif x isa Integer
+        return string(x)
+    elseif x isa AbstractFloat
+        return isfinite(x) ? string(x) : "null"
+    elseif x isa Union{AbstractString, Symbol}
+        return "\"" * _json_escape(x) * "\""
+    elseif x isa JObj
+        return "{" * join(("\"" * _json_escape(k) * "\":" * _json(v) for (k, v) in x.pairs), ",") * "}"
+    elseif x isa AbstractVector
+        return "[" * join((_json(v) for v in x), ",") * "]"
+    else
+        return "\"" * _json_escape(x) * "\""
+    end
+end
+
+_write_perf_json(path, obj::JObj) = (mkpath(dirname(path)); write(path, _json(obj) * "\n"); path)
+
+# Opt-in via EMPIRE_PERF (matches the Python side and the SGE wrapper), so default
+# runs emit no perf.json. The @timed phase capture itself is always-on and cheap.
+_perf_enabled() = lowercase(strip(get(ENV, "EMPIRE_PERF", ""))) in ("1", "true", "yes", "on")
+
+# Record one phase boundary. `wall_seconds`, `alloc_bytes` and `gc_seconds` are
+# the per-phase figures from `@timed` (the `@time` machinery): alloc_bytes is the
+# *cumulative bytes allocated* in the phase — allocation pressure, not footprint.
+# Footprint is `rss_peak_bytes` from Sys.maxrss(), the monotonic peak RSS of the
+# whole process (already includes Gurobi, linked in-process); live_bytes is the
+# current live heap from gc_live_bytes().
+function _perf_phase(name::AbstractString, wall_seconds::Real; alloc_bytes = nothing, gc_seconds = nothing)
+    return JObj([
+        "name" => name,
+        "wall_seconds" => round(Float64(wall_seconds); digits = 3),
+        "alloc_bytes" => alloc_bytes === nothing ? nothing : Int(alloc_bytes),
+        "gc_seconds" => gc_seconds === nothing ? nothing : round(Float64(gc_seconds); digits = 3),
+        "rss_peak_bytes" => Int(Sys.maxrss()),
+        "live_bytes" => Int(Base.gc_live_bytes()),
+    ])
+end
+
+function _pkgversion_str(m::Module)
+    try
+        v = pkgversion(m)
+        return v === nothing ? nothing : string(v)
+    catch
+        return nothing
+    end
+end
+
 function _log_line(message)
     println(message)
     flush(stdout)
@@ -191,7 +251,6 @@ function main(args = ARGS)
     end
     run_config = YAML.load_file(config_file)
     optimizer_attributes = _optimizer_attributes(solver_name, run_config, options)
-    deterministic_tiebreak = _config_bool(run_config, "deterministic_operational_tiebreak", false)
 
     println("================================================")
     println("OpenEMPIRE.jl run")
@@ -205,7 +264,6 @@ function main(args = ARGS)
     println("Seed:         $seed")
     println("Fixed sample: $fixed_sample_option")
     println("Optimize:     $optimize_model")
-    println("Tie-break:    $deterministic_tiebreak")
     println("Result dir:   $result_dir")
     println("Start time:   $(now())")
     println("================================================")
@@ -214,9 +272,11 @@ function main(args = ARGS)
     progress = _progress_logger()
     progress("Runner initialized")
 
+    perf_phases = JObj[]
+    run_start = time()
     build_start = time()
     progress("Starting model build")
-    emp, periods, sets, params = OpenEMPIRE.create_model(
+    build_stats = @timed OpenEMPIRE.create_model(
         config_file,
         data_folder;
         optimizer,
@@ -225,7 +285,9 @@ function main(args = ARGS)
         scenario_rng = MersenneTwister(seed),
         progress,
     )
+    emp, periods, sets, params = build_stats.value
     build_seconds = time() - build_start
+    push!(perf_phases, _perf_phase("build", build_seconds; alloc_bytes = build_stats.bytes, gc_seconds = build_stats.gctime))
     println("Model build seconds: $(round(build_seconds; digits = 2))")
     println("Variables: $(JuMP.num_variables(emp))")
     println("Constraints: $(JuMP.num_constraints(emp; count_variable_in_set_constraints = false))")
@@ -248,13 +310,13 @@ function main(args = ARGS)
     termination = nothing
     objective = nothing
     objective_components = nothing
-    tiebreak_diagnostics = nothing
     solve_seconds = 0.0
     if optimize_model
         solve_start = time()
         progress("Starting solver optimization")
-        JuMP.optimize!(emp)
+        solve_stats = @timed JuMP.optimize!(emp)
         solve_seconds = time() - solve_start
+        push!(perf_phases, _perf_phase("solve", solve_seconds; alloc_bytes = solve_stats.bytes, gc_seconds = solve_stats.gctime))
         progress("Solver optimization finished in $(round(solve_seconds; digits = 2)) seconds")
         termination = JuMP.termination_status(emp)
         objective = JuMP.objective_value(emp)
@@ -266,25 +328,6 @@ function main(args = ARGS)
             periods,
             Discounter(OpenEMPIRE.discount_rate(params), 1, periods),
         )
-        if deterministic_tiebreak && JuMP.is_solved_and_feasible(emp)
-            progress("Starting deterministic fixed-investment operational tie-break")
-            tiebreak_diagnostics = OpenEMPIRE.deterministic_operational_tiebreak!(
-                emp,
-                sets,
-                params,
-                periods,
-                Discounter(OpenEMPIRE.discount_rate(params), 1, periods);
-                cost_absolute_tolerance = Float64(get(run_config, "deterministic_tiebreak_cost_absolute_tolerance", 1.0)),
-                cost_relative_tolerance = Float64(get(run_config, "deterministic_tiebreak_cost_relative_tolerance", 1.0e-10)),
-                marginal_weight = Float64(get(run_config, "deterministic_tiebreak_marginal_weight", 1.0)),
-                power_scale = Float64(get(run_config, "deterministic_tiebreak_power_scale_mw", 1.0e6)),
-                energy_scale = Float64(get(run_config, "deterministic_tiebreak_energy_scale_mwh", 1.0e7)),
-                investment_round_digits = Int(get(run_config, "deterministic_tiebreak_investment_round_digits", 6)),
-            )
-            termination = JuMP.termination_status(emp)
-            solve_seconds = time() - solve_start
-            progress("Deterministic operational tie-break finished")
-        end
         println("Solve seconds: $(round(solve_seconds; digits = 2))")
         println("Termination status: $termination")
         println("Objective value: $objective")
@@ -292,16 +335,12 @@ function main(args = ARGS)
         for (name, value) in pairs(objective_components)
             println("  $name: $value")
         end
-        if tiebreak_diagnostics !== nothing
-            println("Deterministic tie-break diagnostics:")
-            for (name, value) in pairs(tiebreak_diagnostics)
-                println("  $name: $value")
-            end
-        end
         flush(stdout)
         if JuMP.is_solved_and_feasible(emp)
             progress("Writing solution CSV tables")
-            output_dir = OpenEMPIRE.write_solution_tables(result_dir, emp, sets, params, periods)
+            results_stats = @timed OpenEMPIRE.write_solution_tables(result_dir, emp, sets, params, periods)
+            output_dir = results_stats.value
+            push!(perf_phases, _perf_phase("results", results_stats.time; alloc_bytes = results_stats.bytes, gc_seconds = results_stats.gctime))
             println("Solution CSVs written to: $output_dir")
             flush(stdout)
             progress("Solution CSV tables written to $output_dir")
@@ -322,15 +361,6 @@ function main(args = ARGS)
     else
         ["objective_component_$name=$value" for (name, value) in pairs(objective_components)]
     end
-    tiebreak_lines = if tiebreak_diagnostics === nothing
-        ["deterministic_operational_tiebreak=$deterministic_tiebreak"]
-    else
-        vcat(
-            ["deterministic_operational_tiebreak=true"],
-            ["deterministic_tiebreak_$name=$value" for (name, value) in pairs(tiebreak_diagnostics)],
-        )
-    end
-
     progress("Writing run summary")
     summary_path = _write_summary(
         joinpath(result_dir, "summary.txt"),
@@ -352,9 +382,48 @@ function main(args = ARGS)
             "termination_status=$(termination === nothing ? "not_optimized" : string(termination))",
             "objective_value=$(objective === nothing ? "not_optimized" : string(objective))",
             "end_time=$(now())",
-        ], component_lines, tiebreak_lines),
+        ], component_lines),
     )
     println("Summary written to: $summary_path")
+
+    if _perf_enabled()
+    solver_threads = nothing
+    for (k, v) in optimizer_attributes
+        k == "Threads" && (solver_threads = v)
+    end
+    perf = JObj([
+        "runtime" => "julia",
+        "host" => gethostname(),
+        "cpu_threads" => Sys.CPU_THREADS,
+        "solver_threads" => solver_threads === nothing ? nothing : Int(solver_threads),
+        "datetime" => string(now()),
+        "dataset" => dataset,
+        "config" => config_file,
+        "seed" => seed,
+        "versions" => JObj([
+            "julia" => string(VERSION),
+            "jump" => _pkgversion_str(JuMP),
+            "gurobi_jl" => _pkgversion_str(Gurobi),
+        ]),
+        "solver" => solver_name,
+        "solver_attributes" => JObj(Pair{String, Any}[string(k) => string(v) for (k, v) in optimizer_attributes]),
+        "model" => JObj([
+            "variables" => JuMP.num_variables(emp),
+            "constraints" => JuMP.num_constraints(emp; count_variable_in_set_constraints = false),
+        ]),
+        "phases" => perf_phases,
+        "totals" => JObj([
+            "wall_seconds" => round(time() - run_start; digits = 3),
+            "peak_rss_bytes" => Int(Sys.maxrss()),
+            "peak_rss_source" => "Sys.maxrss",
+        ]),
+        "objective_value" => objective,
+        "termination_status" => termination === nothing ? nothing : string(termination),
+    ])
+    perf_path = _write_perf_json(joinpath(result_dir, "perf.json"), perf)
+    println("Perf JSON written to: $perf_path")
+    end
+
     println("End time: $(now())")
     flush(stdout)
     progress("Run complete")

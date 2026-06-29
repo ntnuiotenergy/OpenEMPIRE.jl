@@ -71,7 +71,7 @@ if [ -z "$JOB_ID" ]; then
 	echo "Selected node: ${BEST_NODE} (${MIN_LOAD} jobs)"
 	qsub \
 		-l hostname=${BEST_NODE} \
-		-v JULIA_CMD="$JULIA_CMD",JULIA_SOLVER="$JULIA_SOLVER",JULIA_SEED="$JULIA_SEED",JULIA_OPTIMIZE="$JULIA_OPTIMIZE",JULIA_FIXED_SAMPLE="$JULIA_FIXED_SAMPLE" \
+		-v JULIA_CMD="$JULIA_CMD",JULIA_SOLVER="$JULIA_SOLVER",JULIA_SEED="$JULIA_SEED",JULIA_OPTIMIZE="$JULIA_OPTIMIZE",JULIA_FIXED_SAMPLE="$JULIA_FIXED_SAMPLE",EMPIRE_PERF="${EMPIRE_PERF:-}",EMPIRE_PERF_INTERVAL="${EMPIRE_PERF_INTERVAL:-}" \
 		"$0" "$DATASET" "$CONFIG_FILE" "$INPUT_FORMAT"
 	echo "Job submitted to ${BEST_NODE}. Use 'qstat' to monitor status."
 	exit 0
@@ -182,11 +182,45 @@ if [[ "$JULIA_FIXED_SAMPLE" == "true" || "$JULIA_FIXED_SAMPLE" == "1" || "$JULIA
 	FIXED_SAMPLE_FLAG="--fixed-sample"
 fi
 
+# Optional performance/RAM instrumentation (opt-in via EMPIRE_PERF=1). Wraps the
+# run in the external RSS sampler; the in-process perf.json is gated on the same
+# env var inside scripts/run_julia_empire.jl. SGE accounting is collected
+# afterwards with scripts/perf/collect_qacct.sh $JOB_ID.
+PERF_PREFIX=""
+case "${EMPIRE_PERF:-}" in
+	1 | true | yes | on)
+		PERF_MEM="logs/perf_mem_${JOB_ID}.csv"
+		PERF_SUM="logs/perf_mem_${JOB_ID}.json"
+		PERF_INTERVAL="${EMPIRE_PERF_INTERVAL:-1.0}"
+		# memwatch needs Python 3 (the node's /usr/bin/python is Python 2). Prefer an
+		# explicit override, then any python3-capable interpreter, then the conda
+		# empire_env interpreter that the Python port uses.
+		PERF_PY="${EMPIRE_PERF_PYTHON:-}"
+		if [ -z "$PERF_PY" ]; then
+			for cand in python3 python; do
+				if command -v "$cand" >/dev/null 2>&1 && "$cand" -c 'import sys; sys.exit(0 if sys.version_info[0] >= 3 else 1)' 2>/dev/null; then
+					PERF_PY=$(command -v "$cand")
+					break
+				fi
+			done
+		fi
+		if [ -z "$PERF_PY" ] && [ -x "$HOME/.conda/envs/empire_env/bin/python" ]; then
+			PERF_PY="$HOME/.conda/envs/empire_env/bin/python"
+		fi
+		if [ -z "$PERF_PY" ]; then
+			echo "WARNING: no Python 3 found for memwatch; running without the external RSS sampler."
+		else
+			echo "Performance sampling enabled -> $PERF_MEM (interval ${PERF_INTERVAL}s, $PERF_PY)"
+			PERF_PREFIX="$PERF_PY scripts/perf/memwatch.py --interval $PERF_INTERVAL --out $PERF_MEM --summary $PERF_SUM --label julia-${DATASET} --"
+		fi
+		;;
+esac
+
 echo "================================================"
 echo "Starting OpenEMPIRE.jl run"
 echo "================================================"
 
-$JULIA_CMD --project=. scripts/run_julia_empire.jl \
+$PERF_PREFIX $JULIA_CMD --project=. scripts/run_julia_empire.jl \
 	--dataset="$DATASET" \
 	--config="$CONFIG_FILE" \
 	--format="$INPUT_FORMAT" \
@@ -196,6 +230,11 @@ $JULIA_CMD --project=. scripts/run_julia_empire.jl \
 	$OPTIMIZE_FLAG
 
 EXIT_CODE=$?
+
+if [ -n "$PERF_PREFIX" ]; then
+	echo "Performance sampler summary: $PERF_SUM"
+	echo "Collect SGE accounting once available with: sh scripts/perf/collect_qacct.sh $JOB_ID"
+fi
 
 echo "================================================"
 echo "OpenEMPIRE.jl run completed"
