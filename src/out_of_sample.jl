@@ -1,10 +1,11 @@
 """
     fix_investments_from_results!(model, sets, periods, output_dir; fix_installed_capacities=true)
 
-Fix strategic capacity variables from a previous OpenEMPIRE.jl result directory.
+Read strategic capacity results from a previous run and fix the matching JuMP
+variables in `model`.
 
-The fixed variables are read from the investment and installed-capacity CSVs
-written by a previous run.
+`output_dir` may point either to a run directory or directly to its `Output`
+subdirectory.
 """
 function fix_investments_from_results!(
     model::JuMP.Model,
@@ -25,6 +26,8 @@ function fix_investments_from_results!(
         "genInvCap",
     )
 
+    # Accept the old misspelled file/column name for compatibility with
+    # previous Julia result folders.
     _fix_transmission_capacity!(
         model[:transmissionInvCap],
         sets,
@@ -104,8 +107,6 @@ function _oos_output_dir(path::AbstractString)
 end
 
 function _first_existing_file(output_dir::AbstractString, filenames)
-    # Support the old misspelled transmission filename while preferring the
-    # corrected name when present.
     for filename in filenames
         path = joinpath(output_dir, filename)
         isfile(path) && return path
