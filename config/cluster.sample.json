@@ -8,6 +8,8 @@
     "JULIA_SEED": "1",
     "JULIA_OPTIMIZE": "true",
     "JULIA_FIXED_SAMPLE": "true",
-    "JULIA_CMD": "julia"
+    "JULIA_CMD": "julia",
+    "EMPIRE_PERF": "",
+    "EMPIRE_PERF_INTERVAL": "1.0"
   }
 }
