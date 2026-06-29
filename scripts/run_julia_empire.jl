@@ -18,6 +18,7 @@ function _parse_args(args)
         "seed" => "1",
         "results" => joinpath("results", "julia_runs"),
         "optimize" => "true",
+        "generate-only" => "false",
         "fixed-sample" => "auto",
         "gurobi-method" => "",
         "gurobi-crossover" => "",
@@ -26,6 +27,8 @@ function _parse_args(args)
     for arg in args
         if arg == "--no-optimize"
             options["optimize"] = "false"
+        elseif arg == "--generate-only"
+            options["generate-only"] = "true"
         elseif arg == "--fixed-sample"
             options["fixed-sample"] = "true"
         elseif startswith(arg, "--") && occursin("=", arg)
@@ -168,6 +171,7 @@ function main(args = ARGS)
     optimizer = _optimizer(solver_name)
     seed = parse(Int, options["seed"])
     optimize_model = lowercase(options["optimize"]) in ("true", "1", "yes")
+    generate_only = lowercase(options["generate-only"]) in ("true", "1", "yes")
     fixed_sample_option = lowercase(options["fixed-sample"])
 
     isdir(data_folder) || throw(ArgumentError("Dataset folder not found: $data_folder"))
@@ -203,6 +207,7 @@ function main(args = ARGS)
     println("Solver attrs: $(_optimizer_attribute_summary(optimizer_attributes))")
     println("Seed:         $seed")
     println("Fixed sample: $fixed_sample_option")
+    println("Generate only: $generate_only")
     println("Optimize:     $optimize_model")
     println("Result dir:   $result_dir")
     println("Start time:   $(now())")
@@ -211,6 +216,48 @@ function main(args = ARGS)
 
     progress = _progress_logger()
     progress("Runner initialized")
+
+    if generate_only
+        progress("Generating scenario data only (no model build)")
+        generate_start = time()
+        OpenEMPIRE.generate_scenarios(
+            config_file,
+            data_folder;
+            input_format = format,
+            scenario_rng = MersenneTwister(seed),
+            progress,
+        )
+        generate_seconds = time() - generate_start
+        progress("Scenario generation finished in $(round(generate_seconds; digits = 2)) seconds")
+        scenario_artifact = OpenEMPIRE.write_scenario_artifacts(
+            result_dir,
+            data_folder,
+            run_config;
+            config_file = config_file,
+            dataset = dataset,
+            input_format = format,
+            seed = seed,
+        )
+        scenario_artifact !== nothing &&
+            println("Scenario sampling key archived to: $scenario_artifact")
+        summary_path = _write_summary(
+            joinpath(result_dir, "summary.txt"),
+            [
+                "mode=generate-only",
+                "dataset=$dataset",
+                "config=$config_file",
+                "seed=$seed",
+                "fixed_sample=$fixed_sample_option",
+                "scenario_data_folder=$(joinpath(data_folder, "ScenarioData"))",
+                "generate_seconds=$generate_seconds",
+            ],
+        )
+        println("Summary written to: $summary_path")
+        println("End time: $(now())")
+        flush(stdout)
+        progress("Run complete")
+        return result_dir
+    end
 
     build_start = time()
     progress("Starting model build")

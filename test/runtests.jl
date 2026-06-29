@@ -36,6 +36,7 @@ end
     test_configurable_regular_scenario_seasons()
     test_python_fixed_sample_scenario_parity()
     test_create_model_with_raw_csv_scenarios()
+    test_generate_scenarios_without_model()
     test_write_scenario_sampling_key_artifacts()
     test_create_model_accepts_optimizer_type()
     test_storage_constraints_match_python_formulation()
