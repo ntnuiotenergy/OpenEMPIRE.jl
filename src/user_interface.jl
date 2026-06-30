@@ -175,7 +175,14 @@ function create_model(
     _report_progress(progress, "Build 10/12: creating variables")
     @time OpenEMPIRE.create_variables(emp, sets, periods; progress)
     _report_progress(progress, "Build 11/12: creating constraints")
-    @time OpenEMPIRE.create_constraints(emp, sets, params, periods; progress)
+    @time OpenEMPIRE.create_constraints(
+        emp,
+        sets,
+        params,
+        periods;
+        north_sea = _config_bool(config, "north_sea", false),
+        progress,
+    )
     _report_progress(progress, "Build 12/12: creating objective")
     @time OpenEMPIRE.create_objective(
         emp,

@@ -1215,6 +1215,44 @@ function test_create_model_adds_storage_max_constraints()
     end
 end
 
+function test_north_sea_transmission_cap_is_config_gated()
+    sets = OpenEMPIRE.EmpireSets(
+        Generator = ["Windoffshore"],
+        Technology = ["Wind"],
+        Node = ["Offshore", "Onshore"],
+        OffshoreNode = ["Offshore"],
+        DirectionalLink = [("Offshore", "Onshore"), ("Onshore", "Offshore")],
+        TransmissionType = ["HVDC"],
+        TransmissionTypeOfDirectionalLink = [
+            ("Offshore", "Onshore", "HVDC"),
+            ("Onshore", "Offshore", "HVDC"),
+        ],
+        GeneratorsOfTechnology = [("Wind", "Windoffshore")],
+        GeneratorsOfNode = [("Offshore", "Windoffshore")],
+    )
+    periods = OpenEMPIRE.create_timestruct(1, 5, 1, 2, 0, 0, 1)
+    sp = first(strat_periods(periods))
+    params = OpenEMPIRE.EmpireParams()
+
+    emp_off = JuMP.Model()
+    OpenEMPIRE.create_variables(emp_off, sets, periods)
+    OpenEMPIRE.create_transmission_constraints(emp_off, sets, params, periods; north_sea = false)
+    @test !haskey(JuMP.object_dictionary(emp_off), :wind_farm_transmission_cap)
+
+    emp_on = JuMP.Model()
+    OpenEMPIRE.create_variables(emp_on, sets, periods)
+    OpenEMPIRE.create_transmission_constraints(emp_on, sets, params, periods; north_sea = true)
+    @test _sparse_axis_length(emp_on[:wind_farm_transmission_cap]) == 2
+
+    cap = emp_on[:transmissionInstalledCap]["Offshore", "Onshore", sp]
+    gen = emp_on[:genInstalledCap]["Offshore", "Windoffshore", sp]
+    for arc in (("Offshore", "Onshore"), ("Onshore", "Offshore"))
+        constraint = emp_on[:wind_farm_transmission_cap][arc, sp]
+        @test JuMP.normalized_coefficient(constraint, cap) == 1.0
+        @test JuMP.normalized_coefficient(constraint, gen) == -1.0
+    end
+end
+
 function test_emission_constraints_match_python_formulation()
     sets = OpenEMPIRE.EmpireSets(
         Generator = ["gas", "wind"],

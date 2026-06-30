@@ -148,7 +148,7 @@ function create_objective(emp::JuMP.Model, sets, par, periods::TimeStructure, di
 end
 
 # Create all constraints in the model
-function create_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
+function create_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; north_sea::Bool = false, progress = nothing)
     @info "Creating constraints"
     _report_progress(progress, "Creating constraints")
 
@@ -174,7 +174,7 @@ function create_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; 
 
     create_generator_constraints(emp, sets, par, periods; progress)
     create_storage_constraints(emp, sets, par, periods; progress)
-    create_transmission_constraints(emp, sets, par, periods; progress)
+    create_transmission_constraints(emp, sets, par, periods; north_sea, progress)
     create_emission_constraints(emp, sets, par, periods; progress)
     return nothing
 
@@ -375,7 +375,17 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
 
 end
 
-function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
+function _canonical_arc(m, n)
+    return is_bidir(m, n) ? (m, n) : (n, m)
+end
+
+function _offshore_endpoint(sets, m, n)
+    is_offshore(sets, m) && return m
+    is_offshore(sets, n) && return n
+    return nothing
+end
+
+function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; north_sea::Bool = false, progress = nothing)
     @info "Creating transmission constraints"
     _report_progress(progress, "Creating transmission constraints")
     N = nodes(sets)
@@ -409,12 +419,31 @@ function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::Ti
     )
 
     # Constraints on maximum installed capacity for each transmission line
-    return @constraint(
+    @constraint(
         emp,
         trans_installed_cap[(m, n) in bidir_arcs(sets), sp in SP; !isnothing(trans_max_inst_cap(par, m, n, sp))],
         transCap[m, n, sp] <= trans_max_inst_cap(par, m, n, sp)
     )
 
+    if north_sea
+        @info " - offshore wind-farm transmission capacity constraints"
+        _report_progress(progress, "Creating offshore wind-farm transmission capacity constraints")
+        genCap = emp[:genInstalledCap]
+        # Python builds this over ordered node pairs, producing duplicate rows for the
+        # two directions of an offshore-adjacent corridor. Keep the same row structure
+        # while pointing both directions at Julia's canonical corridor capacity.
+        return @constraint(
+            emp,
+            wind_farm_transmission_cap[
+                (m, n) in arcs(sets), sp in SP;
+                !isnothing(_offshore_endpoint(sets, m, n))
+            ],
+            transCap[_canonical_arc(m, n)..., sp] <=
+                sum(genCap[_offshore_endpoint(sets, m, n), g, sp] for g in generators(sets, _offshore_endpoint(sets, m, n)); init = 0)
+        )
+    end
+
+    return nothing
 end
 
 
