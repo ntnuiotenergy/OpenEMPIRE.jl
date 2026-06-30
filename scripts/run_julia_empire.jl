@@ -221,6 +221,34 @@ function _progress_logger()
     end
 end
 
+# Count how many JuMP.ConstraintRef objects a registered object_dictionary entry holds.
+# Variable containers (VariableRef) and other registered objects return 0.
+function _family_cref_count(obj)
+    obj isa JuMP.ConstraintRef && return 1
+    obj isa AbstractArray && return count(v -> v isa JuMP.ConstraintRef, obj)
+    return 0
+end
+
+# Print the number of constraints in each registered @constraint family, plus a total.
+# Used to localize Python/Julia constraint-count parity gaps.
+function report_constraint_family_counts(emp::JuMP.Model)
+    counts = Tuple{String,Int}[]
+    for (name, obj) in JuMP.object_dictionary(emp)
+        n = _family_cref_count(obj)
+        n > 0 && push!(counts, (string(name), n))
+    end
+    sort!(counts; by = first)
+    println("Constraint family counts:")
+    total = 0
+    for (name, n) in counts
+        total += n
+        println("  $(name): $(n)")
+    end
+    println("  TOTAL (named families): $(total)")
+    flush(stdout)
+    return counts
+end
+
 function main(args = ARGS)
     options = _parse_args(args)
     dataset = options["dataset"]
@@ -339,6 +367,7 @@ function main(args = ARGS)
     println("Model build seconds: $(round(build_seconds; digits = 2))")
     println("Variables: $(JuMP.num_variables(emp))")
     println("Constraints: $(JuMP.num_constraints(emp; count_variable_in_set_constraints = false))")
+    report_constraint_family_counts(emp)
     flush(stdout)
     progress("Model build finished in $(round(build_seconds; digits = 2)) seconds")
     scenario_artifact = OpenEMPIRE.write_scenario_artifacts(
