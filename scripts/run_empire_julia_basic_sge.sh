@@ -24,6 +24,8 @@
 #   JULIA_OPTIMIZE  true/false, default: true
 #   JULIA_FIXED_SAMPLE  true/false, default: false. If true, pass
 #                       --fixed-sample and require ScenarioData/sampling_key.csv.
+#   JULIA_SGE_HOSTS Host expression for SGE, default:
+#                   compute-4-51|compute-4-52|compute-4-53|compute-4-55|compute-4-56
 
 DATASET=${1:-test}
 CONFIG_FILE=${2:-config/testrun.yaml}
@@ -33,6 +35,7 @@ JULIA_SOLVER=${JULIA_SOLVER:-HiGHS}
 JULIA_SEED=${JULIA_SEED:-1}
 JULIA_OPTIMIZE=${JULIA_OPTIMIZE:-true}
 JULIA_FIXED_SAMPLE=${JULIA_FIXED_SAMPLE:-false}
+JULIA_SGE_HOSTS=${JULIA_SGE_HOSTS:-compute-4-51|compute-4-52|compute-4-53|compute-4-55|compute-4-56}
 
 if [ -z "$JOB_ID" ]; then
 	echo "Submitting OpenEMPIRE.jl job for dataset: $DATASET"
@@ -43,37 +46,13 @@ if [ -z "$JOB_ID" ]; then
 		exit 1
 	fi
 
-	HIGH_MEM_NODES=("compute-4-51" "compute-4-52" "compute-4-53" "compute-4-55" "compute-4-56")
-
-	echo "Checking availability of high-memory nodes..."
-	BEST_NODE=""
-	MIN_LOAD=999999
-
-	for node in "${HIGH_MEM_NODES[@]}"; do
-		JOBS_ON_NODE=$(qstat -u "*" 2>/dev/null | grep "${node}" | wc -l)
-		if ! [[ "$JOBS_ON_NODE" =~ ^[0-9]+$ ]]; then
-			JOBS_ON_NODE=0
-		fi
-
-		if [ "$JOBS_ON_NODE" -lt "$MIN_LOAD" ]; then
-			MIN_LOAD=$JOBS_ON_NODE
-			BEST_NODE=$node
-		fi
-
-		echo "  ${node}: ${JOBS_ON_NODE} jobs"
-	done
-
-	if [ -z "$BEST_NODE" ]; then
-		echo "ERROR: No suitable node found!"
-		exit 1
-	fi
-
-	echo "Selected node: ${BEST_NODE} (${MIN_LOAD} jobs)"
+	echo "Submitting to SGE host expression: ${JULIA_SGE_HOSTS}"
+	echo "SGE will choose an eligible available host from that expression."
 	qsub \
-		-l hostname=${BEST_NODE} \
-		-v JULIA_CMD="$JULIA_CMD",JULIA_SOLVER="$JULIA_SOLVER",JULIA_SEED="$JULIA_SEED",JULIA_OPTIMIZE="$JULIA_OPTIMIZE",JULIA_FIXED_SAMPLE="$JULIA_FIXED_SAMPLE",EMPIRE_PERF="${EMPIRE_PERF:-}",EMPIRE_PERF_INTERVAL="${EMPIRE_PERF_INTERVAL:-}" \
+		-l hostname="$JULIA_SGE_HOSTS" \
+		-v JULIA_CMD="$JULIA_CMD",JULIA_SOLVER="$JULIA_SOLVER",JULIA_SEED="$JULIA_SEED",JULIA_OPTIMIZE="$JULIA_OPTIMIZE",JULIA_FIXED_SAMPLE="$JULIA_FIXED_SAMPLE",JULIA_SGE_HOSTS="$JULIA_SGE_HOSTS",EMPIRE_PERF="${EMPIRE_PERF:-}",EMPIRE_PERF_INTERVAL="${EMPIRE_PERF_INTERVAL:-}" \
 		"$0" "$DATASET" "$CONFIG_FILE" "$INPUT_FORMAT"
-	echo "Job submitted to ${BEST_NODE}. Use 'qstat' to monitor status."
+	echo "Job submitted. Use 'qstat' to monitor status."
 	exit 0
 fi
 
