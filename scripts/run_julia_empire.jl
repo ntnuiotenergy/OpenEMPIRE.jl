@@ -6,6 +6,7 @@ using HiGHS
 using JuMP
 using OpenEMPIRE
 using Random
+using SHA
 using TimeStruct
 using YAML
 
@@ -135,6 +136,49 @@ function _config_with_fixed_sample(config_file, result_dir)
     return generated_config
 end
 
+function _read_command(cmd::Cmd)
+    try
+        return strip(read(cmd, String))
+    catch
+        return nothing
+    end
+end
+
+function _git_info()
+    status = _read_command(`git status --short`)
+    return Dict{String, Any}(
+        "branch" => _read_command(`git rev-parse --abbrev-ref HEAD`),
+        "commit" => _read_command(`git rev-parse HEAD`),
+        "dirty" => status === nothing ? nothing : !isempty(status),
+    )
+end
+
+function _sha256_file(path::AbstractString)
+    isfile(path) || return nothing
+    open(path, "r") do io
+        return bytes2hex(sha256(io))
+    end
+end
+
+function _optimizer_attributes_manifest(attributes)
+    return Dict{String, Any}(string(name) => value for (name, value) in attributes)
+end
+
+function _sampling_key_info(data_folder::AbstractString)
+    path = joinpath(data_folder, "ScenarioData", "sampling_key.csv")
+    return Dict{String, Any}(
+        "path" => path,
+        "exists" => isfile(path),
+        "sha256" => _sha256_file(path),
+    )
+end
+
+function _write_run_manifest(path, manifest)
+    mkpath(dirname(path))
+    YAML.write_file(path, manifest)
+    return path
+end
+
 function _write_summary(path, lines)
     mkpath(dirname(path))
     open(path, "w") do io
@@ -254,6 +298,7 @@ function main(args = ARGS)
     dataset = options["dataset"]
     data_folder = joinpath("data", dataset)
     config_file = options["config"]
+    original_config_file = config_file
     format = _input_format(options["format"])
     solver_name = options["solver"]
     optimizer = _optimizer(solver_name)
@@ -283,6 +328,42 @@ function main(args = ARGS)
     end
     run_config = YAML.load_file(config_file)
     optimizer_attributes = _optimizer_attributes(solver_name, run_config, options)
+    run_started_at = now()
+    manifest_path = joinpath(result_dir, "run_manifest.yaml")
+    manifest = Dict{String, Any}(
+        "runtime" => "julia",
+        "status" => "started",
+        "start_time" => string(run_started_at),
+        "host" => gethostname(),
+        "cpu_threads" => Sys.CPU_THREADS,
+        "versions" => Dict{String, Any}(
+            "julia" => string(VERSION),
+            "jump" => _pkgversion_str(JuMP),
+            "gurobi_jl" => _pkgversion_str(Gurobi),
+        ),
+        "git" => _git_info(),
+        "dataset" => dataset,
+        "data_folder" => data_folder,
+        "config_file" => config_file,
+        "original_config_file" => original_config_file,
+        "config_sha256" => _sha256_file(config_file),
+        "original_config_sha256" => _sha256_file(original_config_file),
+        "input_format" => string(format),
+        "solver" => Dict{String, Any}(
+            "name" => solver_name,
+            "attributes" => _optimizer_attributes_manifest(optimizer_attributes),
+        ),
+        "seed" => seed,
+        "fixed_sample" => fixed_sample_option,
+        "sampling_key" => _sampling_key_info(data_folder),
+        "generate_only" => generate_only,
+        "optimize" => optimize_model,
+        "result_dir" => result_dir,
+        "timings" => Dict{String, Any}(),
+        "model" => nothing,
+        "solution" => nothing,
+    )
+    _write_run_manifest(manifest_path, manifest)
 
     println("================================================")
     println("OpenEMPIRE.jl run")
@@ -344,7 +425,16 @@ function main(args = ARGS)
             ],
         )
         println("Summary written to: $summary_path")
-        println("End time: $(now())")
+        run_ended_at = now()
+        manifest["status"] = "complete"
+        manifest["end_time"] = string(run_ended_at)
+        manifest["timings"]["generate_seconds"] = generate_seconds
+        manifest["timings"]["wall_seconds"] = round(time() - run_start; digits = 3)
+        manifest["sampling_key"] = _sampling_key_info(data_folder)
+        manifest["scenario_artifact"] = scenario_artifact
+        _write_run_manifest(manifest_path, manifest)
+        println("Run manifest written to: $manifest_path")
+        println("End time: $run_ended_at")
         flush(stdout)
         progress("Run complete")
         return result_dir
@@ -370,6 +460,15 @@ function main(args = ARGS)
     report_constraint_family_counts(emp)
     flush(stdout)
     progress("Model build finished in $(round(build_seconds; digits = 2)) seconds")
+    manifest["timings"]["build_seconds"] = build_seconds
+    manifest["model"] = Dict{String, Any}(
+        "variables" => JuMP.num_variables(emp),
+        "constraints" => JuMP.num_constraints(
+            emp;
+            count_variable_in_set_constraints = false,
+        ),
+    )
+    _write_run_manifest(manifest_path, manifest)
     scenario_artifact = OpenEMPIRE.write_scenario_artifacts(
         result_dir,
         data_folder,
@@ -383,6 +482,9 @@ function main(args = ARGS)
         println("Scenario sampling key archived to: $scenario_artifact")
         flush(stdout)
     end
+    manifest["sampling_key"] = _sampling_key_info(data_folder)
+    manifest["scenario_artifact"] = scenario_artifact
+    _write_run_manifest(manifest_path, manifest)
 
     termination = nothing
     objective = nothing
@@ -394,6 +496,7 @@ function main(args = ARGS)
         solve_stats = @timed JuMP.optimize!(emp)
         solve_seconds = time() - solve_start
         push!(perf_phases, _perf_phase("solve", solve_seconds; alloc_bytes = solve_stats.bytes, gc_seconds = solve_stats.gctime))
+        manifest["timings"]["solve_seconds"] = solve_seconds
         progress("Solver optimization finished in $(round(solve_seconds; digits = 2)) seconds")
         termination = JuMP.termination_status(emp)
         objective = JuMP.objective_value(emp)
@@ -426,6 +529,12 @@ function main(args = ARGS)
             flush(stdout)
         end
     end
+    manifest["solution"] = Dict{String, Any}(
+        "termination_status" => termination === nothing ? "not_optimized" : string(termination),
+        "objective_value" => objective === nothing ? "not_optimized" : objective,
+        "objective_components" => objective_components === nothing ? nothing :
+            Dict{String, Any}(string(name) => value for (name, value) in pairs(objective_components)),
+    )
 
     component_lines = if objective_components === nothing
         ["objective_component_$name=not_optimized" for name in (
@@ -462,43 +571,51 @@ function main(args = ARGS)
         ], component_lines),
     )
     println("Summary written to: $summary_path")
+    manifest["status"] = "complete"
+    manifest["end_time"] = string(now())
+    manifest["timings"]["wall_seconds"] = round(time() - run_start; digits = 3)
+    manifest["summary_path"] = summary_path
+    manifest["scenario_artifact"] = scenario_artifact
+    manifest["perf_enabled"] = _perf_enabled()
+    _write_run_manifest(manifest_path, manifest)
+    println("Run manifest written to: $manifest_path")
 
     if _perf_enabled()
-    solver_threads = nothing
-    for (k, v) in optimizer_attributes
-        k == "Threads" && (solver_threads = v)
-    end
-    perf = JObj([
-        "runtime" => "julia",
-        "host" => gethostname(),
-        "cpu_threads" => Sys.CPU_THREADS,
-        "solver_threads" => solver_threads === nothing ? nothing : Int(solver_threads),
-        "datetime" => string(now()),
-        "dataset" => dataset,
-        "config" => config_file,
-        "seed" => seed,
-        "versions" => JObj([
-            "julia" => string(VERSION),
-            "jump" => _pkgversion_str(JuMP),
-            "gurobi_jl" => _pkgversion_str(Gurobi),
-        ]),
-        "solver" => solver_name,
-        "solver_attributes" => JObj(Pair{String, Any}[string(k) => string(v) for (k, v) in optimizer_attributes]),
-        "model" => JObj([
-            "variables" => JuMP.num_variables(emp),
-            "constraints" => JuMP.num_constraints(emp; count_variable_in_set_constraints = false),
-        ]),
-        "phases" => perf_phases,
-        "totals" => JObj([
-            "wall_seconds" => round(time() - run_start; digits = 3),
-            "peak_rss_bytes" => Int(Sys.maxrss()),
-            "peak_rss_source" => "Sys.maxrss",
-        ]),
-        "objective_value" => objective,
-        "termination_status" => termination === nothing ? nothing : string(termination),
-    ])
-    perf_path = _write_perf_json(joinpath(result_dir, "perf.json"), perf)
-    println("Perf JSON written to: $perf_path")
+        solver_threads = nothing
+        for (k, v) in optimizer_attributes
+            k == "Threads" && (solver_threads = v)
+        end
+        perf = JObj([
+            "runtime" => "julia",
+            "host" => gethostname(),
+            "cpu_threads" => Sys.CPU_THREADS,
+            "solver_threads" => solver_threads === nothing ? nothing : Int(solver_threads),
+            "datetime" => string(now()),
+            "dataset" => dataset,
+            "config" => config_file,
+            "seed" => seed,
+            "versions" => JObj([
+                "julia" => string(VERSION),
+                "jump" => _pkgversion_str(JuMP),
+                "gurobi_jl" => _pkgversion_str(Gurobi),
+            ]),
+            "solver" => solver_name,
+            "solver_attributes" => JObj(Pair{String, Any}[string(k) => string(v) for (k, v) in optimizer_attributes]),
+            "model" => JObj([
+                "variables" => JuMP.num_variables(emp),
+                "constraints" => JuMP.num_constraints(emp; count_variable_in_set_constraints = false),
+            ]),
+            "phases" => perf_phases,
+            "totals" => JObj([
+                "wall_seconds" => round(time() - run_start; digits = 3),
+                "peak_rss_bytes" => Int(Sys.maxrss()),
+                "peak_rss_source" => "Sys.maxrss",
+            ]),
+            "objective_value" => objective,
+            "termination_status" => termination === nothing ? nothing : string(termination),
+        ])
+        perf_path = _write_perf_json(joinpath(result_dir, "perf.json"), perf)
+        println("Perf JSON written to: $perf_path")
     end
 
     println("End time: $(now())")
