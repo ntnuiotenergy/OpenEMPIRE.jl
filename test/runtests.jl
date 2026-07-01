@@ -13,6 +13,7 @@ using YAML
 include("test_excel.jl")
 include("test_csv.jl")
 include("test_scenario_csv.jl")
+include("test_runner_staging.jl")
 #include("test_interface.jl")
 include("test_timestruct.jl")
 include("test_solve.jl")
@@ -44,6 +45,10 @@ end
     test_emission_constraints_match_python_formulation()
     test_native_dual_weight_normalization()
     test_create_model_respects_emission_cap_config()
+end
+
+@testset "Runner staging" begin
+    test_stage_run_inputs_copies_without_mutating_source()
 end
 
 @testset "Validate" begin

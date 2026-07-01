@@ -126,14 +126,13 @@ function _config_bool(config, key, default)
     return _boolean_option(string(value), key)
 end
 
-function _config_with_fixed_sample(config_file, result_dir)
+function _config_with_fixed_sample(config_file)
     config = YAML.load_file(config_file)
     config["use_scenario_generation"] = true
     config["use_fixed_sample"] = true
 
-    generated_config = joinpath(result_dir, "fixed_sample_config.yaml")
-    YAML.write_file(generated_config, config)
-    return generated_config
+    YAML.write_file(config_file, config)
+    return config_file
 end
 
 function _read_command(cmd::Cmd)
@@ -177,6 +176,27 @@ function _write_run_manifest(path, manifest)
     mkpath(dirname(path))
     YAML.write_file(path, manifest)
     return path
+end
+
+function _dataset_folder(dataset::AbstractString)
+    return isabspath(dataset) ? dataset : joinpath("data", dataset)
+end
+
+function _run_label(dataset::AbstractString)
+    label = basename(normpath(dataset))
+    return isempty(label) ? "dataset" : label
+end
+
+function _stage_run_inputs(result_dir::AbstractString, data_folder::AbstractString, config_file::AbstractString)
+    input_dir = joinpath(result_dir, "Input")
+    staged_data = joinpath(input_dir, "csv")
+    staged_config = joinpath(input_dir, "config.yaml")
+
+    mkpath(input_dir)
+    cp(data_folder, staged_data)
+    cp(config_file, staged_config; force = true)
+
+    return staged_data, staged_config
 end
 
 function _write_summary(path, lines)
@@ -296,7 +316,7 @@ end
 function main(args = ARGS)
     options = _parse_args(args)
     dataset = options["dataset"]
-    data_folder = joinpath("data", dataset)
+    original_data_folder = _dataset_folder(dataset)
     config_file = options["config"]
     original_config_file = config_file
     format = _input_format(options["format"])
@@ -307,19 +327,20 @@ function main(args = ARGS)
     generate_only = lowercase(options["generate-only"]) in ("true", "1", "yes")
     fixed_sample_option = lowercase(options["fixed-sample"])
 
-    isdir(data_folder) || throw(ArgumentError("Dataset folder not found: $data_folder"))
+    isdir(original_data_folder) || throw(ArgumentError("Dataset folder not found: $original_data_folder"))
     isfile(config_file) || throw(ArgumentError("Config file not found: $config_file"))
 
     timestamp = Dates.format(now(), dateformat"yyyymmdd_HHMMSS")
-    result_dir = joinpath(options["results"], "$(timestamp)_$(dataset)")
+    result_dir = joinpath(options["results"], "$(timestamp)_$(_run_label(dataset))")
     mkpath(result_dir)
+    data_folder, config_file = _stage_run_inputs(result_dir, original_data_folder, config_file)
 
     if fixed_sample_option != "auto"
         if _boolean_option(fixed_sample_option, "fixed-sample")
             sampling_key = joinpath(data_folder, "ScenarioData", "sampling_key.csv")
             isfile(sampling_key) ||
                 throw(ArgumentError("--fixed-sample requires sampling key: $sampling_key"))
-            config_file = _config_with_fixed_sample(config_file, result_dir)
+            config_file = _config_with_fixed_sample(config_file)
         else
             throw(ArgumentError(
                 "--fixed-sample=false is not supported by this runner. Use a config file with use_fixed_sample: False instead.",
@@ -344,6 +365,12 @@ function main(args = ARGS)
         "git" => _git_info(),
         "dataset" => dataset,
         "data_folder" => data_folder,
+        "original_data_folder" => original_data_folder,
+        "input_staging" => Dict{String, Any}(
+            "mode" => "full_copy",
+            "staged_data_folder" => data_folder,
+            "staged_config_file" => config_file,
+        ),
         "config_file" => config_file,
         "original_config_file" => original_config_file,
         "config_sha256" => _sha256_file(config_file),
@@ -625,4 +652,6 @@ function main(args = ARGS)
     return termination
 end
 
-main()
+if abspath(PROGRAM_FILE) == @__FILE__
+    main()
+end
