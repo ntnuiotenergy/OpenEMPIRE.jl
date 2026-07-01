@@ -158,8 +158,8 @@ To run directly on Solstorm after copying the repo there:
 sh scripts/run_empire_julia_basic_sge.sh test
 ```
 
-The script selects one of the high-memory Solstorm nodes, instantiates the
-Julia project with `Pkg.instantiate()`, and runs:
+The script asks SGE to choose an available high-memory Solstorm node,
+instantiates the Julia project with `Pkg.instantiate()`, and runs:
 
 ```bash
 julia --project=. scripts/run_julia_empire.jl --dataset=test
@@ -194,6 +194,11 @@ For one-command deployment, set this in `config/cluster.json`:
 ```json
 "JULIA_SOLVER": "Gurobi"
 ```
+
+The default SGE host expression is the high-memory node group
+`compute-4-51|compute-4-52|compute-4-53|compute-4-55|compute-4-56`. Override it
+with `JULIA_SGE_HOSTS` in your environment or `config/cluster.json` if Solstorm
+node availability changes.
 
 The Julia project includes `Gurobi.jl`; on Solstorm, the script tries to load
 `gurobi/13.0` first and then `gurobi/12.0`. If Gurobi license discovery fails,
