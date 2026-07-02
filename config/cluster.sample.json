@@ -3,7 +3,7 @@
     "REMOTE_USER": "your_username",
     "REMOTE_SERVER": "solstorm.iot.ntnu.no",
     "REMOTE_DIR": "~/OpenEMPIRE.jl",
-    "SCHEDULER_SCRIPT": "./scripts/run_empire_julia_basic_sge.sh test",
+    "SCHEDULER_SCRIPT": "./scripts/run_empire_julia_basic_sge.sh",
     "JULIA_SOLVER": "Gurobi",
     "JULIA_SEED": "1",
     "JULIA_OPTIMIZE": "true",

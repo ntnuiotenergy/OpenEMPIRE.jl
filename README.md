@@ -179,7 +179,38 @@ Edit `config/cluster.json` with your Solstorm username and remote directory,
 then run:
 
 ```bash
-sh scripts/copy_and_run_julia_on_hpc.sh Solstorm
+sh scripts/copy_and_run_julia_on_hpc.sh Solstorm \
+  --run config/runs/2045_3sce_northsea.yaml
+```
+
+`config/cluster.json` should describe the cluster connection and scheduler
+entrypoint. The run profile describes the actual model run:
+
+```yaml
+dataset: europe_v51
+config: config/run_2045_3sce.yaml
+format: csv
+solver: Gurobi
+seed: 1
+fixed_sample: true
+optimize: true
+perf: true
+perf_interval: 2.0
+```
+
+Explicit flags can still override profile values when useful:
+
+```bash
+sh scripts/copy_and_run_julia_on_hpc.sh Solstorm \
+  --run config/runs/2045_3sce_northsea.yaml \
+  --dataset europe_v51 \
+  --config config/run_2045_3sce.yaml \
+  --format csv \
+  --solver Gurobi \
+  --seed 1 \
+  --fixed-sample \
+  --perf \
+  --perf-interval 2.0
 ```
 
 The default solver for this first Julia smoke test is HiGHS. Gurobi is loaded
