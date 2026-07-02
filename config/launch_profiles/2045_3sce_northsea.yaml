@@ -1,5 +1,5 @@
 dataset: europe_v51
-config: config/run_2045_3sce.yaml
+model_config: config/run_2045_3sce.yaml
 format: csv
 solver: Gurobi
 seed: 1

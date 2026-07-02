@@ -11,9 +11,10 @@ Cluster config:
   <cluster_name>               Usually: Solstorm
 
 Run options:
-  --run PATH                   Run profile YAML, e.g. config/runs/2045_3sce_northsea.yaml
+  --profile PATH               Launch profile YAML, e.g. config/launch_profiles/2045_3sce_northsea.yaml
   --dataset NAME               Dataset to run, e.g. test or europe_v51
-  --config PATH                Run config, e.g. config/run_2045_3sce.yaml
+  --model-config PATH          Model config, e.g. config/run_2045_3sce.yaml
+  --config PATH                Alias for --model-config
   --format FORMAT              Input format, default when --dataset is used: csv
   --solver NAME                Solver passed to the Julia runner
   --seed N                     Scenario seed
@@ -30,12 +31,12 @@ Run options:
 
 Examples:
   scripts/copy_and_run_julia_on_hpc.sh Solstorm \
-    --run config/runs/2045_3sce_northsea.yaml
+    --profile config/launch_profiles/2045_3sce_northsea.yaml
 
-Run profiles use a flat YAML mapping with scalar values. Values in a run profile
-can be overridden by explicit flags. If no run profile or run options are
-provided, the script preserves the older behavior and runs the SCHEDULER_SCRIPT
-string from config/cluster.json as-is.
+Launch profiles use a flat YAML mapping with scalar values. Values in a launch
+profile can be overridden by explicit flags. If no launch profile or run options
+are provided, the script preserves the older behavior and runs the
+SCHEDULER_SCRIPT string from config/cluster.json as-is.
 USAGE
 }
 
@@ -97,7 +98,7 @@ function assign_profile_value() {
 		dataset)
 			PROFILE_DATASET="$value"
 			;;
-		config)
+		model_config | config)
 			PROFILE_CONFIG="$value"
 			;;
 		format)
@@ -133,12 +134,12 @@ function assign_profile_value() {
 			PROFILE_PERF_INTERVAL="$value"
 			;;
 		*)
-			die "Unsupported run profile key: $key"
+			die "Unsupported launch profile key: $key"
 			;;
 	esac
 }
 
-function load_run_profile() {
+function load_launch_profile() {
 	local profile_path="$1"
 	local line
 	local key
@@ -152,7 +153,7 @@ function load_run_profile() {
 			value="$(unquote_yaml_scalar "${BASH_REMATCH[2]}")"
 			assign_profile_value "$key" "$value"
 		else
-			die "Run profile supports only flat 'key: value' entries: $line"
+			die "Launch profile supports only flat 'key: value' entries: $line"
 		fi
 	done < "$profile_path"
 }
@@ -170,7 +171,7 @@ fi
 CLUSTER="$1"
 shift
 
-RUN_PROFILE=""
+LAUNCH_PROFILE=""
 RUN_DATASET=""
 RUN_CONFIG=""
 RUN_FORMAT=""
@@ -187,9 +188,9 @@ DRY_RUN=false
 
 while [ "$#" -gt 0 ]; do
 	case "$1" in
-		--run)
+		--profile | --launch-profile | --run)
 			require_value "$@"
-			RUN_PROFILE="${2:-}"
+			LAUNCH_PROFILE="${2:-}"
 			shift 2
 			;;
 		--dataset)
@@ -197,7 +198,7 @@ while [ "$#" -gt 0 ]; do
 			RUN_DATASET="${2:-}"
 			shift 2
 			;;
-		--config)
+		--model-config | --config)
 			require_value "$@"
 			RUN_CONFIG="${2:-}"
 			shift 2
@@ -290,10 +291,10 @@ PROFILE_PERF=""
 PROFILE_PERF_SET=false
 PROFILE_PERF_INTERVAL=""
 
-if [[ -n "$RUN_PROFILE" ]]; then
-	RUN_PROFILE_PATH="$(resolve_path "$RUN_PROFILE")"
-	[[ -f "$RUN_PROFILE_PATH" ]] || die "Run profile not found: $RUN_PROFILE_PATH"
-	load_run_profile "$RUN_PROFILE_PATH"
+if [[ -n "$LAUNCH_PROFILE" ]]; then
+	LAUNCH_PROFILE_PATH="$(resolve_path "$LAUNCH_PROFILE")"
+	[[ -f "$LAUNCH_PROFILE_PATH" ]] || die "Launch profile not found: $LAUNCH_PROFILE_PATH"
+	load_launch_profile "$LAUNCH_PROFILE_PATH"
 fi
 
 RUN_DATASET=${RUN_DATASET:-$PROFILE_DATASET}
@@ -350,7 +351,7 @@ if [[ -z "$REMOTE_USER" || -z "$REMOTE_SERVER" || -z "$REMOTE_DIR" || -z "$SCHED
 fi
 
 STRUCTURED_RUN=false
-if [[ -n "$RUN_PROFILE" || -n "$RUN_DATASET" || -n "$RUN_CONFIG" || -n "$RUN_FORMAT" ]]; then
+if [[ -n "$LAUNCH_PROFILE" || -n "$RUN_DATASET" || -n "$RUN_CONFIG" || -n "$RUN_FORMAT" ]]; then
 	STRUCTURED_RUN=true
 fi
 
@@ -383,11 +384,11 @@ if [[ "$DRY_RUN" == true ]]; then
 	echo "Cluster:      $CLUSTER"
 	echo "Remote:       $REMOTE_USER@$REMOTE_SERVER:$REMOTE_DIR"
 	if [[ "$STRUCTURED_RUN" == true ]]; then
-		if [[ -n "$RUN_PROFILE" ]]; then
-			echo "Run profile:  $RUN_PROFILE"
+		if [[ -n "$LAUNCH_PROFILE" ]]; then
+			echo "Profile:      $LAUNCH_PROFILE"
 		fi
 		echo "Dataset:      $RUN_DATASET"
-		echo "Config:       $RUN_CONFIG"
+		echo "Model config: $RUN_CONFIG"
 		echo "Input format: $RUN_FORMAT"
 	else
 		echo "Run:          legacy SCHEDULER_SCRIPT string from cluster.json"
@@ -452,11 +453,11 @@ echo "Transfer complete."
 if [[ "$CLUSTER" == "Solstorm" ]]; then
 	echo "Starting SGE job on Solstorm..."
 	if [[ "$STRUCTURED_RUN" == true ]]; then
-		if [[ -n "$RUN_PROFILE" ]]; then
-			echo "Run profile:  $RUN_PROFILE"
+		if [[ -n "$LAUNCH_PROFILE" ]]; then
+			echo "Profile:      $LAUNCH_PROFILE"
 		fi
 		echo "Dataset:      $RUN_DATASET"
-		echo "Config:       $RUN_CONFIG"
+		echo "Model config: $RUN_CONFIG"
 		echo "Input format: $RUN_FORMAT"
 	fi
 	echo "Solver:       $JULIA_SOLVER"
