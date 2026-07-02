@@ -28,6 +28,32 @@ The runner writes `perf.json` beside the normal run summary. It records:
 `rss_peak_bytes` for the process high-water mark. The latter includes an
 in-process solver such as HiGHS or Gurobi.
 
+## Launching matched Julia/Python runs
+
+Use the comparison runner when the goal is a fair same-dataset, same-config,
+same-sampling-key Julia/Python launch:
+
+```bash
+scripts/run_python_julia_comparison.sh \
+    --dataset test \
+    --config config/testrun.yaml \
+    --generate-key \
+    --perf
+```
+
+The script validates both repos, installs the same `sampling_key.csv` into the
+Julia `data/<dataset>/ScenarioData/` folder and Python
+`input_data/<dataset>/ScenarioData/` folder, writes a manifest under
+`results/comparison_runs/`, and then calls the existing copy/submit launchers.
+
+For Solstorm submissions, each repo's `config/cluster.json` still controls the
+actual scheduler command. Make sure each `SCHEDULER_SCRIPT` mentions the intended
+dataset and config. The Python scheduler command must include
+`USE_FIXED_SAMPLE=true`; the comparison runner fails early if that is missing, so
+it does not accidentally launch a Python run with regenerated scenarios.
+
+## Comparing two runs
+
 The runner also prints counts for every named JuMP constraint family. This
 localizes model-size differences without requiring performance reporting to be
 enabled.
