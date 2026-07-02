@@ -9,6 +9,7 @@
     "JULIA_OPTIMIZE": "true",
     "JULIA_FIXED_SAMPLE": "true",
     "JULIA_CMD": "julia",
+    "JULIA_SGE_HOSTS": "compute-4-51|compute-4-52|compute-4-53|compute-4-55|compute-4-56",
     "EMPIRE_PERF": "",
     "EMPIRE_PERF_INTERVAL": "1.0"
   }
