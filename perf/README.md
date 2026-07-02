@@ -46,11 +46,29 @@ Julia `data/<dataset>/ScenarioData/` folder and Python
 `input_data/<dataset>/ScenarioData/` folder, writes a manifest under
 `results/comparison_runs/`, and then calls the existing copy/submit launchers.
 
-For Solstorm submissions, each repo's `config/cluster.json` still controls the
-actual scheduler command. Make sure each `SCHEDULER_SCRIPT` mentions the intended
-dataset and config. The Python scheduler command must include
-`USE_FIXED_SAMPLE=true`; the comparison runner fails early if that is missing, so
-it does not accidentally launch a Python run with regenerated scenarios.
+The two ports' config files are never byte-identical (different headers, the
+Julia `solver_*` block, the `use_fixed_sample` flag), so the runner does **not**
+compare checksums. Instead it checks that the **model-relevant keys** agree
+(`forecast_horizon_year`, `number_of_scenarios`, `length_of_regular_season`,
+`discount_rate`, `wacc`, `use_emission_cap`, `leap_years_investment`,
+`north_sea`, `time_format`) and fails on a difference unless
+`--allow-config-mismatch`. Solver settings (`solver_method`, `solver_crossover`,
+`solver_presolve`, `solver_threads`, `optimization_solver`) are reported as a
+**warning**, not a hard failure, because the Python reference may source Gurobi
+parameters outside its YAML — verify these match by hand for a fair run.
+
+**`config/cluster.json` is the source of truth for what runs remotely.** The
+comparison runner's `--dataset`/`--config` install the sampling key and validate
+paths, but the actual dataset, config, and solver on the remote side come from
+each repo's `SCHEDULER_SCRIPT`, not from this script. So make each
+`SCHEDULER_SCRIPT` pass the intended dataset and config **explicitly** (do not
+rely on the SGE script defaults — the runner checks that both appear). The Python
+scheduler command must include `USE_FIXED_SAMPLE=true` and must **not** be a
+test run (`--test-run`/`TEST_RUN=true`); the runner fails early on either, so it
+does not accidentally launch a Python run with regenerated scenarios or a tiny
+test instance. The written manifest records both repos' git commit, both
+`SCHEDULER_SCRIPT` strings, the config-parity result, and any solver
+differences, so a comparison is reproducible after the fact.
 
 ## Comparing two runs
 
