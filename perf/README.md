@@ -59,6 +59,30 @@ On the node this wraps the run in `memwatch.py` (→ `logs/perf_mem_<JOB_ID>.csv
 sh scripts/perf/collect_qacct.sh <JOB_ID>     # → logs/perf_<JOB_ID>.txt
 ```
 
+## Launching matched Julia/Python runs
+
+Use the comparison runner when the goal is a fair same-dataset, same-config,
+same-sampling-key Julia/Python launch:
+
+```bash
+scripts/run_python_julia_comparison.sh \
+    --dataset test \
+    --config config/testrun.yaml \
+    --generate-key \
+    --perf
+```
+
+The script validates both repos, installs the same `sampling_key.csv` into the
+Julia `data/<dataset>/ScenarioData/` folder and Python
+`input_data/<dataset>/ScenarioData/` folder, writes a manifest under
+`results/comparison_runs/`, and then calls the existing copy/submit launchers.
+
+For Solstorm submissions, each repo's `config/cluster.json` still controls the
+actual scheduler command. Make sure each `SCHEDULER_SCRIPT` mentions the intended
+dataset and config. The Python scheduler command must include
+`USE_FIXED_SAMPLE=true`; the comparison runner fails early if that is missing, so
+it does not accidentally launch a Python run with regenerated scenarios.
+
 ## Comparing two runs
 
 ```bash
