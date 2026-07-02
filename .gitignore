@@ -9,4 +9,5 @@ data/*/ScenarioData/sloadRaw.csv
 data/*/ScenarioData/maxRegHydroGenRaw.csv
 data/*/ScenarioData/genCapAvailStochRaw.csv
 data/*/ScenarioData/sampling_key.csv
+OutOfSample/
 **/.DS_Store
