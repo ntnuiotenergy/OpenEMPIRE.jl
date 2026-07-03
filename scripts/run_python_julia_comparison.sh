@@ -5,17 +5,21 @@ function usage() {
 	cat <<'USAGE'
 Usage:
   scripts/run_python_julia_comparison.sh --dataset DATASET --config CONFIG [options]
+  scripts/run_python_julia_comparison.sh --profile config/launch_profiles/NAME.yaml [options]
 
 Prepare and optionally launch matched Julia/Python EMPIRE comparison runs.
 
 Required:
+  --profile PATH              Julia launch profile with dataset/model_config, or:
   --dataset NAME              Dataset name present in Julia data/ and Python input_data/
-  --config PATH               Config path, relative to each repo unless --python-config is set
+  --config PATH               Model config path, relative to each repo unless --python-config is set
 
 Common options:
+  --model-config PATH         Alias for --config
   --python-config PATH        Python config path when it differs from --config
   --julia-repo PATH           Julia repo root, default: this script's parent repo
   --python-repo PATH          Python CSV repo root, default: sibling ../OpenEMPIRE-csv
+  --format FORMAT             Input format for Julia key generation/launch, default: csv
   --seed N                    Scenario seed for generated sampling keys, default: 1
   --solver NAME               Julia solver env value, default: Gurobi
   --cluster NAME              Cluster passed to copy scripts, default: Solstorm
@@ -46,14 +50,10 @@ checksum: the two ports' config files are never byte-identical. Solver settings
 are reported as a warning, since Gurobi parameters may live outside the Python
 YAML.
 
-cluster.json is the source of truth for what runs remotely. The existing repo
-launchers read their own config/cluster.json, and dataset/config/solver on the
-remote side come from each SCHEDULER_SCRIPT, not this script's flags. Before
-submitting, this script checks that each SCHEDULER_SCRIPT references the requested
-dataset (as a distinct argument) and config path, so mismatched cluster configs
-fail early. The Python SCHEDULER_SCRIPT must also include USE_FIXED_SAMPLE=true
-and must not be a test run, because the Python copy launcher forwards only
-EMPIRE_PERF* and otherwise owns the remote scheduler command.
+For Julia, a launch profile is forwarded to copy_and_run_julia_on_hpc.sh and
+explicit comparison flags override profile values. For Python, cluster.json
+still provides the remote server/directory, but this script constructs and
+passes the SCHEDULER_SCRIPT override for the selected dataset/config.
 USAGE
 }
 
@@ -66,6 +66,10 @@ function info() {
 	echo "[compare] $*"
 }
 
+function shell_quote() {
+	printf "'%s'" "$(printf "%s" "$1" | sed "s/'/'\\\\''/g")"
+}
+
 function abs_path() {
 	local path="$1"
 	if [[ "$path" = /* ]]; then
@@ -73,6 +77,10 @@ function abs_path() {
 	else
 		printf '%s/%s\n' "$(pwd)" "$path"
 	fi
+}
+
+function require_value() {
+	[[ "$#" -ge 2 && -n "$2" && "$2" != --* ]] || die "$1 requires a value"
 }
 
 function resolve_in_repo() {
@@ -83,6 +91,102 @@ function resolve_in_repo() {
 	else
 		printf '%s/%s\n' "$repo" "$path"
 	fi
+}
+
+function truthy() {
+	case "$1" in
+		true | True | TRUE | 1 | yes | Yes | YES | on | On | ON)
+			return 0
+			;;
+		*)
+			return 1
+			;;
+	esac
+}
+
+function trim() {
+	local value="$1"
+	value="${value#"${value%%[![:space:]]*}"}"
+	value="${value%"${value##*[![:space:]]}"}"
+	printf '%s\n' "$value"
+}
+
+function unquote_yaml_scalar() {
+	local value
+	value="$(trim "$1")"
+	if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+		value="${value:1:${#value}-2}"
+	elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
+		value="${value:1:${#value}-2}"
+	fi
+	printf '%s\n' "$value"
+}
+
+function assign_profile_value() {
+	local key="$1"
+	local value="$2"
+	case "$key" in
+		dataset)
+			PROFILE_DATASET="$value"
+			;;
+		model_config | config)
+			PROFILE_CONFIG="$value"
+			;;
+		python_config)
+			PROFILE_PYTHON_CONFIG="$value"
+			;;
+		format)
+			PROFILE_FORMAT="$value"
+			;;
+		solver)
+			PROFILE_SOLVER="$value"
+			;;
+		seed)
+			PROFILE_SEED="$value"
+			;;
+		fixed_sample)
+			PROFILE_FIXED_SAMPLE="$value"
+			;;
+		optimize)
+			PROFILE_OPTIMIZE="$value"
+			;;
+		perf)
+			PROFILE_PERF_SET=true
+			if truthy "$value"; then
+				PROFILE_PERF=true
+			else
+				PROFILE_PERF=false
+			fi
+			;;
+		perf_interval)
+			PROFILE_PERF_INTERVAL="$value"
+			;;
+		julia_cmd | sge_hosts)
+			# Julia-only launch settings are intentionally left for
+			# copy_and_run_julia_on_hpc.sh, which receives the profile directly.
+			;;
+		*)
+			die "Unsupported launch profile key for comparison runner: $key"
+			;;
+	esac
+}
+
+function load_launch_profile() {
+	local profile_path="$1"
+	local line key value
+	[[ -f "$profile_path" ]] || die "Launch profile not found: $profile_path"
+
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		line="$(trim "${line%%#*}")"
+		[[ -z "$line" ]] && continue
+		if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*:[[:space:]]*(.*)$ ]]; then
+			key="${BASH_REMATCH[1]}"
+			value="$(unquote_yaml_scalar "${BASH_REMATCH[2]}")"
+			assign_profile_value "$key" "$value"
+		else
+			die "Launch profile supports only flat 'key: value' entries: $line"
+		fi
+	done < "$profile_path"
 }
 
 function sha256_file() {
@@ -143,6 +247,23 @@ function read_scheduler_script_soft() {
 	[[ -f "$config_file" ]] || return 0
 	command -v jq >/dev/null 2>&1 || return 0
 	jq -r ".$cluster.SCHEDULER_SCRIPT // \"\"" "$config_file" 2>/dev/null
+}
+
+function read_cluster_value_soft() {
+	local repo="$1"
+	local cluster="$2"
+	local key="$3"
+	local config_file="$repo/config/cluster.json"
+	[[ -f "$config_file" ]] || return 0
+	command -v jq >/dev/null 2>&1 || return 0
+	jq -r ".$cluster.$key // \"\"" "$config_file" 2>/dev/null
+}
+
+function remote_dir_with_suffix() {
+	local base="$1"
+	local suffix="$2"
+	[[ -n "$base" && "$base" != "null" ]] || return 0
+	printf '%s_%s\n' "${base%/}" "$suffix"
 }
 
 function contains_runtime() {
@@ -221,9 +342,16 @@ function validate_python_not_test_run() {
 		die "Python SCHEDULER_SCRIPT enables a test run; refusing to launch a non-comparable Python job: $script_value"
 }
 
+function python_scheduler_script() {
+	local inner
+	inner="USE_FIXED_SAMPLE=true TEST_RUN=false sh scripts/run_empire_basic_sge.sh $DATASET $PYTHON_CONFIG"
+	printf -- "-c %s\n" "$(shell_quote "$inner")"
+}
+
 # Config keys that must agree for a fair comparison. Runtime-specific keys such
-# as use_fixed_sample and the Gurobi solver_* block are handled separately: they
-# differ by design between the two ports.
+# as use_scenario_generation, use_fixed_sample, and the Gurobi solver_* block
+# are handled separately: fixed-sample comparison launchers force scenario
+# generation/fixed-sample at runtime, and solver settings may be external.
 PARITY_CONFIG_KEYS=(
 	forecast_horizon_year
 	number_of_scenarios
@@ -231,7 +359,6 @@ PARITY_CONFIG_KEYS=(
 	discount_rate
 	wacc
 	use_emission_cap
-	use_scenario_generation
 	leap_years_investment
 	north_sea
 	time_format
@@ -299,12 +426,16 @@ DEFAULT_PYTHON_REPO="$(cd "$DEFAULT_JULIA_REPO/.." && pwd)/OpenEMPIRE-csv"
 DATASET=""
 CONFIG=""
 PYTHON_CONFIG=""
+LAUNCH_PROFILE=""
+LAUNCH_PROFILE_PATH=""
+FORMAT="csv"
 JULIA_REPO="$DEFAULT_JULIA_REPO"
 PYTHON_REPO="$DEFAULT_PYTHON_REPO"
 SEED="1"
 SOLVER="Gurobi"
 CLUSTER="Solstorm"
 PERF=false
+PERF_SET=false
 PERF_INTERVAL="1.0"
 SAMPLING_KEY=""
 GENERATE_KEY=false
@@ -316,47 +447,68 @@ MANIFEST=""
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
+		--profile | --launch-profile | --run)
+			require_value "$@"
+			LAUNCH_PROFILE="$2"
+			shift 2
+			;;
 		--dataset)
+			require_value "$@"
 			DATASET="$2"
 			shift 2
 			;;
-		--config)
+		--config | --model-config)
+			require_value "$@"
 			CONFIG="$2"
 			shift 2
 			;;
 		--python-config)
+			require_value "$@"
 			PYTHON_CONFIG="$2"
 			shift 2
 			;;
 		--julia-repo)
+			require_value "$@"
 			JULIA_REPO="$(abs_path "$2")"
 			shift 2
 			;;
 		--python-repo)
+			require_value "$@"
 			PYTHON_REPO="$(abs_path "$2")"
 			shift 2
 			;;
+		--format)
+			require_value "$@"
+			FORMAT="$2"
+			shift 2
+			;;
 		--seed)
+			require_value "$@"
 			SEED="$2"
 			shift 2
 			;;
 		--solver)
+			require_value "$@"
 			SOLVER="$2"
 			shift 2
 			;;
 		--cluster)
+			require_value "$@"
 			CLUSTER="$2"
 			shift 2
 			;;
 		--perf)
 			PERF=true
+			PERF_SET=true
 			shift
 			;;
 		--perf-interval)
+			require_value "$@"
 			PERF_INTERVAL="$2"
 			shift 2
 			;;
 		--sampling-key)
+			require_value "$@"
 			SAMPLING_KEY="$(abs_path "$2")"
 			shift 2
 			;;
@@ -377,6 +529,7 @@ while [[ $# -gt 0 ]]; do
 			shift
 			;;
 		--runtime)
+			require_value "$@"
 			RUNTIMES="$2"
 			shift 2
 			;;
@@ -390,11 +543,42 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
-[[ -n "$DATASET" ]] || die "--dataset is required"
-[[ -n "$CONFIG" ]] || die "--config is required"
-[[ "$DATASET" != */* ]] || die "--dataset must be a dataset name, not a path: $DATASET"
 [[ -d "$JULIA_REPO" ]] || die "Julia repo not found: $JULIA_REPO"
 [[ -d "$PYTHON_REPO" ]] || die "Python repo not found: $PYTHON_REPO"
+
+PROFILE_DATASET=""
+PROFILE_CONFIG=""
+PROFILE_PYTHON_CONFIG=""
+PROFILE_FORMAT=""
+PROFILE_SOLVER=""
+PROFILE_SEED=""
+PROFILE_FIXED_SAMPLE=""
+PROFILE_OPTIMIZE=""
+PROFILE_PERF=false
+PROFILE_PERF_SET=false
+PROFILE_PERF_INTERVAL=""
+
+if [[ -n "$LAUNCH_PROFILE" ]]; then
+	LAUNCH_PROFILE_PATH="$(resolve_in_repo "$JULIA_REPO" "$LAUNCH_PROFILE")"
+	load_launch_profile "$LAUNCH_PROFILE_PATH"
+	[[ -n "$DATASET" ]] || DATASET="$PROFILE_DATASET"
+	[[ -n "$CONFIG" ]] || CONFIG="$PROFILE_CONFIG"
+	[[ -n "$PYTHON_CONFIG" ]] || PYTHON_CONFIG="$PROFILE_PYTHON_CONFIG"
+	[[ "$FORMAT" != "csv" || -z "$PROFILE_FORMAT" ]] || FORMAT="$PROFILE_FORMAT"
+	[[ "$SOLVER" != "Gurobi" || -z "$PROFILE_SOLVER" ]] || SOLVER="$PROFILE_SOLVER"
+	[[ "$SEED" != "1" || -z "$PROFILE_SEED" ]] || SEED="$PROFILE_SEED"
+	if [[ "$PERF_SET" == false && "$PROFILE_PERF_SET" == true ]]; then
+		PERF="$PROFILE_PERF"
+	fi
+	[[ "$PERF_INTERVAL" != "1.0" || -z "$PROFILE_PERF_INTERVAL" ]] || PERF_INTERVAL="$PROFILE_PERF_INTERVAL"
+	if [[ -n "$PROFILE_FIXED_SAMPLE" ]] && ! truthy "$PROFILE_FIXED_SAMPLE"; then
+		info "NOTE: launch profile fixed_sample=$PROFILE_FIXED_SAMPLE; comparison runs override Julia to fixed-sample mode so both languages use the same sampling_key.csv."
+	fi
+fi
+
+[[ -n "$DATASET" ]] || die "--dataset is required unless provided by --profile"
+[[ -n "$CONFIG" ]] || die "--config/--model-config is required unless provided by --profile"
+[[ "$DATASET" != */* ]] || die "--dataset must be a dataset name, not a path: $DATASET"
 validate_runtimes "$RUNTIMES"
 contains_runtime julia || contains_runtime python || die "--runtime must include julia and/or python"
 
@@ -449,13 +633,19 @@ PYTHON_SCHEDULER=""
 if [[ "$PREPARE_ONLY" == false && "$DRY_RUN" == false ]]; then
 	if contains_runtime julia; then
 		JULIA_SCHEDULER="$(read_scheduler_script "$JULIA_REPO" "$CLUSTER")"
-		validate_scheduler_script "Julia" "$JULIA_SCHEDULER" "$CONFIG"
+		[[ -n "$JULIA_SCHEDULER" && "$JULIA_SCHEDULER" != "null" ]] ||
+			die "Julia cluster config has no SCHEDULER_SCRIPT for $CLUSTER"
+		if [[ -z "$LAUNCH_PROFILE" ]]; then
+			validate_scheduler_script "Julia" "$JULIA_SCHEDULER" "$CONFIG"
+		elif [[ "$JULIA_SCHEDULER" =~ [[:space:]] ]]; then
+			die "Julia SCHEDULER_SCRIPT should be only the entrypoint when --profile is used, e.g. './scripts/run_empire_julia_basic_sge.sh': $JULIA_SCHEDULER"
+		fi
 		[[ -x "$JULIA_REPO/scripts/copy_and_run_julia_on_hpc.sh" ]] ||
 			die "Julia copy launcher is not executable: $JULIA_REPO/scripts/copy_and_run_julia_on_hpc.sh"
 	fi
 
 	if contains_runtime python; then
-		PYTHON_SCHEDULER="$(read_scheduler_script "$PYTHON_REPO" "$CLUSTER")"
+		PYTHON_SCHEDULER="$(python_scheduler_script)"
 		validate_scheduler_script "Python" "$PYTHON_SCHEDULER" "$PYTHON_CONFIG"
 		validate_python_fixed_sample "$PYTHON_SCHEDULER"
 		validate_python_not_test_run "$PYTHON_SCHEDULER"
@@ -467,6 +657,11 @@ fi
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 COMPARE_DIR="$JULIA_REPO/results/comparison_runs/${TIMESTAMP}_${DATASET}"
 KEYGEN_ROOT="$COMPARE_DIR/keygen"
+REMOTE_SUFFIX="comparison_${TIMESTAMP}_${DATASET}_seed${SEED}"
+JULIA_REMOTE_BASE="$(read_cluster_value_soft "$JULIA_REPO" "$CLUSTER" "REMOTE_DIR")"
+PYTHON_REMOTE_BASE="$(read_cluster_value_soft "$PYTHON_REPO" "$CLUSTER" "REMOTE_DIR")"
+JULIA_REMOTE_DIR="$(remote_dir_with_suffix "$JULIA_REMOTE_BASE" "$REMOTE_SUFFIX")"
+PYTHON_REMOTE_DIR="$(remote_dir_with_suffix "$PYTHON_REMOTE_BASE" "$REMOTE_SUFFIX")"
 
 if [[ "$GENERATE_KEY" == true ]]; then
 	[[ -z "$SAMPLING_KEY" ]] || die "Use either --generate-key or --sampling-key, not both."
@@ -481,7 +676,7 @@ if [[ "$GENERATE_KEY" == true ]]; then
 			julia --project=. scripts/run_julia_empire.jl \
 				--dataset="$DATASET" \
 				--config="$CONFIG" \
-				--format=csv \
+				--format="$FORMAT" \
 				--solver="$SOLVER" \
 				--seed="$SEED" \
 				--generate-only \
@@ -520,7 +715,7 @@ fi
 # Record what actually determines each HPC run: the SCHEDULER_SCRIPT in each
 # repo's cluster.json owns dataset/config/solver on the remote side.
 JULIA_SCHEDULER_MANIFEST="$(read_scheduler_script_soft "$JULIA_REPO" "$CLUSTER")"
-PYTHON_SCHEDULER_MANIFEST="$(read_scheduler_script_soft "$PYTHON_REPO" "$CLUSTER")"
+PYTHON_SCHEDULER_MANIFEST="$(python_scheduler_script)"
 CONFIG_PARITY="ok"
 [[ ${#CONFIG_MISMATCHES[@]} -eq 0 ]] || CONFIG_PARITY="mismatch"
 SOLVER_DIFFERENCES="none"
@@ -537,9 +732,12 @@ if [[ "$DRY_RUN" == false ]]; then
 	{
 		echo "created_at=$TIMESTAMP"
 		echo "dataset=$DATASET"
+		echo "format=$FORMAT"
 		echo "seed=$SEED"
 		echo "cluster=$CLUSTER"
 		echo "runtimes=$RUNTIMES"
+		echo "launch_profile=${LAUNCH_PROFILE:-none}"
+		echo "launch_profile_path=${LAUNCH_PROFILE_PATH:-none}"
 		echo "julia_repo=$JULIA_REPO"
 		echo "python_repo=$PYTHON_REPO"
 		echo "julia_commit=$(repo_commit "$JULIA_REPO")"
@@ -552,6 +750,8 @@ if [[ "$DRY_RUN" == false ]]; then
 		echo "solver_config_differences=$SOLVER_DIFFERENCES"
 		echo "julia_scheduler_script=${JULIA_SCHEDULER_MANIFEST:-unknown}"
 		echo "python_scheduler_script=${PYTHON_SCHEDULER_MANIFEST:-unknown}"
+		echo "julia_remote_dir=${JULIA_REMOTE_DIR:-cluster_default}"
+		echo "python_remote_dir=${PYTHON_REMOTE_DIR:-cluster_default}"
 		echo "sampling_key_source=$SAMPLING_KEY"
 		echo "sampling_key_sha256=$KEY_SHA"
 		echo "julia_sampling_key=$JULIA_KEY_TARGET"
@@ -574,16 +774,30 @@ fi
 if contains_runtime julia; then
 	JULIA_LOG="$COMPARE_DIR/julia_submit.log"
 	echo "julia_submit_log=$JULIA_LOG" >> "$MANIFEST"
+	JULIA_LAUNCH_CMD=("$JULIA_REPO/scripts/copy_and_run_julia_on_hpc.sh" "$CLUSTER")
+	if [[ -n "$LAUNCH_PROFILE" ]]; then
+		JULIA_LAUNCH_CMD+=(--profile "$LAUNCH_PROFILE")
+	else
+		JULIA_LAUNCH_CMD+=(--dataset "$DATASET" --model-config "$CONFIG" --format "$FORMAT")
+	fi
+	JULIA_LAUNCH_CMD+=(
+		--solver "$SOLVER"
+		--seed "$SEED"
+		--optimize
+		--fixed-sample
+	)
+	if [[ "$PERF" == true ]]; then
+		JULIA_LAUNCH_CMD+=(--perf --perf-interval "$PERF_INTERVAL")
+	else
+		JULIA_LAUNCH_CMD+=(--no-perf)
+	fi
+	JULIA_RUN_CMD=("${JULIA_LAUNCH_CMD[@]}")
+	if [[ -n "$JULIA_REMOTE_DIR" ]]; then
+		JULIA_RUN_CMD=(env REMOTE_DIR="$JULIA_REMOTE_DIR" "${JULIA_LAUNCH_CMD[@]}")
+	fi
 	# `if run_and_log ...` disables set -e for the launcher call so a failed
 	# submit is recorded in the manifest rather than aborting silently.
-	if run_and_log "Julia" "$JULIA_LOG" env \
-		JULIA_SOLVER="$SOLVER" \
-		JULIA_SEED="$SEED" \
-		JULIA_OPTIMIZE="true" \
-		JULIA_FIXED_SAMPLE="true" \
-		EMPIRE_PERF="$PERF_VALUE" \
-		EMPIRE_PERF_INTERVAL="$PERF_INTERVAL" \
-		"$JULIA_REPO/scripts/copy_and_run_julia_on_hpc.sh" "$CLUSTER"; then
+	if run_and_log "Julia" "$JULIA_LOG" "${JULIA_RUN_CMD[@]}"; then
 		JULIA_JOB_IDS="$(extract_job_ids "$JULIA_LOG")"
 		echo "julia_job_ids=${JULIA_JOB_IDS:-unknown}" >> "$MANIFEST"
 	else
@@ -596,13 +810,19 @@ fi
 if contains_runtime python; then
 	PYTHON_LOG="$COMPARE_DIR/python_submit.log"
 	echo "python_submit_log=$PYTHON_LOG" >> "$MANIFEST"
-	# copy_and_run_empire_on_hpc.sh only forwards EMPIRE_PERF*; fixed-sample and
-	# non-test-run selection are enforced above via the SCHEDULER_SCRIPT checks,
-	# not passed as env, so we do not set USE_FIXED_SAMPLE/TEST_RUN here.
-	if run_and_log "Python" "$PYTHON_LOG" env \
+	# The Python copy launcher accepts this SCHEDULER_SCRIPT env override, so the
+	# comparison runner owns dataset/config/fixed-sample selection instead of
+	# relying on a manually edited Python config/cluster.json.
+	PYTHON_RUN_CMD=(env \
+		SCHEDULER_SCRIPT="$PYTHON_SCHEDULER" \
 		EMPIRE_PERF="$PERF_VALUE" \
 		EMPIRE_PERF_INTERVAL="$PERF_INTERVAL" \
-		"$PYTHON_REPO/scripts/copy_and_run_empire_on_hpc.sh" "$CLUSTER"; then
+	)
+	if [[ -n "$PYTHON_REMOTE_DIR" ]]; then
+		PYTHON_RUN_CMD+=(REMOTE_DIR="$PYTHON_REMOTE_DIR")
+	fi
+	PYTHON_RUN_CMD+=("$PYTHON_REPO/scripts/copy_and_run_empire_on_hpc.sh" "$CLUSTER")
+	if run_and_log "Python" "$PYTHON_LOG" "${PYTHON_RUN_CMD[@]}"; then
 		PYTHON_JOB_IDS="$(extract_job_ids "$PYTHON_LOG")"
 		echo "python_job_ids=${PYTHON_JOB_IDS:-unknown}" >> "$MANIFEST"
 	else

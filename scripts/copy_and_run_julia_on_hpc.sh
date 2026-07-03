@@ -133,6 +133,9 @@ function assign_profile_value() {
 		perf_interval)
 			PROFILE_PERF_INTERVAL="$value"
 			;;
+		python_config)
+			# Comparison-runner metadata; ignored by the Julia-only launcher.
+			;;
 		*)
 			die "Unsupported launch profile key: $key"
 			;;
@@ -328,7 +331,8 @@ fi
 
 REMOTE_USER=$(jq -r ".$CLUSTER.REMOTE_USER" "$CONFIG_FILE")
 REMOTE_SERVER=$(jq -r ".$CLUSTER.REMOTE_SERVER" "$CONFIG_FILE")
-REMOTE_DIR=$(jq -r ".$CLUSTER.REMOTE_DIR" "$CONFIG_FILE")
+CONFIG_REMOTE_DIR=$(jq -r ".$CLUSTER.REMOTE_DIR" "$CONFIG_FILE")
+REMOTE_DIR=${REMOTE_DIR:-$CONFIG_REMOTE_DIR}
 SCHEDULER_SCRIPT=$(jq -r ".$CLUSTER.SCHEDULER_SCRIPT" "$CONFIG_FILE")
 JULIA_SOLVER=${CLI_SOLVER:-${JULIA_SOLVER:-$(jq -r ".$CLUSTER.JULIA_SOLVER // \"HiGHS\"" "$CONFIG_FILE")}}
 JULIA_SEED=${CLI_SEED:-${JULIA_SEED:-$(jq -r ".$CLUSTER.JULIA_SEED // \"1\"" "$CONFIG_FILE")}}
@@ -427,18 +431,19 @@ tar $TAR_FLAGS \
 	--exclude='./logs' \
 	--exclude='./logs/*' \
 	--exclude='./Manifest.toml' \
+	--exclude='./openempire_jl.tar.gz' \
 	--exclude='*/._*' \
 	--exclude='*__pycache__*' \
 	-cvzf openempire_jl.tar.gz *
 
 echo "Creating remote directory: $REMOTE_DIR"
-ssh "$REMOTE_USER@$REMOTE_SERVER" "mkdir -p $REMOTE_DIR"
+ssh -o BatchMode=yes "$REMOTE_USER@$REMOTE_SERVER" "mkdir -p $REMOTE_DIR"
 
 echo "Copying archive to $REMOTE_SERVER..."
-scp openempire_jl.tar.gz "$REMOTE_USER@$REMOTE_SERVER:$REMOTE_DIR"
+scp -o BatchMode=yes openempire_jl.tar.gz "$REMOTE_USER@$REMOTE_SERVER:$REMOTE_DIR"
 
 echo "Extracting archive on remote..."
-ssh "$REMOTE_USER@$REMOTE_SERVER" <<EOF
+ssh -o BatchMode=yes "$REMOTE_USER@$REMOTE_SERVER" <<EOF
     cd $REMOTE_DIR
     rm -f Manifest.toml
     tar --warning=no-unknown-keyword -xvzf openempire_jl.tar.gz
@@ -466,7 +471,7 @@ if [[ "$CLUSTER" == "Solstorm" ]]; then
 	echo "Fixed sample: $JULIA_FIXED_SAMPLE"
 	echo "Perf:         ${EMPIRE_PERF:-off}"
 	echo "Scheduler:    $SCHEDULER_COMMAND"
-	ssh "$REMOTE_USER@$REMOTE_SERVER" \
+	ssh -o BatchMode=yes "$REMOTE_USER@$REMOTE_SERVER" \
 		"cd $REMOTE_DIR && JULIA_SOLVER=$(shell_quote "$JULIA_SOLVER") JULIA_SEED=$(shell_quote "$JULIA_SEED") JULIA_OPTIMIZE=$(shell_quote "$JULIA_OPTIMIZE") JULIA_FIXED_SAMPLE=$(shell_quote "$JULIA_FIXED_SAMPLE") JULIA_CMD=$(shell_quote "$JULIA_CMD") JULIA_SGE_HOSTS=$(shell_quote "$JULIA_SGE_HOSTS") EMPIRE_PERF=$(shell_quote "$EMPIRE_PERF") EMPIRE_PERF_INTERVAL=$(shell_quote "$EMPIRE_PERF_INTERVAL") sh $SCHEDULER_COMMAND"
 else
 	echo "Files copied. No scheduler command is defined for cluster '$CLUSTER'."

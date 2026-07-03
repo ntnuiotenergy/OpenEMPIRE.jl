@@ -66,8 +66,17 @@ same-sampling-key Julia/Python launch:
 
 ```bash
 scripts/run_python_julia_comparison.sh \
-    --dataset test \
-    --config config/testrun.yaml \
+    --profile config/launch_profiles/2060_5sce_northsea.yaml \
+    --generate-key \
+    --perf
+```
+
+Run the same setup with another scenario seed by overriding the profile:
+
+```bash
+scripts/run_python_julia_comparison.sh \
+    --profile config/launch_profiles/2060_5sce_northsea.yaml \
+    --seed 4 \
     --generate-key \
     --perf
 ```
@@ -88,18 +97,21 @@ compare checksums. Instead it checks that the **model-relevant keys** agree
 **warning**, not a hard failure, because the Python reference may source Gurobi
 parameters outside its YAML — verify these match by hand for a fair run.
 
-**`config/cluster.json` is the source of truth for what runs remotely.** The
-comparison runner's `--dataset`/`--config` install the sampling key and validate
-paths, but the actual dataset, config, and solver on the remote side come from
-each repo's `SCHEDULER_SCRIPT`, not from this script. So make each
-`SCHEDULER_SCRIPT` pass the intended dataset and config **explicitly** (do not
-rely on the SGE script defaults — the runner checks that both appear). The Python
-scheduler command must include `USE_FIXED_SAMPLE=true` and must **not** be a
-test run (`--test-run`/`TEST_RUN=true`); the runner fails early on either, so it
-does not accidentally launch a Python run with regenerated scenarios or a tiny
-test instance. The written manifest records both repos' git commit, both
-`SCHEDULER_SCRIPT` strings, the config-parity result, and any solver
-differences, so a comparison is reproducible after the fact.
+For Julia, a launch profile is passed through to
+`copy_and_run_julia_on_hpc.sh`, and explicit comparison flags (`--seed`,
+`--perf`, `--perf-interval`, etc.) override the profile. The comparison runner
+always launches Julia in fixed-sample mode so both languages use the same
+`sampling_key.csv`.
+
+For Python, `OpenEMPIRE-csv/config/cluster.json` still provides the remote
+server and remote directory, but the comparison runner now constructs the Python
+`SCHEDULER_SCRIPT` from the selected dataset/config and passes it as an override
+to `copy_and_run_empire_on_hpc.sh`. That keeps old cluster settings from
+silently launching the wrong model. The generated Python command always includes
+`USE_FIXED_SAMPLE=true` and `TEST_RUN=false`. The written manifest records both
+repos' git commit, the Julia launch profile, both scheduler commands, the
+config-parity result, and any solver differences, so a comparison is
+reproducible after the fact.
 
 ## Comparing two runs
 

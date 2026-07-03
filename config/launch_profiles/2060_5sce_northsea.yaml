@@ -1,0 +1,10 @@
+dataset: europe_v51
+model_config: config/run_2060.yaml
+python_config: config/run_2060.yaml
+format: csv
+solver: Gurobi
+seed: 3
+fixed_sample: true
+optimize: true
+perf: true
+perf_interval: 2.0
