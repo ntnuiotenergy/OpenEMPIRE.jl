@@ -576,6 +576,48 @@ function test_generate_scenarios_without_model()
     end
 end
 
+function test_create_model_reads_separate_scenario_data_root()
+    mktempdir() do root
+        dataset = joinpath(root, "test")
+        cp(joinpath(pkgdir(OpenEMPIRE), "data", "test"), dataset)
+
+        config = YAML.load_file(joinpath(pkgdir(OpenEMPIRE), "data", "test_excel", "testrun.yaml"))
+        config["use_scenario_generation"] = true
+        generate_config = joinpath(root, "generate.yaml")
+        YAML.write_file(generate_config, config)
+
+        OpenEMPIRE.generate_scenarios(
+            generate_config,
+            dataset;
+            input_format = :csv,
+            scenario_rng = MersenneTwister(1),
+        )
+
+        scenario_root = joinpath(root, "oos_tree1")
+        mkpath(scenario_root)
+        cp(joinpath(dataset, "ScenarioData"), joinpath(scenario_root, "ScenarioData"))
+
+        for f in ("sloadRaw.csv", "maxRegHydroGenRaw.csv", "genCapAvailStochRaw.csv", "sampling_key.csv")
+            rm(joinpath(dataset, "ScenarioData", f); force = true)
+        end
+
+        config["use_scenario_generation"] = false
+        read_config = joinpath(root, "read_oos_tree.yaml")
+        YAML.write_file(read_config, config)
+
+        emp, _, _, params = OpenEMPIRE.create_model(
+            read_config,
+            dataset;
+            input_format = :csv,
+            scenario_data_root = scenario_root,
+        )
+
+        @test JuMP.num_variables(emp) > 0
+        @test length(params.sloadRaw) == 3
+        @test haskey(params.genCapAvail, ("Germany", "Solar"))
+    end
+end
+
 function test_write_scenario_sampling_key_artifacts()
     mktempdir() do root
         dataset = joinpath(root, "dataset")

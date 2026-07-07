@@ -280,10 +280,12 @@ function write_scenario_artifacts(
     dataset = nothing,
     input_format = nothing,
     seed = nothing,
+    scenario_data_root = nothing,
 )
-    get(config, "use_scenario_generation", true) || return nothing
+    get(config, "use_scenario_generation", true) || scenario_data_root !== nothing || return nothing
 
-    source_key = joinpath(data_folder, "ScenarioData", "sampling_key.csv")
+    source_root = scenario_data_root === nothing ? data_folder : scenario_data_root
+    source_key = joinpath(source_root, "ScenarioData", "sampling_key.csv")
     isfile(source_key) || return nothing
 
     input_dir = joinpath(result_dir, "Input")
@@ -298,13 +300,14 @@ function write_scenario_artifacts(
     end
 
     generated_files = Dict(
-        filename => isfile(joinpath(data_folder, "ScenarioData", filename))
+        filename => isfile(joinpath(source_root, "ScenarioData", filename))
         for filename in ("sloadRaw.csv", "maxRegHydroGenRaw.csv", "genCapAvailStochRaw.csv")
     )
 
     metadata = Dict{String, Any}(
         "data_folder" => data_folder,
-        "scenario_data_folder" => joinpath(data_folder, "ScenarioData"),
+        "scenario_data_root" => source_root,
+        "scenario_data_folder" => joinpath(source_root, "ScenarioData"),
         "source_sampling_key" => source_key,
         "archived_sampling_key" => relpath(archived_key, result_dir),
         "generated_scenario_files_present" => generated_files,

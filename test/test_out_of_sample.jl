@@ -29,7 +29,9 @@ function test_fix_investments_from_results()
     OpenEMPIRE.create_variables(model, sets, periods)
 
     mktempdir() do result_dir
-        output_dir = joinpath(result_dir, "Output")
+        # Julia result folders use lowercase `output`; Python-style folders use
+        # uppercase `Output`. The OOS reader should accept either run layout.
+        output_dir = joinpath(result_dir, "output")
 
         _write_oos_csv(joinpath(output_dir, "genInvCap.csv"), "Node,Generator,Period,genInvCap\nA,Solar,1,3.5\n")
         _write_oos_csv(joinpath(output_dir, "transmissionInvCap.csv"), "FromNode,ToNode,Period,transmissionInvCap\nA,B,1,4.5\n")

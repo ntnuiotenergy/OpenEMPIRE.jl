@@ -22,6 +22,7 @@ function _parse_args(args)
         "fixed-sample" => "auto",
         "out-of-sample" => "false",
         "fixed-investment-dir" => "",
+        "scenario-data-root" => "",
         "gurobi-method" => "",
         "gurobi-crossover" => "",
     )
@@ -137,6 +138,42 @@ function _config_with_fixed_sample(config_file, result_dir)
     return generated_config
 end
 
+function _config_with_scenario_data_root(config_file, result_dir)
+    config = YAML.load_file(config_file)
+    config["use_scenario_generation"] = false
+    config["use_fixed_sample"] = false
+
+    generated_config = joinpath(result_dir, "oos_scenario_config.yaml")
+    YAML.write_file(generated_config, config)
+    return generated_config
+end
+
+function _validate_scenario_data_root(path)
+    isempty(path) && return nothing
+
+    scenario_dir = joinpath(path, "ScenarioData")
+    isdir(scenario_dir) || throw(ArgumentError(
+        "--scenario-data-root must point to a folder containing ScenarioData: $path",
+    ))
+
+    required_files = (
+        "sloadRaw.csv",
+        "maxRegHydroGenRaw.csv",
+        "genCapAvailStochRaw.csv",
+    )
+    missing = [filename for filename in required_files if !isfile(joinpath(scenario_dir, filename))]
+    isempty(missing) || throw(ArgumentError(
+        "Scenario data root is missing generated files in $scenario_dir: $(join(missing, ", "))",
+    ))
+
+    return path
+end
+
+function _oos_tree_name(scenario_data_root::AbstractString)
+    isempty(scenario_data_root) && return ""
+    return basename(normpath(scenario_data_root))
+end
+
 function _write_summary(path, lines)
     mkpath(dirname(path))
     open(path, "w") do io
@@ -175,6 +212,8 @@ function main(args = ARGS)
     optimize_model = lowercase(options["optimize"]) in ("true", "1", "yes")
     generate_only = lowercase(options["generate-only"]) in ("true", "1", "yes")
     fixed_sample_option = lowercase(options["fixed-sample"])
+    scenario_data_root = _validate_scenario_data_root(options["scenario-data-root"])
+    scenario_data_root_value = scenario_data_root === nothing ? nothing : scenario_data_root
 
     isdir(data_folder) || throw(ArgumentError("Dataset folder not found: $data_folder"))
     isfile(config_file) || throw(ArgumentError("Config file not found: $config_file"))
@@ -182,6 +221,10 @@ function main(args = ARGS)
     timestamp = Dates.format(now(), dateformat"yyyymmdd_HHMMSS")
     result_dir = joinpath(options["results"], "$(timestamp)_$(dataset)")
     mkpath(result_dir)
+
+    if scenario_data_root !== nothing && fixed_sample_option != "auto"
+        throw(ArgumentError("--scenario-data-root cannot be combined with --fixed-sample"))
+    end
 
     if fixed_sample_option != "auto"
         if _boolean_option(fixed_sample_option, "fixed-sample")
@@ -195,9 +238,19 @@ function main(args = ARGS)
             ))
         end
     end
+    if scenario_data_root !== nothing && !generate_only
+        config_file = _config_with_scenario_data_root(config_file, result_dir)
+    end
     run_config = YAML.load_file(config_file)
     optimizer_attributes = _optimizer_attributes(solver_name, run_config, options)
     deterministic_tiebreak = _config_bool(run_config, "deterministic_operational_tiebreak", false)
+    is_out_of_sample = _boolean_option(options["out-of-sample"], "out-of-sample")
+    oos_tree = _oos_tree_name(options["scenario-data-root"])
+    result_output_root = if is_out_of_sample && !isempty(oos_tree)
+        joinpath(result_dir, "OutOfSample", oos_tree)
+    else
+        result_dir
+    end
 
     println("================================================")
     println("OpenEMPIRE.jl run")
@@ -210,10 +263,12 @@ function main(args = ARGS)
     println("Solver attrs: $(_optimizer_attribute_summary(optimizer_attributes))")
     println("Seed:         $seed")
     println("Fixed sample: $fixed_sample_option")
+    println("Scenario root: $(scenario_data_root === nothing ? "(dataset)" : scenario_data_root)")
     println("Generate only: $generate_only")
     println("Optimize:     $optimize_model")
     println("Tie-break:    $deterministic_tiebreak")
     println("Result dir:   $result_dir")
+    println("Output dir:   $result_output_root")
     println("Start time:   $(now())")
     println("================================================")
     flush(stdout)
@@ -229,6 +284,7 @@ function main(args = ARGS)
             data_folder;
             input_format = format,
             scenario_rng = MersenneTwister(seed),
+            scenario_data_root = scenario_data_root_value,
             progress,
         )
         generate_seconds = time() - generate_start
@@ -241,6 +297,7 @@ function main(args = ARGS)
             dataset = dataset,
             input_format = format,
             seed = seed,
+            scenario_data_root = scenario_data_root_value,
         )
         scenario_artifact !== nothing &&
             println("Scenario sampling key archived to: $scenario_artifact")
@@ -252,6 +309,7 @@ function main(args = ARGS)
                 "config=$config_file",
                 "seed=$seed",
                 "fixed_sample=$fixed_sample_option",
+                "scenario_data_root=$(scenario_data_root === nothing ? "" : scenario_data_root)",
                 "scenario_data_folder=$(joinpath(data_folder, "ScenarioData"))",
                 "generate_seconds=$generate_seconds",
             ],
@@ -272,6 +330,7 @@ function main(args = ARGS)
         optimizer_attributes,
         input_format = format,
         scenario_rng = MersenneTwister(seed),
+        scenario_data_root = scenario_data_root_value,
         progress,
     )
     build_seconds = time() - build_start
@@ -288,13 +347,14 @@ function main(args = ARGS)
         dataset = dataset,
         input_format = format,
         seed = seed,
+        scenario_data_root = scenario_data_root_value,
     )
     if scenario_artifact !== nothing
         println("Scenario sampling key archived to: $scenario_artifact")
         flush(stdout)
     end
 
-    if _boolean_option(options["out-of-sample"], "out-of-sample")
+    if is_out_of_sample
         fixed_investment_dir = options["fixed-investment-dir"]
 
         isempty(fixed_investment_dir) && throw(ArgumentError(
@@ -367,7 +427,7 @@ function main(args = ARGS)
         flush(stdout)
         if JuMP.is_solved_and_feasible(emp)
             progress("Writing solution CSV tables")
-            output_dir = OpenEMPIRE.write_solution_tables(result_dir, emp, sets, params, periods)
+            output_dir = OpenEMPIRE.write_solution_tables(result_output_root, emp, sets, params, periods)
             println("Solution CSVs written to: $output_dir")
             flush(stdout)
             progress("Solution CSV tables written to $output_dir")
@@ -399,7 +459,7 @@ function main(args = ARGS)
 
     progress("Writing run summary")
     summary_path = _write_summary(
-        joinpath(result_dir, "summary.txt"),
+        joinpath(result_output_root, "summary.txt"),
         vcat([
             "OpenEMPIRE.jl run summary",
             "dataset=$dataset",
@@ -412,6 +472,9 @@ function main(args = ARGS)
             "fixed_sample=$fixed_sample_option",
             "out_of_sample=$(options["out-of-sample"])",
             "fixed_investment_dir=$(options["fixed-investment-dir"])",
+            "scenario_data_root=$(scenario_data_root === nothing ? "" : scenario_data_root)",
+            "oos_tree=$oos_tree",
+            "result_output_root=$result_output_root",
             "optimize=$optimize_model",
             "variables=$(JuMP.num_variables(emp))",
             "constraints=$(JuMP.num_constraints(emp; count_variable_in_set_constraints = false))",

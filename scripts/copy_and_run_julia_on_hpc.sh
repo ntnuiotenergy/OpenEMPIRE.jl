@@ -61,6 +61,7 @@ tar $TAR_FLAGS \
 	--exclude='./logs' \
 	--exclude='./logs/*' \
 	--exclude='./Manifest.toml' \
+	--exclude='Manifest.toml' \
 	--exclude='*/._*' \
 	--exclude='*__pycache__*' \
 	-cvzf openempire_jl.tar.gz *
@@ -76,6 +77,7 @@ ssh "$REMOTE_USER@$REMOTE_SERVER" <<EOF
     cd $REMOTE_DIR
     rm -f Manifest.toml
     tar --warning=no-unknown-keyword -xvzf openempire_jl.tar.gz
+    rm -f Manifest.toml
     rm openempire_jl.tar.gz
     chmod +x scripts/*
 EOF

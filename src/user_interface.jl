@@ -18,11 +18,15 @@ function _config_bool(config, key::AbstractString, default::Bool)
 end
 
 """
-    _prepare_model_inputs(config_file, data_folder; input_format, scenario_rng, progress)
+    _prepare_model_inputs(config_file, data_folder; input_format, scenario_rng, scenario_data_root, progress)
 
 Run the data-preparation stages shared by `create_model` and `generate_scenarios`
 (Build 1-6): read the config, build the time structure, load the dataset, and read
 or generate the stochastic scenario data. No JuMP model is constructed here.
+
+When `scenario_data_root` is provided, structural data is read from
+`data_folder` while stochastic scenario data is read from
+`joinpath(scenario_data_root, "ScenarioData")`.
 
 Returns `(config, periods, sets, params)`.
 """
@@ -31,6 +35,7 @@ function _prepare_model_inputs(
     data_folder;
     input_format = :auto,
     scenario_rng = Random.default_rng(),
+    scenario_data_root = nothing,
     progress = nothing,
 )
     _report_progress(progress, "Build 1/12: reading configuration from $config_file")
@@ -91,8 +96,9 @@ function _prepare_model_inputs(
     params.regularSeasonCount = season_count
 
     _report_progress(progress, "Build 5/12: reading or generating stochastic scenario data")
+    scenario_input_root = scenario_data_root === nothing ? OpenEMPIRE.input_path(data_folder) : scenario_data_root
     OpenEMPIRE.read_scenario_data!(
-        OpenEMPIRE.input_path(data_folder),
+        scenario_input_root,
         periods,
         params,
         sets,
@@ -106,7 +112,7 @@ function _prepare_model_inputs(
 end
 
 """
-    generate_scenarios(config_file, data_folder; input_format, scenario_rng, progress)
+    generate_scenarios(config_file, data_folder; input_format, scenario_rng, scenario_data_root, progress)
 
 Generate (or load) the stochastic scenario data for `data_folder` **without
 building the JuMP model**, then return `(periods, sets, params)`.
@@ -119,12 +125,17 @@ and the generated `sloadRaw.csv`, `maxRegHydroGenRaw.csv`,
 `sampling_key.csv`) are written into `<data_folder>/ScenarioData`. Use it to
 prepare comparable scenario inputs for multi-seed parity runs before paying the
 cost of model construction and optimization.
+
+When `scenario_data_root` is provided, stochastic scenario data is read from or
+written to `joinpath(scenario_data_root, "ScenarioData")` instead of
+`joinpath(data_folder, "ScenarioData")`.
 """
 function generate_scenarios(
     config_file,
     data_folder;
     input_format = :auto,
     scenario_rng = Random.default_rng(),
+    scenario_data_root = nothing,
     progress = nothing,
 )
     _, periods, sets, params = _prepare_model_inputs(
@@ -132,6 +143,7 @@ function generate_scenarios(
         data_folder;
         input_format,
         scenario_rng,
+        scenario_data_root,
         progress,
     )
     return periods, sets, params
@@ -145,6 +157,7 @@ function create_model(
     include_string_names = true,
     input_format = :auto,
     scenario_rng = Random.default_rng(),
+    scenario_data_root = nothing,
     progress = nothing,
 )
     config, periods, sets, params = _prepare_model_inputs(
@@ -152,6 +165,7 @@ function create_model(
         data_folder;
         input_format,
         scenario_rng,
+        scenario_data_root,
         progress,
     )
 

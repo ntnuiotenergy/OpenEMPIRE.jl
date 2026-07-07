@@ -101,9 +101,14 @@ end
 function _oos_output_dir(path::AbstractString)
     isdir(path) || throw(ArgumentError("Fixed investment directory does not exist: $path"))
 
-    # Accept either the run directory or its Output subdirectory.
-    output_path = joinpath(path, "Output")
-    return isdir(output_path) ? output_path : path
+    # Accept either the run directory or its output subdirectory. Older Python
+    # result folders use `Output`, while the Julia result writer uses `output`.
+    for output_folder in ("Output", "output")
+        output_path = joinpath(path, output_folder)
+        isdir(output_path) && return output_path
+    end
+
+    return path
 end
 
 function _first_existing_file(output_dir::AbstractString, filenames)

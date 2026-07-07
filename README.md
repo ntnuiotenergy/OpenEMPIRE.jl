@@ -145,6 +145,30 @@ and scenario settings used to generate it. Internally, the script reuses
 `data/<dataset>/ScenarioData` and then copied into the corresponding
 `OutOfSample/<dataset>/oos_treeN/ScenarioData` folder.
 
+### Running one out-of-sample evaluation
+
+The Julia runner can consume one generated OOS tree directly. Structural data is
+read from `data/<dataset>`, while stochastic scenario data is read from the
+folder passed with `--scenario-data-root`. That folder should contain a
+`ScenarioData/` subdirectory.
+
+```bash
+julia --project=. scripts/run_julia_empire.jl test \
+  --config=config/testrun.yaml \
+  --out-of-sample=true \
+  --fixed-investment-dir=results/julia_runs/<base_investment_run> \
+  --scenario-data-root=OutOfSample/test/oos_tree1
+```
+
+When `--scenario-data-root` is provided, the runner writes a generated run config
+with `use_scenario_generation: false`, so the model reads the generated OOS
+scenario CSVs instead of sampling a new tree. OOS solution tables are written
+under:
+
+```text
+results/julia_runs/<timestamp>_<dataset>/OutOfSample/oos_tree1/output/
+```
+
 ### Comparable multi-seed Julia/Python parity runs
 
 Scenario draws are **not** cross-language reproducible (Julia's RNG differs from
