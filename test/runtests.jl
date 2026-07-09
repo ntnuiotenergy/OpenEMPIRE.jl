@@ -14,6 +14,7 @@ include("test_excel.jl")
 include("test_csv.jl")
 include("test_scenario_csv.jl")
 include("test_out_of_sample.jl")
+include("test_multiple_oos_trees.jl")
 #include("test_interface.jl")
 include("test_timestruct.jl")
 include("test_solve.jl")
@@ -50,6 +51,10 @@ end
 
 @testset "Out-of-sample" begin
     test_fix_investments_from_results()
+    test_discover_and_select_oos_trees()
+    test_validate_oos_tree_files()
+    test_validate_fixed_investment_files()
+    test_write_multiple_oos_summary()
 end
 
 @testset "Validate" begin

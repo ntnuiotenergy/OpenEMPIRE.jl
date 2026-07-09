@@ -17,6 +17,7 @@ function _parse_args(args)
         "solver" => "HiGHS",
         "seed" => "1",
         "results" => joinpath("results", "julia_runs"),
+        "result-dir" => "",
         "optimize" => "true",
         "generate-only" => "false",
         "fixed-sample" => "auto",
@@ -219,7 +220,10 @@ function main(args = ARGS)
     isfile(config_file) || throw(ArgumentError("Config file not found: $config_file"))
 
     timestamp = Dates.format(now(), dateformat"yyyymmdd_HHMMSS")
-    result_dir = joinpath(options["results"], "$(timestamp)_$(dataset)")
+    explicit_result_dir = strip(options["result-dir"])
+    result_dir = isempty(explicit_result_dir) ?
+                 joinpath(options["results"], "$(timestamp)_$(dataset)") :
+                 explicit_result_dir
     mkpath(result_dir)
 
     if scenario_data_root !== nothing && fixed_sample_option != "auto"
@@ -246,7 +250,9 @@ function main(args = ARGS)
     deterministic_tiebreak = _config_bool(run_config, "deterministic_operational_tiebreak", false)
     is_out_of_sample = _boolean_option(options["out-of-sample"], "out-of-sample")
     oos_tree = _oos_tree_name(options["scenario-data-root"])
-    result_output_root = if is_out_of_sample && !isempty(oos_tree)
+    result_output_root = if !isempty(explicit_result_dir)
+        result_dir
+    elseif is_out_of_sample && !isempty(oos_tree)
         joinpath(result_dir, "OutOfSample", oos_tree)
     else
         result_dir
@@ -383,15 +389,17 @@ function main(args = ARGS)
         solve_seconds = time() - solve_start
         progress("Solver optimization finished in $(round(solve_seconds; digits = 2)) seconds")
         termination = JuMP.termination_status(emp)
-        objective = JuMP.objective_value(emp)
-        progress("Computing objective component diagnostics")
-        objective_components = OpenEMPIRE.objective_component_values(
-            emp,
-            sets,
-            params,
-            periods,
-            Discounter(OpenEMPIRE.discount_rate(params), 1, periods),
-        )
+        if JuMP.has_values(emp)
+            objective = JuMP.objective_value(emp)
+            progress("Computing objective component diagnostics")
+            objective_components = OpenEMPIRE.objective_component_values(
+                emp,
+                sets,
+                params,
+                periods,
+                Discounter(OpenEMPIRE.discount_rate(params), 1, periods),
+            )
+        end
         if deterministic_tiebreak && JuMP.is_solved_and_feasible(emp)
             progress("Starting deterministic fixed-investment operational tie-break")
             tiebreak_diagnostics = OpenEMPIRE.deterministic_operational_tiebreak!(
@@ -413,10 +421,12 @@ function main(args = ARGS)
         end
         println("Solve seconds: $(round(solve_seconds; digits = 2))")
         println("Termination status: $termination")
-        println("Objective value: $objective")
-        println("Objective components:")
-        for (name, value) in pairs(objective_components)
-            println("  $name: $value")
+        println("Objective value: $(objective === nothing ? "unavailable" : objective)")
+        if objective_components !== nothing
+            println("Objective components:")
+            for (name, value) in pairs(objective_components)
+                println("  $name: $value")
+            end
         end
         if tiebreak_diagnostics !== nothing
             println("Deterministic tie-break diagnostics:")
@@ -425,7 +435,7 @@ function main(args = ARGS)
             end
         end
         flush(stdout)
-        if JuMP.is_solved_and_feasible(emp)
+        if JuMP.has_values(emp)
             progress("Writing solution CSV tables")
             output_dir = OpenEMPIRE.write_solution_tables(result_output_root, emp, sets, params, periods)
             println("Solution CSVs written to: $output_dir")
@@ -437,8 +447,9 @@ function main(args = ARGS)
         end
     end
 
+    unavailable_value = optimize_model ? "unavailable" : "not_optimized"
     component_lines = if objective_components === nothing
-        ["objective_component_$name=not_optimized" for name in (
+        ["objective_component_$name=$unavailable_value" for name in (
             :generator_investment,
             :storage_investment,
             :transmission_investment,
@@ -481,7 +492,7 @@ function main(args = ARGS)
             "build_seconds=$build_seconds",
             "solve_seconds=$solve_seconds",
             "termination_status=$(termination === nothing ? "not_optimized" : string(termination))",
-            "objective_value=$(objective === nothing ? "not_optimized" : string(objective))",
+            "objective_value=$(objective === nothing ? unavailable_value : string(objective))",
             "end_time=$(now())",
         ], component_lines, tiebreak_lines),
     )

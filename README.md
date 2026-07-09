@@ -169,6 +169,45 @@ under:
 results/julia_runs/<timestamp>_<dataset>/OutOfSample/oos_tree1/output/
 ```
 
+### Running multiple out-of-sample evaluations
+
+Use `scripts/run_out_of_sample_trees.jl` to evaluate all generated trees with
+the same fixed investments:
+
+```bash
+julia --project=. scripts/run_out_of_sample_trees.jl test \
+  --config=config/testrun.yaml \
+  --trees-root=OutOfSample/test \
+  --fixed-investment-dir=results/julia_runs/<base_investment_run> \
+  --solver=HiGHS \
+  --num-trees=3
+```
+
+Trees are discovered as `oos_treeN`, sorted numerically, validated, and run
+sequentially in separate Julia processes. This keeps peak memory close to one
+model and ensures memory is returned when each process exits. An infeasible
+tree is recorded and does not prevent later trees from running.
+
+Results are grouped under one batch directory:
+
+```text
+results/julia_oos_runs/<timestamp>_<dataset>/
+├── batch_summary.csv
+├── batch_summary.txt
+├── oos_tree1/
+│   ├── output/
+│   ├── runner.out
+│   ├── runner.err
+│   └── summary.txt
+└── oos_tree2/
+```
+
+`batch_summary.csv` is updated after each tree and records its termination
+status, objective when available, timings, result directory, and process error.
+Use `--first-tree=N` to select a later starting tree, `--num-trees=all` to run
+every available tree, and `--continue-on-error=false` to stop after a process
+failure.
+
 ### Comparable multi-seed Julia/Python parity runs
 
 Scenario draws are **not** cross-language reproducible (Julia's RNG differs from
