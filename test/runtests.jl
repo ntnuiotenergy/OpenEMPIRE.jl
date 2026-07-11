@@ -15,6 +15,7 @@ include("test_csv.jl")
 include("test_scenario_csv.jl")
 include("test_out_of_sample.jl")
 include("test_multiple_oos_trees.jl")
+include("test_oos_result_aggregation.jl")
 #include("test_interface.jl")
 include("test_timestruct.jl")
 include("test_solve.jl")
@@ -55,6 +56,9 @@ end
     test_validate_oos_tree_files()
     test_validate_fixed_investment_files()
     test_write_multiple_oos_summary()
+    test_aggregate_oos_result_file()
+    test_aggregate_oos_missing_file_modes()
+    test_aggregate_oos_status_filter()
 end
 
 @testset "Validate" begin

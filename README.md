@@ -192,14 +192,14 @@ Results are grouped under one batch directory:
 
 ```text
 results/julia_oos_runs/<timestamp>_<dataset>/
-├── batch_summary.csv
-├── batch_summary.txt
-├── oos_tree1/
-│   ├── output/
-│   ├── runner.out
-│   ├── runner.err
-│   └── summary.txt
-└── oos_tree2/
+|-- batch_summary.csv
+|-- batch_summary.txt
+|-- oos_tree1/
+|   |-- output/
+|   |-- runner.out
+|   |-- runner.err
+|   `-- summary.txt
+`-- oos_tree2/
 ```
 
 `batch_summary.csv` is updated after each tree and records its termination
@@ -207,6 +207,46 @@ status, objective when available, timings, result directory, and process error.
 Use `--first-tree=N` to select a later starting tree, `--num-trees=all` to run
 every available tree, and `--continue-on-error=false` to stop after a process
 failure.
+
+### Aggregating out-of-sample results
+
+Use `scripts/aggregate_out_of_sample_results.jl` to concatenate selected OOS
+output files across successful tree runs:
+
+```bash
+julia --project=. scripts/aggregate_out_of_sample_results.jl \
+  results/julia_oos_runs/<timestamp>_<dataset>
+```
+
+By default, the script aggregates:
+
+```text
+genOperational.csv
+transmissionOperational.csv
+storCharge.csv
+storDischarge.csv
+loadShed.csv
+```
+
+Only `OPTIMAL` tree runs are included by default. Infeasible trees remain visible
+in `aggregated/oos_summary.csv`, but are skipped for operational result files
+because they do not have solution values. The combined files add `Tree`,
+`TreeIndex`, and `Run` columns and are written to:
+
+```text
+results/julia_oos_runs/<timestamp>_<dataset>/aggregated/
+|-- genOperational.csv
+|-- transmissionOperational.csv
+|-- storCharge.csv
+|-- storDischarge.csv
+|-- loadShed.csv
+|-- oos_summary.csv
+`-- aggregation_summary.txt
+```
+
+Use `--files=genOperational,loadShed` to select a smaller set, `--status=OPTIMAL`
+to control which tree statuses are included, and `--skip-missing=false` to fail
+when an expected tree output file is missing.
 
 ### Comparable multi-seed Julia/Python parity runs
 
