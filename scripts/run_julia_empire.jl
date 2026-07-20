@@ -184,11 +184,7 @@ function _sampling_key_info(data_folder::AbstractString)
     )
 end
 
-const _OOS_SCENARIO_FILENAMES = (
-    "sloadRaw.csv",
-    "maxRegHydroGenRaw.csv",
-    "genCapAvailStochRaw.csv",
-)
+const _OOS_SCENARIO_FILENAMES = OpenEMPIRE._OOS_SCENARIO_FILENAMES
 
 const _OOS_FIXED_INVESTMENT_FILENAMES = (
     ("genInvCap.csv",),

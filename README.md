@@ -119,6 +119,24 @@ The output is **not** only `sampling_key.csv`: the key records which weather
 files are the derived stochastic inputs the model actually consumes. Both the
 key and the derived files are written deterministically from `(raw inputs, key)`.
 
+### Generating one out-of-sample scenario tree
+
+Generate one self-contained tree without modifying the source dataset:
+
+```bash
+julia --project=. scripts/create_out_of_sample_tree.jl test \
+  --config=config/testrun.yaml \
+  --seed=101 \
+  --output=OutOfSample/test/oos_tree1
+```
+
+The generator works on a temporary dataset copy and publishes the completed
+tree only after all required files have been produced. It refuses to overwrite
+an existing tree. `metadata.yaml` records the seed, relevant configuration,
+source paths, config checksum, and checksums and sizes for every scenario file.
+The corresponding library function is
+`OpenEMPIRE.generate_oos_scenario_tree(config_file, data_folder, tree_dir; seed=...)`.
+
 ### Running one out-of-sample scenario tree
 
 Use the standard Julia runner with a completed investment run and one external

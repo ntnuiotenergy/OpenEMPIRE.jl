@@ -8,6 +8,7 @@ using CSV
 using Dates
 using DelimitedFiles
 using Random
+using SHA
 using YAML
 
 include("empire_sets.jl")
