@@ -14,6 +14,7 @@ include("test_excel.jl")
 include("test_csv.jl")
 include("test_scenario_csv.jl")
 include("test_runner_staging.jl")
+include("test_out_of_sample.jl")
 #include("test_interface.jl")
 include("test_timestruct.jl")
 include("test_solve.jl")
@@ -50,6 +51,12 @@ end
 
 @testset "Runner staging" begin
     test_stage_run_inputs_copies_without_mutating_source()
+end
+
+@testset "Out-of-sample" begin
+    test_fix_investments_from_results()
+    test_fix_only_investment_capacities()
+    test_fixed_investment_key_validation()
 end
 
 @testset "Validate" begin
