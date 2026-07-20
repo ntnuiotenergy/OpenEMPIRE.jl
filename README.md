@@ -257,6 +257,36 @@ inputs or code.
 The generated SGE script repeats this fingerprint validation on the execution
 node immediately before invoking the EMPIRE runner.
 
+### Planning a one-tree Solstorm staging run
+
+Create a locally validated staging plan before transferring an OOS smoke test:
+
+```bash
+julia --project=. scripts/prepare_oos_solstorm_staging.jl \
+  --queue=OutOfSample/test/experiment_seed101_3trees/execution.yaml \
+  --remote-user=<username> \
+  --remote-root=/absolute/solstorm/path/openempire-oos
+```
+
+This is a dry-run operation. It writes `staging.yaml` plus remote-adjusted tree
+and experiment metadata, but it does not create archives, connect to Solstorm,
+copy files, prepare a remote queue, or submit a scheduler job. The manifest
+contains exact commands for those later steps, each marked `executed: false`.
+
+The plan creates a unique workspace under `<remote-root>/stages/`, pins the
+repository archive to the current Git commit, transfers the full base dataset,
+one selected scenario tree, the execution and generation configurations, and
+only the eight fixed-investment tables required by OOS. It records checksums
+and includes a remote verification command that must pass before queue and SGE
+preparation. The selected source tree is deliberately represented as
+`oos_tree1` in a self-contained one-tree experiment.
+
+`--remote-root` must be an absolute Solstorm path; `~` is rejected to prevent
+local and remote path expansion from producing different manifests. If Julia
+source or the runner differs from the selected Git revision, the plan is
+written with `status: blocked`. Unrelated working-tree changes are recorded but
+excluded from the revision-pinned repository archive.
+
 ### Running one out-of-sample scenario tree
 
 Use the standard Julia runner with a completed investment run and one external
