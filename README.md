@@ -163,6 +163,31 @@ results. The corresponding library function is
 `OpenEMPIRE.prepare_oos_experiment(config_file, data_folder, experiment_dir;
 num_trees=..., seed_start=...)`.
 
+### Preparing an out-of-sample execution queue
+
+After the investment run and scenario trees are complete, prepare runner
+commands without starting any jobs:
+
+```bash
+julia --project=. scripts/prepare_oos_execution_queue.jl test \
+  --experiment=OutOfSample/test/experiment_seed101_3trees \
+  --fixed-investment-dir=results/julia_runs/<investment-run> \
+  --config=config/testrun.yaml \
+  --solver=HiGHS
+```
+
+The command validates the experiment manifest and every tree checksum, checks
+that the dataset and scenario-shaping configuration match, and verifies all
+eight fixed-capacity result tables. It then writes `execution.yaml` under the
+experiment directory. Each job contains an argument vector and copyable command
+for the current `run_julia_empire.jl` interface, together with fields for
+scheduler job ID, status, logs, and result location.
+
+No command in the queue is executed. Repeating the preparation command preserves
+existing `pending`, `submitted`, `running`, `complete`, or `failed` job state if
+the experiment, runner, fixed investments, and commands are unchanged. Changed
+inputs are rejected rather than silently replacing an active queue.
+
 ### Running one out-of-sample scenario tree
 
 Use the standard Julia runner with a completed investment run and one external

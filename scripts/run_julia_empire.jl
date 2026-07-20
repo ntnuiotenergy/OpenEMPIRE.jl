@@ -186,17 +186,6 @@ end
 
 const _OOS_SCENARIO_FILENAMES = OpenEMPIRE._OOS_SCENARIO_FILENAMES
 
-const _OOS_FIXED_INVESTMENT_FILENAMES = (
-    ("genInvCap.csv",),
-    ("transmissionInvCap.csv", "transmisionInvCap.csv"),
-    ("storPWInvCap.csv",),
-    ("storENInvCap.csv",),
-    ("genInstalledCap.csv",),
-    ("transmissionInstalledCap.csv",),
-    ("storPWInstalledCap.csv",),
-    ("storENInstalledCap.csv",),
-)
-
 function _scenario_data_dir(root::AbstractString)
     scenario_dir = joinpath(root, "ScenarioData")
     isdir(scenario_dir) || throw(ArgumentError(
@@ -256,24 +245,8 @@ function _scenario_tree_metadata(root::AbstractString)
     )
 end
 
-function _fixed_investment_output_dir(path::AbstractString)
-    isdir(path) || throw(ArgumentError("Fixed-investment directory does not exist: $path"))
-    for output_folder in ("Output", "output")
-        output_dir = joinpath(path, output_folder)
-        isdir(output_dir) && return output_dir
-    end
-    return path
-end
-
 function _fixed_investment_source_files(path::AbstractString)
-    output_dir = _fixed_investment_output_dir(path)
-    return map(_OOS_FIXED_INVESTMENT_FILENAMES) do aliases
-        source = findfirst(filename -> isfile(joinpath(output_dir, filename)), aliases)
-        source === nothing && throw(ArgumentError(
-            "Fixed-investment directory is missing one of: $(join(aliases, ", "))",
-        ))
-        joinpath(output_dir, aliases[source])
-    end
+    return OpenEMPIRE._oos_fixed_investment_source_files(path)
 end
 
 function _validate_out_of_sample_options(options, generate_only::Bool, fixed_sample::String)
