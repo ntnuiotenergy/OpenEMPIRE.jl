@@ -137,6 +137,32 @@ source paths, config checksum, and checksums and sizes for every scenario file.
 The corresponding library function is
 `OpenEMPIRE.generate_oos_scenario_tree(config_file, data_folder, tree_dir; seed=...)`.
 
+### Preparing a multi-tree out-of-sample experiment
+
+Prepare a deterministic sequence of trees without starting solver jobs:
+
+```bash
+julia --project=. scripts/prepare_oos_experiment.jl test \
+  --config=config/testrun.yaml \
+  --num-trees=3 \
+  --seed-start=101 \
+  --output=OutOfSample/test/experiment_seed101_3trees
+```
+
+This produces `oos_tree1`, `oos_tree2`, and `oos_tree3` with seeds 101–103.
+The atomic `experiment.yaml` manifest records the immutable inputs and each
+tree's preparation status. Repeating the command resumes the preparation:
+valid completed trees are checksum-verified and skipped, while missing trees
+are generated. A changed experiment specification or an invalid existing tree
+is rejected rather than overwritten. Multi-tree preparation requires
+`use_fixed_sample: false`; otherwise different seeds would not produce
+independent trees.
+
+This step only prepares inputs. It does not submit EMPIRE runs or aggregate
+results. The corresponding library function is
+`OpenEMPIRE.prepare_oos_experiment(config_file, data_folder, experiment_dir;
+num_trees=..., seed_start=...)`.
+
 ### Running one out-of-sample scenario tree
 
 Use the standard Julia runner with a completed investment run and one external

@@ -120,6 +120,114 @@ function test_generate_single_oos_scenario_tree()
     end
 end
 
+function _oos_tree_scenario_snapshot(tree_dir)
+    scenario_dir = joinpath(tree_dir, "ScenarioData")
+    return Dict(
+        filename => OpenEMPIRE._oos_sha256_file(joinpath(scenario_dir, filename)) for
+        filename in OpenEMPIRE._OOS_TREE_FILENAMES
+    )
+end
+
+function test_prepare_oos_experiment()
+    mktempdir() do root
+        source_data = joinpath(root, "source")
+        cp(joinpath(pkgdir(OpenEMPIRE), "data", "test"), source_data)
+        config_file = joinpath(pkgdir(OpenEMPIRE), "config", "testrun.yaml")
+        source_before = _oos_source_snapshot(source_data)
+        experiment_dir = joinpath(root, "experiment")
+
+        prepared = OpenEMPIRE.prepare_oos_experiment(
+            config_file,
+            source_data,
+            experiment_dir;
+            num_trees = 2,
+            seed_start = 40,
+            input_format = :csv,
+        )
+
+        @test prepared == abspath(experiment_dir)
+        @test _oos_source_snapshot(source_data) == source_before
+        manifest_file = joinpath(experiment_dir, "experiment.yaml")
+        manifest = YAML.load_file(manifest_file)
+        @test manifest["schema_version"] == 1
+        @test manifest["kind"] == "oos_tree_experiment"
+        @test manifest["status"] == "complete"
+        @test manifest["seed_start"] == 40
+        @test manifest["num_trees"] == 2
+        @test [tree["seed"] for tree in manifest["trees"]] == [40, 41]
+        @test all(tree["status"] == "complete" for tree in manifest["trees"])
+
+        tree1 = joinpath(experiment_dir, "oos_tree1")
+        tree2 = joinpath(experiment_dir, "oos_tree2")
+        tree1_metadata_before = OpenEMPIRE._oos_sha256_file(joinpath(tree1, "metadata.yaml"))
+        tree1_before = _oos_tree_scenario_snapshot(tree1)
+        tree2_before = _oos_tree_scenario_snapshot(tree2)
+        @test tree1_before != tree2_before
+
+        saved_tree2 = joinpath(root, "saved_oos_tree2")
+        mv(tree2, saved_tree2)
+        resumed = OpenEMPIRE.prepare_oos_experiment(
+            config_file,
+            source_data,
+            experiment_dir;
+            num_trees = 2,
+            seed_start = 40,
+            input_format = :csv,
+        )
+        @test resumed == prepared
+        @test _oos_tree_scenario_snapshot(tree1) == tree1_before
+        @test OpenEMPIRE._oos_sha256_file(joinpath(tree1, "metadata.yaml")) ==
+              tree1_metadata_before
+        @test _oos_tree_scenario_snapshot(tree2) == tree2_before
+        @test _oos_source_snapshot(source_data) == source_before
+
+        @test_throws ArgumentError OpenEMPIRE.prepare_oos_experiment(
+            config_file,
+            source_data,
+            experiment_dir;
+            num_trees = 3,
+            seed_start = 40,
+            input_format = :csv,
+        )
+        @test_throws ArgumentError OpenEMPIRE.prepare_oos_experiment(
+            config_file,
+            source_data,
+            experiment_dir;
+            num_trees = 2,
+            seed_start = 40,
+            input_format = :csv,
+            resume = false,
+        )
+
+        scenario_file = joinpath(tree2, "ScenarioData", "sloadRaw.csv")
+        write(scenario_file, read(scenario_file, String) * "\n")
+        @test_throws ArgumentError OpenEMPIRE.prepare_oos_experiment(
+            config_file,
+            source_data,
+            experiment_dir;
+            num_trees = 2,
+            seed_start = 40,
+            input_format = :csv,
+        )
+        failed_manifest = YAML.load_file(manifest_file)
+        @test failed_manifest["status"] == "failed"
+        @test failed_manifest["trees"][2]["status"] == "failed"
+
+        fixed_config_file = joinpath(root, "fixed-sample.yaml")
+        fixed_config = YAML.load_file(config_file)
+        fixed_config["use_fixed_sample"] = true
+        YAML.write_file(fixed_config_file, fixed_config)
+        @test_throws ArgumentError OpenEMPIRE.prepare_oos_experiment(
+            fixed_config_file,
+            source_data,
+            joinpath(root, "fixed-sample-experiment");
+            num_trees = 2,
+            seed_start = 40,
+            input_format = :csv,
+        )
+    end
+end
+
 function _write_investment_csvs(output_dir; include_installed = true, extra_generator = false)
     generator_rows = extra_generator ?
                      "A,Solar,1,3.5\nB,Solar,1,1.0\n" :

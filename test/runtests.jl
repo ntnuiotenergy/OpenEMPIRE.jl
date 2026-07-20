@@ -57,6 +57,7 @@ end
 
 @testset "Out-of-sample" begin
     test_generate_single_oos_scenario_tree()
+    test_prepare_oos_experiment()
     test_fix_investments_from_results()
     test_fix_only_investment_capacities()
     test_fixed_investment_key_validation()
