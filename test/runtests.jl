@@ -66,6 +66,7 @@ end
 end
 
 @testset "Out-of-sample" begin
+    test_generate_single_oos_scenario_tree()
     test_fixed_investment_provenance_and_compatibility()
     test_fix_investments_from_results()
     test_fix_only_investment_capacities()

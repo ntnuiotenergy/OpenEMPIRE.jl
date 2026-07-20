@@ -154,31 +154,23 @@ chosen variables cover more nodes. If more than one sampling mode is on,
 `copula_clusters_use`. The file is saved with the sampling key under
 `results/julia_runs/<run>/Input/ScenarioData/`.
 
-### Generating out-of-sample scenario trees
+### Generating one out-of-sample scenario tree
 
-Use `scripts/create_out_of_sample_tree.jl` to generate one or more scenario trees
-without building or solving a model:
+Generate one self-contained tree without modifying the source dataset:
 
 ```bash
 julia --project=. scripts/create_out_of_sample_tree.jl test \
   --config=config/testrun.yaml \
-  --num-trees=3 \
-  --seed=1
+  --seed=101 \
+  --output=OutOfSample/test/oos_tree1
 ```
 
-This writes generated OOS scenario inputs under:
-
-```text
-OutOfSample/<dataset>/oos_tree1/ScenarioData/
-OutOfSample/<dataset>/oos_tree2/ScenarioData/
-OutOfSample/<dataset>/oos_tree3/ScenarioData/
-```
-
-Each tree folder also gets a `metadata.yaml` file with the dataset, seed, config,
-and scenario settings used to generate it. Internally, the script reuses
-`OpenEMPIRE.generate_scenarios`, so the generated files are first written to
-`data/<dataset>/ScenarioData` and then copied into the corresponding
-`OutOfSample/<dataset>/oos_treeN/ScenarioData` folder.
+The generator works on a temporary dataset copy and publishes the completed
+tree only after all required files have been produced. It refuses to overwrite
+an existing tree. `metadata.yaml` records the seed, relevant configuration,
+source paths, config checksum, and checksums and sizes for every scenario file.
+The corresponding library function is
+`OpenEMPIRE.generate_oos_scenario_tree(config_file, data_folder, tree_dir; seed=...)`.
 
 ### Running one out-of-sample scenario tree
 

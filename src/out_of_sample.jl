@@ -1,3 +1,168 @@
+const _OOS_SCENARIO_FILENAMES = (
+    "sloadRaw.csv",
+    "maxRegHydroGenRaw.csv",
+    "genCapAvailStochRaw.csv",
+)
+
+const _OOS_TREE_FILENAMES = (_OOS_SCENARIO_FILENAMES..., "sampling_key.csv")
+
+const _OOS_TREE_CONFIG_KEYS = (
+    "forecast_horizon_year",
+    "leap_years_investment",
+    "number_of_scenarios",
+    "regular_seasons",
+    "length_of_regular_season",
+    "n_peak_seasons",
+    "len_peak_season",
+    "time_format",
+    "use_fixed_sample",
+)
+
+function _oos_sha256_file(path::AbstractString)
+    open(path, "r") do io
+        return bytes2hex(sha256(io))
+    end
+end
+
+function _oos_directory_sha256(root::AbstractString)
+    files = String[]
+    for (directory, _, filenames) in walkdir(root)
+        append!(files, joinpath(directory, filename) for filename in filenames)
+    end
+    sort!(files; by = path -> relpath(path, root))
+    digest_manifest = join(
+        ("$(relpath(path, root))\t$(_oos_sha256_file(path))" for path in files),
+        "\n",
+    )
+    return bytes2hex(sha256(digest_manifest))
+end
+
+function _oos_tree_file_metadata(scenario_dir::AbstractString)
+    return Dict{String, Any}(
+        filename => Dict{String, Any}(
+            "bytes" => filesize(joinpath(scenario_dir, filename)),
+            "sha256" => _oos_sha256_file(joinpath(scenario_dir, filename)),
+        ) for filename in _OOS_TREE_FILENAMES
+    )
+end
+
+function _oos_tree_metadata(
+    config,
+    config_file::AbstractString,
+    data_folder::AbstractString,
+    tree_dir::AbstractString,
+    scenario_dir::AbstractString,
+    input_format::Symbol,
+    seed::Int,
+)
+    config_values = Dict{String, Any}()
+    for key in _OOS_TREE_CONFIG_KEYS
+        haskey(config, key) && (config_values[key] = config[key])
+    end
+
+    return Dict{String, Any}(
+        "schema_version" => 1,
+        "generator" => "OpenEMPIRE.generate_oos_scenario_tree",
+        "created_at_utc" => string(now(UTC), "Z"),
+        "julia_version" => string(VERSION),
+        "openempire_version" => string(pkgversion(@__MODULE__)),
+        "tree" => basename(tree_dir),
+        "tree_dir" => tree_dir,
+        "seed" => seed,
+        "input_format" => string(input_format),
+        "source_data_folder" => data_folder,
+        "source_data_sha256" => _oos_directory_sha256(data_folder),
+        "source_config_file" => config_file,
+        "source_config_sha256" => _oos_sha256_file(config_file),
+        "config" => config_values,
+        "files" => _oos_tree_file_metadata(scenario_dir),
+    )
+end
+
+"""
+    generate_oos_scenario_tree(
+        config_file,
+        data_folder,
+        tree_dir;
+        input_format = :auto,
+        seed = 1,
+        progress = nothing,
+    )
+
+Generate one out-of-sample scenario tree without modifying `data_folder`.
+
+The dataset is copied to a temporary workspace before [`generate_scenarios`](@ref)
+is called. The generated scenario CSVs, sampling key, and reproducibility
+metadata are then published atomically under `tree_dir`. An existing `tree_dir`
+is never overwritten. Returns the absolute tree path.
+"""
+function generate_oos_scenario_tree(
+    config_file::AbstractString,
+    data_folder::AbstractString,
+    tree_dir::AbstractString;
+    input_format::Symbol = :auto,
+    seed::Integer = 1,
+    progress = nothing,
+)
+    source_data = abspath(normpath(data_folder))
+    source_config = abspath(normpath(config_file))
+    target_tree = abspath(normpath(tree_dir))
+    seed_value = Int(seed)
+
+    isdir(source_data) || throw(ArgumentError("Dataset folder does not exist: $data_folder"))
+    isfile(source_config) || throw(ArgumentError("Config file does not exist: $config_file"))
+    ispath(target_tree) && throw(ArgumentError("OOS tree already exists: $tree_dir"))
+    _is_same_or_child_path(target_tree, source_data) && throw(ArgumentError(
+        "OOS tree must be outside the source dataset: $tree_dir",
+    ))
+
+    config = YAML.load_file(source_config)
+    _config_bool(config, "use_scenario_generation", true) || throw(ArgumentError(
+        "OOS tree generation requires use_scenario_generation: true",
+    ))
+
+    target_parent = dirname(target_tree)
+    mkpath(target_parent)
+    mktempdir(target_parent; prefix = ".oos-tree-") do workspace
+        staged_data = joinpath(workspace, "data")
+        staged_tree = joinpath(workspace, "tree")
+        staged_scenario_dir = joinpath(staged_tree, "ScenarioData")
+
+        cp(source_data, staged_data)
+        generate_scenarios(
+            source_config,
+            staged_data;
+            input_format,
+            scenario_rng = MersenneTwister(seed_value),
+            progress,
+        )
+
+        generated_scenario_dir = joinpath(staged_data, "ScenarioData")
+        mkpath(staged_scenario_dir)
+        for filename in _OOS_TREE_FILENAMES
+            source_file = joinpath(generated_scenario_dir, filename)
+            isfile(source_file) || throw(ArgumentError(
+                "Scenario generation did not produce required file: $source_file",
+            ))
+            cp(source_file, joinpath(staged_scenario_dir, filename))
+        end
+
+        metadata = _oos_tree_metadata(
+            config,
+            source_config,
+            source_data,
+            target_tree,
+            staged_scenario_dir,
+            input_format,
+            seed_value,
+        )
+        YAML.write_file(joinpath(staged_tree, "metadata.yaml"), metadata)
+        mv(staged_tree, target_tree)
+    end
+
+    return target_tree
+end
+
 """
     fix_investments_from_results!(model, sets, periods, output_dir; fix_installed_capacities=true)
 
