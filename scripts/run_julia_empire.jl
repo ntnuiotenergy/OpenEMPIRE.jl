@@ -212,6 +212,50 @@ function _scenario_data_dir(root::AbstractString)
     return scenario_dir
 end
 
+function _verify_scenario_tree_checksums(root::AbstractString, metadata)
+    files = get(metadata, "files", nothing)
+    files isa AbstractDict || return false
+
+    scenario_dir = _scenario_data_dir(root)
+    for filename in OpenEMPIRE._OOS_TREE_FILENAMES
+        file_metadata = get(files, filename, nothing)
+        file_metadata isa AbstractDict || return false
+        expected = get(file_metadata, "sha256", nothing)
+        expected === nothing && return false
+        actual = _sha256_file(joinpath(scenario_dir, filename))
+        lowercase(string(expected)) == actual || throw(ArgumentError(
+            "OOS scenario checksum mismatch for $filename in $root",
+        ))
+    end
+    return true
+end
+
+function _load_scenario_tree_metadata(metadata_path::AbstractString, scenario_root::AbstractString)
+    isempty(metadata_path) && return (
+        path = "",
+        data = Dict{String, Any}(),
+        checksums_verified = false,
+    )
+
+    metadata = YAML.load_file(metadata_path)
+    metadata isa AbstractDict || throw(ArgumentError(
+        "OOS scenario metadata must be a mapping: $metadata_path",
+    ))
+    return (
+        path = metadata_path,
+        data = metadata,
+        checksums_verified = _verify_scenario_tree_checksums(scenario_root, metadata),
+    )
+end
+
+function _scenario_tree_metadata(root::AbstractString)
+    metadata_path = joinpath(root, "metadata.yaml")
+    return _load_scenario_tree_metadata(
+        isfile(metadata_path) ? metadata_path : "",
+        root,
+    )
+end
+
 function _fixed_investment_output_dir(path::AbstractString)
     isdir(path) || throw(ArgumentError("Fixed-investment directory does not exist: $path"))
     for output_folder in ("Output", "output")
@@ -259,6 +303,7 @@ function _validate_out_of_sample_options(options, generate_only::Bool, fixed_sam
     ))
 
     _scenario_data_dir(scenario_data_root)
+    _scenario_tree_metadata(scenario_data_root)
     _fixed_investment_source_files(fixed_investment_dir)
     return (; is_out_of_sample, fixed_investment_dir, scenario_data_root)
 end
@@ -288,6 +333,7 @@ function _stage_run_inputs(
     input_dir = joinpath(result_dir, "Input")
     staged_data = joinpath(input_dir, "csv")
     staged_config = joinpath(input_dir, "config.yaml")
+    staged_scenario_metadata_file = ""
 
     mkpath(input_dir)
     cp(data_folder, staged_data)
@@ -297,6 +343,11 @@ function _stage_run_inputs(
         source_scenario_dir = _scenario_data_dir(scenario_data_root)
         staged_scenario_dir = joinpath(staged_data, "ScenarioData")
         cp(source_scenario_dir, staged_scenario_dir; force = true)
+        source_metadata_file = joinpath(scenario_data_root, "metadata.yaml")
+        if isfile(source_metadata_file)
+            staged_scenario_metadata_file = joinpath(input_dir, "oos_tree_metadata.yaml")
+            cp(source_metadata_file, staged_scenario_metadata_file)
+        end
     end
 
     staged_fixed_investment_dir = ""
@@ -308,7 +359,12 @@ function _stage_run_inputs(
         end
     end
 
-    return staged_data, staged_config, staged_fixed_investment_dir
+    return (
+        staged_data,
+        staged_config,
+        staged_fixed_investment_dir,
+        staged_scenario_metadata_file,
+    )
 end
 
 function _write_summary(path, lines)
@@ -433,7 +489,7 @@ folded into this once by [`_resolve_run_spec`](@ref) and the rest of the runner
 only reads spec fields. `data_folder`/`config_file` point at the staged copies
 under `result_dir/Input`; the `original_*` fields keep the source paths.
 """
-Base.@kwdef struct JuliaRunSpec{O, A <: Tuple, C}
+Base.@kwdef struct JuliaRunSpec{O, A <: Tuple, C, M}
     dataset::String
     original_data_folder::String
     data_folder::String
@@ -450,6 +506,9 @@ Base.@kwdef struct JuliaRunSpec{O, A <: Tuple, C}
     optimize::Bool
     out_of_sample::Bool
     scenario_tree::String
+    scenario_tree_metadata::M
+    scenario_tree_metadata_file::String
+    scenario_tree_checksums_verified::Bool
     original_scenario_data_root::String
     original_fixed_investment_dir::String
     fixed_investment_dir::String
@@ -485,13 +544,19 @@ function _resolve_run_spec(options)
     timestamp = Dates.format(now(), dateformat"yyyymmdd_HHMMSS")
     result_dir = joinpath(options["results"], "$(timestamp)_$(_run_label(dataset))")
     mkpath(result_dir)
-    data_folder, config_file, fixed_investment_dir = _stage_run_inputs(
-        result_dir,
-        original_data_folder,
-        original_config_file;
-        scenario_data_root = oos.scenario_data_root,
-        fixed_investment_dir = oos.fixed_investment_dir,
-    )
+    data_folder, config_file, fixed_investment_dir, scenario_tree_metadata_file =
+        _stage_run_inputs(
+            result_dir,
+            original_data_folder,
+            original_config_file;
+            scenario_data_root = oos.scenario_data_root,
+            fixed_investment_dir = oos.fixed_investment_dir,
+        )
+    scenario_metadata = if isempty(oos.scenario_data_root)
+        (data = Dict{String, Any}(), checksums_verified = false)
+    else
+        _load_scenario_tree_metadata(scenario_tree_metadata_file, data_folder)
+    end
 
     if oos.is_out_of_sample
         config_file = _config_for_out_of_sample(config_file)
@@ -526,6 +591,9 @@ function _resolve_run_spec(options)
         optimize,
         out_of_sample = oos.is_out_of_sample,
         scenario_tree = isempty(oos.scenario_data_root) ? "" : basename(normpath(oos.scenario_data_root)),
+        scenario_tree_metadata = scenario_metadata.data,
+        scenario_tree_metadata_file,
+        scenario_tree_checksums_verified = scenario_metadata.checksums_verified,
         original_scenario_data_root = oos.scenario_data_root,
         original_fixed_investment_dir = oos.fixed_investment_dir,
         fixed_investment_dir,
@@ -533,6 +601,10 @@ function _resolve_run_spec(options)
         manifest_path = joinpath(result_dir, "run_manifest.yaml"),
         perf_enabled = _perf_enabled(),
     )
+end
+
+function _oos_scenario_seed(spec::JuliaRunSpec)
+    return get(spec.scenario_tree_metadata, "seed", nothing)
 end
 
 function _initial_manifest(spec::JuliaRunSpec)
@@ -557,6 +629,8 @@ function _initial_manifest(spec::JuliaRunSpec)
             "staged_config_file" => spec.config_file,
             "scenario_data_source" => isempty(spec.original_scenario_data_root) ? nothing :
                 spec.original_scenario_data_root,
+            "staged_scenario_metadata_file" => isempty(spec.scenario_tree_metadata_file) ? nothing :
+                spec.scenario_tree_metadata_file,
             "fixed_investment_source" => isempty(spec.original_fixed_investment_dir) ? nothing :
                 spec.original_fixed_investment_dir,
             "staged_fixed_investment_dir" => isempty(spec.fixed_investment_dir) ? nothing :
@@ -577,6 +651,12 @@ function _initial_manifest(spec::JuliaRunSpec)
         "out_of_sample" => Dict{String, Any}(
             "enabled" => spec.out_of_sample,
             "scenario_tree" => isempty(spec.scenario_tree) ? nothing : spec.scenario_tree,
+            "scenario_seed" => _oos_scenario_seed(spec),
+            "scenario_checksums_verified" => spec.scenario_tree_checksums_verified,
+            "scenario_metadata" => isempty(spec.scenario_tree_metadata) ? nothing :
+                spec.scenario_tree_metadata,
+            "base_investment_run" => isempty(spec.original_fixed_investment_dir) ? nothing :
+                spec.original_fixed_investment_dir,
             "investments_fixed" => false,
         ),
         "generate_only" => spec.generate_only,
@@ -603,6 +683,7 @@ function _print_run_header(spec::JuliaRunSpec)
     println("OOS:          $(spec.out_of_sample)")
     if spec.out_of_sample
         println("OOS tree:     $(spec.scenario_tree)")
+        println("OOS seed:     $(_oos_scenario_seed(spec))")
         println("Investments:  $(spec.fixed_investment_dir)")
     end
     println("Generate only: $(spec.generate_only)")
@@ -849,6 +930,9 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
             "fixed_sample=$(spec.fixed_sample)",
             "out_of_sample=$(spec.out_of_sample)",
             "scenario_tree=$(spec.scenario_tree)",
+            "scenario_seed=$(_oos_scenario_seed(spec))",
+            "scenario_checksums_verified=$(spec.scenario_tree_checksums_verified)",
+            "base_investment_run=$(spec.original_fixed_investment_dir)",
             "fixed_investment_dir=$(spec.fixed_investment_dir)",
             "optimize=$(spec.optimize)",
             "variables=$(JuMP.num_variables(emp))",
