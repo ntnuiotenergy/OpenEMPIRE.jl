@@ -16,10 +16,12 @@ function test_stage_run_inputs_copies_without_mutating_source()
         write(config_file, "use_scenario_generation: true\n")
 
         result_dir = joinpath(root, "result")
-        staged_data, staged_config = _stage_run_inputs(result_dir, source, config_file)
+        staged_data, staged_config, staged_fixed_investments =
+            _stage_run_inputs(result_dir, source, config_file)
 
         @test staged_data == joinpath(result_dir, "Input", "csv")
         @test staged_config == joinpath(result_dir, "Input", "config.yaml")
+        @test isempty(staged_fixed_investments)
         @test read(joinpath(staged_data, "ScenarioData", "sampling_key.csv"), String) == read(source_key, String)
         @test read(staged_config, String) == read(config_file, String)
 
@@ -31,4 +33,108 @@ function test_stage_run_inputs_copies_without_mutating_source()
         @test !isfile(joinpath(source, "ScenarioData", "sloadRaw.csv"))
         @test read(config_file, String) == "use_scenario_generation: true\n"
     end
+end
+
+function _write_runner_fixed_investment_files(output_dir)
+    mkpath(output_dir)
+    for filename in (
+        "genInvCap.csv",
+        "transmisionInvCap.csv",
+        "storPWInvCap.csv",
+        "storENInvCap.csv",
+        "genInstalledCap.csv",
+        "transmissionInstalledCap.csv",
+        "storPWInstalledCap.csv",
+        "storENInstalledCap.csv",
+    )
+        write(joinpath(output_dir, filename), "$filename\n")
+    end
+    return output_dir
+end
+
+function test_resolve_single_tree_oos_run_spec()
+    mktempdir() do root
+        source = joinpath(root, "source")
+        source_scenario_dir = joinpath(source, "ScenarioData")
+        mkpath(source_scenario_dir)
+        write(joinpath(source_scenario_dir, "electricload.csv"), "source raw data\n")
+        write(joinpath(source_scenario_dir, "sloadRaw.csv"), "stale generated data\n")
+
+        tree_root = joinpath(root, "oos_tree7")
+        tree_scenario_dir = joinpath(tree_root, "ScenarioData")
+        mkpath(tree_scenario_dir)
+        for filename in _OOS_SCENARIO_FILENAMES
+            write(joinpath(tree_scenario_dir, filename), "tree data: $filename\n")
+        end
+        write(joinpath(tree_scenario_dir, "sampling_key.csv"), "tree sampling key\n")
+
+        fixed_result = joinpath(root, "investment_run")
+        _write_runner_fixed_investment_files(joinpath(fixed_result, "output"))
+
+        config_file = joinpath(root, "run.yaml")
+        write(config_file, "use_scenario_generation: true\nuse_fixed_sample: true\n")
+        results_root = joinpath(root, "results")
+        options = _parse_args([
+            source,
+            "--config=$config_file",
+            "--results=$results_root",
+            "--solver=none",
+            "--no-optimize",
+            "--out-of-sample=true",
+            "--fixed-investment-dir=$fixed_result",
+            "--scenario-data-root=$tree_root",
+        ])
+
+        spec = _resolve_run_spec(options)
+
+        @test spec.out_of_sample
+        @test spec.scenario_tree == "oos_tree7"
+        @test spec.original_scenario_data_root == tree_root
+        @test spec.original_fixed_investment_dir == fixed_result
+        @test spec.fixed_investment_dir == joinpath(spec.result_dir, "Input", "fixed_investments")
+        @test isdir(spec.fixed_investment_dir)
+        @test length(readdir(spec.fixed_investment_dir)) == 8
+
+        staged_scenario_dir = joinpath(spec.data_folder, "ScenarioData")
+        for filename in _OOS_SCENARIO_FILENAMES
+            @test read(joinpath(staged_scenario_dir, filename), String) ==
+                  "tree data: $filename\n"
+        end
+        @test read(joinpath(staged_scenario_dir, "sampling_key.csv"), String) ==
+              "tree sampling key\n"
+        @test !isfile(joinpath(staged_scenario_dir, "electricload.csv"))
+
+        staged_config = YAML.load_file(spec.config_file)
+        @test staged_config["use_scenario_generation"] == false
+        @test staged_config["use_fixed_sample"] == false
+
+        @test read(joinpath(source_scenario_dir, "sloadRaw.csv"), String) ==
+              "stale generated data\n"
+        @test YAML.load_file(config_file)["use_scenario_generation"] == true
+
+        manifest = _initial_manifest(spec)
+        @test manifest["out_of_sample"]["enabled"] == true
+        @test manifest["out_of_sample"]["scenario_tree"] == "oos_tree7"
+        @test manifest["out_of_sample"]["investments_fixed"] == false
+        @test manifest["input_staging"]["scenario_data_source"] == tree_root
+        @test manifest["sampling_key"]["sha256"] == _sha256_file(
+            joinpath(staged_scenario_dir, "sampling_key.csv"),
+        )
+    end
+end
+
+function test_reject_incomplete_oos_runner_options()
+    options = _parse_args(["--scenario-data-root=tree"])
+    @test_throws ArgumentError _validate_out_of_sample_options(options, false, "auto")
+
+    options = _parse_args(["--out-of-sample=true", "--scenario-data-root=tree"])
+    @test_throws ArgumentError _validate_out_of_sample_options(options, false, "auto")
+
+    options = _parse_args([
+        "--out-of-sample=true",
+        "--fixed-investment-dir=results",
+        "--scenario-data-root=tree",
+    ])
+    @test_throws ArgumentError _validate_out_of_sample_options(options, true, "auto")
+    @test_throws ArgumentError _validate_out_of_sample_options(options, false, "true")
 end

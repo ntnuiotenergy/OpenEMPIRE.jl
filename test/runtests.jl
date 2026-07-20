@@ -51,6 +51,8 @@ end
 
 @testset "Runner staging" begin
     test_stage_run_inputs_copies_without_mutating_source()
+    test_resolve_single_tree_oos_run_spec()
+    test_reject_incomplete_oos_runner_options()
 end
 
 @testset "Out-of-sample" begin
