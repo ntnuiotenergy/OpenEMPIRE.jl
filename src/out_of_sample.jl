@@ -616,6 +616,27 @@ function _oos_command_display(working_directory::AbstractString, command)
     return "cd $(_oos_shell_quote(working_directory)) && $command_text"
 end
 
+function _oos_code_sha256(project_dir::AbstractString)
+    files = String[joinpath(project_dir, "Project.toml")]
+    source_dir = joinpath(project_dir, "src")
+    for (directory, _, filenames) in walkdir(source_dir)
+        append!(
+            files,
+            joinpath(directory, filename) for filename in filenames if endswith(filename, ".jl")
+        )
+    end
+    push!(files, joinpath(project_dir, "scripts", "run_julia_empire.jl"))
+    sort!(unique!(files); by = path -> relpath(path, project_dir))
+    digest_input = join(
+        (
+            "$(relpath(path, project_dir))\t$(_oos_sha256_file(path))" for
+            path in files
+        ),
+        "\n",
+    )
+    return bytes2hex(sha256(digest_input))
+end
+
 function _load_complete_oos_experiment(experiment_dir::AbstractString)
     manifest_file = joinpath(experiment_dir, _OOS_EXPERIMENT_MANIFEST)
     isfile(manifest_file) || throw(ArgumentError(
@@ -762,6 +783,7 @@ function _oos_execution_job(
         "stderr_path" => nothing,
         "error" => nothing,
         "history" => Any[],
+        "scheduler" => nothing,
         "command" => command,
         "command_display" => _oos_command_display(project_dir, command),
     )
@@ -771,6 +793,7 @@ function _oos_execution_queue_status(jobs)
     statuses = Set(job["status"] for job in jobs)
     all(status == "complete" for status in statuses) && return "complete"
     "failed" in statuses && return "attention_required"
+    "finished" in statuses && return "reconciling"
     "running" in statuses && return "running"
     "submitted" in statuses && return "submitted"
     return "ready"
@@ -829,8 +852,16 @@ function _resume_oos_execution_jobs!(jobs, existing_jobs)
         "stderr_path",
         "error",
         "history",
+        "scheduler",
     )
-    allowed_statuses = Set(("pending", "submitted", "running", "complete", "failed"))
+    allowed_statuses = Set((
+        "pending",
+        "submitted",
+        "running",
+        "finished",
+        "complete",
+        "failed",
+    ))
     for index in eachindex(jobs)
         existing = existing_jobs[index]
         existing isa AbstractDict || throw(ArgumentError(
@@ -972,6 +1003,7 @@ function prepare_oos_execution_queue(
             "project_dir" => project_dir,
             "script" => runner_script,
             "script_sha256" => _oos_sha256_file(runner_script),
+            "code_sha256" => _oos_code_sha256(project_dir),
         ),
         "results_root" => target_results,
         "acceptance_criteria" => Dict{String, Any}(
@@ -1009,14 +1041,16 @@ const _OOS_EXECUTION_STATUSES = Set((
     "pending",
     "submitted",
     "running",
+    "finished",
     "complete",
     "failed",
 ))
 
 const _OOS_EXECUTION_TRANSITIONS = Dict(
-    "pending" => Set(("submitted", "running", "complete", "failed")),
-    "submitted" => Set(("running", "complete", "failed")),
-    "running" => Set(("complete", "failed")),
+    "pending" => Set(("submitted", "running", "finished", "complete", "failed")),
+    "submitted" => Set(("running", "finished", "complete", "failed")),
+    "running" => Set(("finished", "complete", "failed")),
+    "finished" => Set(("complete", "failed")),
     "failed" => Set(("pending",)),
     "complete" => Set{String}(),
 )
@@ -1242,6 +1276,9 @@ function _validate_oos_execution_queue_inputs(queue)
     ))
     _oos_sha256_file(runner["script"]) == runner["script_sha256"] || throw(ArgumentError(
         "OOS queue runner checksum has changed: $(runner["script"])",
+    ))
+    _oos_code_sha256(runner["project_dir"]) == runner["code_sha256"] || throw(ArgumentError(
+        "OOS queue Julia source fingerprint has changed: $(runner["project_dir"])",
     ))
 
     fixed_metadata = _oos_fixed_investment_metadata(queue["fixed_investments"]["run_dir"])

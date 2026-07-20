@@ -15,6 +15,7 @@ include("test_csv.jl")
 include("test_scenario_csv.jl")
 include("test_runner_staging.jl")
 include("test_out_of_sample.jl")
+include("test_oos_sge.jl")
 #include("test_interface.jl")
 include("test_timestruct.jl")
 include("test_solve.jl")
@@ -63,6 +64,11 @@ end
     test_fix_investments_from_results()
     test_fix_only_investment_capacities()
     test_fixed_investment_key_validation()
+end
+
+@testset "OOS Solstorm SGE" begin
+    test_parse_oos_sge_output()
+    test_prepare_and_record_oos_sge_job()
 end
 
 @testset "Validate" begin

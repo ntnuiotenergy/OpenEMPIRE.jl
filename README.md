@@ -214,6 +214,49 @@ termination status, and summary satisfy the queue's acceptance criteria.
 Otherwise the job becomes `failed` with the reasons recorded. A failed job can
 be returned to `pending` with the `mark` command for a deliberate retry.
 
+### Preparing a Solstorm scheduler job
+
+Solstorm uses Sun Grid Engine (SGE), so OOS jobs use `qsub`, `qstat`, and
+`qacct` rather than Slurm commands. Generate an SGE script for the next pending
+queue job without submitting it:
+
+```bash
+julia --project=. scripts/prepare_oos_sge_job.jl \
+  --queue=OutOfSample/test/experiment_seed101_3trees/execution.yaml
+```
+
+The adapter follows the existing Solstorm high-memory-host and Julia/Gurobi
+module conventions. It writes an executable `sge/oos_treeN.sge.sh`, records the
+corresponding `qsub` command and log templates in `execution.yaml`, and prints
+the command as **not executed**. Repeating it is safe when the generated script
+is unchanged; a conflicting existing script is rejected.
+
+Prepare the execution queue and SGE script on Solstorm after transferring the
+repository, scenario experiment, and fixed-investment outputs. Queue commands
+use absolute paths and checksums from the execution host; a queue prepared on a
+local workstation is intentionally not portable to a different filesystem.
+
+After a future manual or automated submission, captured scheduler output can be
+fed back into the queue without letting the controller execute scheduler
+commands:
+
+```bash
+julia --project=. scripts/manage_oos_execution_queue.jl sge-submit \
+  --queue=<execution.yaml> --job=1 --input=<captured-qsub-output.txt>
+julia --project=. scripts/manage_oos_execution_queue.jl sge-qstat \
+  --queue=<execution.yaml> --job=1 --input=<captured-qstat-output.txt>
+julia --project=. scripts/manage_oos_execution_queue.jl sge-qacct \
+  --queue=<execution.yaml> --job=1 --input=<captured-qacct-output.txt>
+```
+
+Successful SGE accounting moves a job to `finished`, not `complete`.
+`reconcile` must still validate the EMPIRE run manifest and summary. The queue
+also fingerprints the Julia source, runner, dataset, config, trees, and fixed
+investments, preventing a prepared scheduler job from silently running changed
+inputs or code.
+The generated SGE script repeats this fingerprint validation on the execution
+node immediately before invoking the EMPIRE runner.
+
 ### Running one out-of-sample scenario tree
 
 Use the standard Julia runner with a completed investment run and one external

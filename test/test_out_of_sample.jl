@@ -261,6 +261,8 @@ function test_prepare_oos_execution_queue()
         @test queue["schema_version"] == 1
         @test queue["kind"] == "oos_execution_queue"
         @test queue["status"] == "ready"
+        @test queue["runner"]["code_sha256"] ==
+              OpenEMPIRE._oos_code_sha256(pkgdir(OpenEMPIRE))
         @test queue["experiment"]["num_trees"] == 2
         @test queue["dataset"]["sha256"] ==
               OpenEMPIRE._oos_directory_sha256(source_data)

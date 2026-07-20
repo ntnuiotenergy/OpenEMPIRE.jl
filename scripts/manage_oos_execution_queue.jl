@@ -12,6 +12,7 @@ const _OOS_QUEUE_CONTROL_OPTIONS = Set([
     "stdout",
     "stderr",
     "error",
+    "input",
 ])
 
 function _parse_oos_queue_control_args(args)
@@ -33,8 +34,17 @@ function _parse_oos_queue_control_args(args)
             throw(ArgumentError("Unsupported argument: $arg"))
         end
     end
-    action in ("show", "next", "mark", "reconcile") || throw(ArgumentError(
-        "Unsupported action: $action. Expected show, next, mark, or reconcile.",
+    action in (
+        "show",
+        "next",
+        "mark",
+        "reconcile",
+        "sge-submit",
+        "sge-qstat",
+        "sge-qacct",
+    ) || throw(ArgumentError(
+        "Unsupported action: $action. Expected show, next, mark, reconcile, " *
+        "sge-submit, sge-qstat, or sge-qacct.",
     ))
     isempty(strip(options["queue"])) && throw(ArgumentError("--queue is required"))
     return action, options
@@ -52,10 +62,13 @@ function _print_oos_queue_summary(queue_file)
     println("Jobs:")
     for job in queue["jobs"]
         scheduler_id = something(get(job, "scheduler_job_id", nothing), "-")
+        scheduler = get(job, "scheduler", nothing)
+        scheduler_state = scheduler isa AbstractDict ? get(scheduler, "raw_state", nothing) : nothing
+        scheduler_state = something(scheduler_state, "-")
         result_dir = something(get(job, "result_dir", nothing), "-")
         println(
             "  $(job["index"]). $(job["tree"]): $(job["status"]) " *
-            "[scheduler=$scheduler_id, result=$result_dir]",
+            "[scheduler=$scheduler_id, state=$scheduler_state, result=$result_dir]",
         )
     end
     next_job = OpenEMPIRE.next_pending_oos_job(queue_file)
@@ -100,6 +113,25 @@ function main(args = ARGS)
             stderr_path = _optional_oos_queue_value(options["stderr"]),
             error = _optional_oos_queue_value(options["error"]),
         )
+        return _print_oos_queue_summary(queue_file)
+    elseif action in ("sge-submit", "sge-qstat", "sge-qacct")
+        isempty(strip(options["job"])) && throw(ArgumentError(
+            "$action requires --job=<index>",
+        ))
+        input_file = _optional_oos_queue_value(options["input"])
+        input_file === nothing && throw(ArgumentError(
+            "$action requires --input=<captured-output-file>",
+        ))
+        isfile(input_file) || throw(ArgumentError("Input file does not exist: $input_file"))
+        output = read(input_file, String)
+        job_index = parse(Int, options["job"])
+        if action == "sge-submit"
+            OpenEMPIRE.record_oos_sge_submission!(queue_file, job_index, output)
+        elseif action == "sge-qstat"
+            OpenEMPIRE.record_oos_sge_qstat!(queue_file, job_index, output)
+        else
+            OpenEMPIRE.record_oos_sge_qacct!(queue_file, job_index, output)
+        end
         return _print_oos_queue_summary(queue_file)
     end
 
