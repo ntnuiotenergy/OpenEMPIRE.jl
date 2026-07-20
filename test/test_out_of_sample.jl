@@ -393,6 +393,133 @@ function test_prepare_oos_execution_queue()
     end
 end
 
+function _write_test_oos_run_manifest(queue, job; status, termination = nothing)
+    result_dir = joinpath(job["result_root"], "20260720_120000_test")
+    mkpath(result_dir)
+    summary_path = joinpath(result_dir, "summary.txt")
+    if status == "complete"
+        write(summary_path, "termination_status=$termination\n")
+    end
+    tree_metadata = YAML.load_file(joinpath(job["scenario_tree"], "metadata.yaml"))
+    YAML.write_file(
+        joinpath(result_dir, "run_manifest.yaml"),
+        Dict{String, Any}(
+            "status" => status,
+            "start_time" => "2026-07-20T12:00:00",
+            "original_data_folder" => queue["dataset"]["folder"],
+            "original_config_sha256" => queue["config"]["sha256"],
+            "result_dir" => result_dir,
+            "summary_path" => status == "complete" ? summary_path : nothing,
+            "out_of_sample" => Dict{String, Any}(
+                "enabled" => true,
+                "scenario_tree" => job["tree"],
+                "scenario_seed" => job["seed"],
+                "scenario_checksums_verified" => status == "complete",
+                "scenario_metadata" => tree_metadata,
+                "base_investment_run" => queue["fixed_investments"]["run_dir"],
+                "investments_fixed" => status == "complete",
+            ),
+            "solution" => status == "complete" ?
+                          Dict{String, Any}("termination_status" => termination) :
+                          nothing,
+        ),
+    )
+    return result_dir
+end
+
+function test_manage_oos_execution_queue()
+    mktempdir() do root
+        source_data = joinpath(root, "source")
+        cp(joinpath(pkgdir(OpenEMPIRE), "data", "test"), source_data)
+        config_file = joinpath(pkgdir(OpenEMPIRE), "config", "testrun.yaml")
+        experiment_dir = OpenEMPIRE.prepare_oos_experiment(
+            config_file,
+            source_data,
+            joinpath(root, "experiment");
+            num_trees = 2,
+            seed_start = 120,
+            input_format = :csv,
+        )
+        fixed_investment_dir = joinpath(root, "investment_run")
+        _write_investment_csvs(joinpath(fixed_investment_dir, "Output"))
+        queue_file = OpenEMPIRE.prepare_oos_execution_queue(
+            experiment_dir,
+            fixed_investment_dir;
+            dataset = source_data,
+            config_file,
+            results_root = joinpath(root, "results"),
+            input_format = :csv,
+            solver = "HiGHS",
+        )
+
+        @test OpenEMPIRE.next_pending_oos_job(queue_file)["index"] == 1
+        submitted = OpenEMPIRE.update_oos_execution_job!(
+            queue_file,
+            1,
+            "submitted";
+            scheduler_job_id = "98765",
+            stdout_path = joinpath(root, "logs", "tree1.out"),
+            stderr_path = joinpath(root, "logs", "tree1.err"),
+        )
+        @test submitted["status"] == "submitted"
+        @test submitted["scheduler_job_id"] == "98765"
+        @test submitted["history"][1]["from"] == "pending"
+        @test submitted["history"][1]["to"] == "submitted"
+        @test YAML.load_file(queue_file)["status"] == "submitted"
+        @test_throws ArgumentError OpenEMPIRE.update_oos_execution_job!(
+            queue_file,
+            2,
+            "submitted",
+        )
+        @test_throws ArgumentError OpenEMPIRE.update_oos_execution_job!(
+            queue_file,
+            1,
+            "complete",
+        )
+
+        queue = YAML.load_file(queue_file)
+        first_result = _write_test_oos_run_manifest(
+            queue,
+            queue["jobs"][1];
+            status = "started",
+        )
+        reconciled = OpenEMPIRE.reconcile_oos_execution_queue!(queue_file)
+        @test reconciled["jobs"][1]["status"] == "running"
+        @test reconciled["jobs"][1]["result_dir"] == first_result
+        @test reconciled["jobs"][1]["history"][2]["source"] == "reconcile"
+
+        _write_test_oos_run_manifest(
+            reconciled,
+            reconciled["jobs"][1];
+            status = "complete",
+            termination = "OPTIMAL",
+        )
+        reconciled = OpenEMPIRE.reconcile_oos_execution_queue!(queue_file)
+        @test reconciled["jobs"][1]["status"] == "complete"
+        @test isnothing(reconciled["jobs"][1]["error"])
+        @test OpenEMPIRE.next_pending_oos_job(queue_file)["index"] == 2
+
+        second_result = _write_test_oos_run_manifest(
+            reconciled,
+            reconciled["jobs"][2];
+            status = "complete",
+            termination = "INFEASIBLE",
+        )
+        reconciled = OpenEMPIRE.reconcile_oos_execution_queue!(queue_file)
+        @test reconciled["status"] == "attention_required"
+        @test reconciled["jobs"][2]["status"] == "failed"
+        @test reconciled["jobs"][2]["result_dir"] == second_result
+        @test occursin("INFEASIBLE", reconciled["jobs"][2]["error"])
+
+        retried = OpenEMPIRE.update_oos_execution_job!(queue_file, 2, "pending")
+        @test retried["status"] == "pending"
+        @test isnothing(retried["result_dir"])
+        @test isnothing(retried["error"])
+        @test length(retried["history"]) == 2
+        @test OpenEMPIRE.next_pending_oos_job(queue_file)["index"] == 2
+    end
+end
+
 function _write_investment_csvs(
     output_dir;
     include_installed = true,

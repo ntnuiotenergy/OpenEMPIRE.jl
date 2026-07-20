@@ -761,6 +761,7 @@ function _oos_execution_job(
         "stdout_path" => nothing,
         "stderr_path" => nothing,
         "error" => nothing,
+        "history" => Any[],
         "command" => command,
         "command_display" => _oos_command_display(project_dir, command),
     )
@@ -827,6 +828,7 @@ function _resume_oos_execution_jobs!(jobs, existing_jobs)
         "stdout_path",
         "stderr_path",
         "error",
+        "history",
     )
     allowed_statuses = Set(("pending", "submitted", "running", "complete", "failed"))
     for index in eachindex(jobs)
@@ -844,7 +846,8 @@ function _resume_oos_execution_jobs!(jobs, existing_jobs)
             "Existing OOS execution job $index has unsupported status: $status",
         ))
         for key in state_keys
-            jobs[index][key] = get(existing, key, nothing)
+            default = key == "history" ? Any[] : nothing
+            jobs[index][key] = get(existing, key, default)
         end
     end
     return jobs
@@ -1000,6 +1003,384 @@ function prepare_oos_execution_queue(
     queue["updated_at_utc"] = string(now(UTC), "Z")
     _write_oos_experiment_manifest(target_queue, queue)
     return target_queue
+end
+
+const _OOS_EXECUTION_STATUSES = Set((
+    "pending",
+    "submitted",
+    "running",
+    "complete",
+    "failed",
+))
+
+const _OOS_EXECUTION_TRANSITIONS = Dict(
+    "pending" => Set(("submitted", "running", "complete", "failed")),
+    "submitted" => Set(("running", "complete", "failed")),
+    "running" => Set(("complete", "failed")),
+    "failed" => Set(("pending",)),
+    "complete" => Set{String}(),
+)
+
+function _load_oos_execution_queue(queue_file::AbstractString)
+    target_queue = abspath(normpath(queue_file))
+    isfile(target_queue) || throw(ArgumentError(
+        "OOS execution queue does not exist: $queue_file",
+    ))
+    queue = YAML.load_file(target_queue)
+    queue isa AbstractDict || throw(ArgumentError(
+        "OOS execution queue must be a mapping: $target_queue",
+    ))
+    get(queue, "kind", nothing) == "oos_execution_queue" || throw(ArgumentError(
+        "Not an OOS execution queue: $target_queue",
+    ))
+    jobs = get(queue, "jobs", nothing)
+    jobs isa AbstractVector || throw(ArgumentError(
+        "OOS execution queue jobs must be a sequence: $target_queue",
+    ))
+    isempty(jobs) && throw(ArgumentError("OOS execution queue has no jobs: $target_queue"))
+    for (index, job) in enumerate(jobs)
+        job isa AbstractDict || throw(ArgumentError(
+            "OOS execution job $index must be a mapping",
+        ))
+        get(job, "index", nothing) == index || throw(ArgumentError(
+            "OOS execution job $index has an invalid index",
+        ))
+        status = get(job, "status", nothing)
+        status in _OOS_EXECUTION_STATUSES || throw(ArgumentError(
+            "OOS execution job $index has unsupported status: $status",
+        ))
+        history = get(job, "history", Any[])
+        history isa AbstractVector || throw(ArgumentError(
+            "OOS execution job $index history must be a sequence",
+        ))
+        job["history"] = history
+    end
+    return target_queue, queue
+end
+
+function _oos_execution_job(queue, job_index::Integer)
+    index = Int(job_index)
+    1 <= index <= length(queue["jobs"]) || throw(ArgumentError(
+        "OOS execution job index is out of range: $job_index",
+    ))
+    return queue["jobs"][index]
+end
+
+function _oos_optional_absolute_path(value)
+    value === nothing && return nothing
+    text = strip(string(value))
+    isempty(text) && return nothing
+    return abspath(normpath(text))
+end
+
+function _set_oos_execution_job_status!(
+    queue,
+    job,
+    status::AbstractString;
+    scheduler_job_id = nothing,
+    result_dir = nothing,
+    stdout_path = nothing,
+    stderr_path = nothing,
+    error = nothing,
+    source::AbstractString,
+)
+    target_status = lowercase(strip(status))
+    target_status in _OOS_EXECUTION_STATUSES || throw(ArgumentError(
+        "Unsupported OOS execution status: $status",
+    ))
+    current_status = job["status"]
+    if target_status != current_status
+        target_status in _OOS_EXECUTION_TRANSITIONS[current_status] || throw(ArgumentError(
+            "Invalid OOS execution transition: $current_status -> $target_status",
+        ))
+    end
+
+    job_id = scheduler_job_id === nothing ? nothing : strip(string(scheduler_job_id))
+    isempty(something(job_id, "")) && (job_id = nothing)
+    if target_status == "submitted" && job_id === nothing &&
+       get(job, "scheduler_job_id", nothing) === nothing
+        throw(ArgumentError("A submitted OOS job requires a scheduler job ID"))
+    end
+    error_text = error === nothing ? nothing : strip(string(error))
+    isempty(something(error_text, "")) && (error_text = nothing)
+    if target_status == "failed" && error_text === nothing &&
+       get(job, "error", nothing) === nothing
+        throw(ArgumentError("A failed OOS job requires an error message"))
+    end
+
+    timestamp = string(now(UTC), "Z")
+    if target_status != current_status
+        push!(job["history"], Dict{String, Any}(
+            "timestamp_utc" => timestamp,
+            "from" => current_status,
+            "to" => target_status,
+            "source" => source,
+            "scheduler_job_id" => job_id === nothing ?
+                                  get(job, "scheduler_job_id", nothing) : job_id,
+            "result_dir" => result_dir === nothing ?
+                            get(job, "result_dir", nothing) :
+                            _oos_optional_absolute_path(result_dir),
+            "error" => error_text === nothing ? get(job, "error", nothing) : error_text,
+        ))
+    end
+
+    if current_status == "failed" && target_status == "pending"
+        for key in (
+            "scheduler_job_id",
+            "submitted_at_utc",
+            "started_at_utc",
+            "completed_at_utc",
+            "result_dir",
+            "stdout_path",
+            "stderr_path",
+            "error",
+        )
+            job[key] = nothing
+        end
+    end
+
+    job["status"] = target_status
+    job_id === nothing || (job["scheduler_job_id"] = job_id)
+    result_path = _oos_optional_absolute_path(result_dir)
+    result_path === nothing || (job["result_dir"] = result_path)
+    stdout = _oos_optional_absolute_path(stdout_path)
+    stdout === nothing || (job["stdout_path"] = stdout)
+    stderr = _oos_optional_absolute_path(stderr_path)
+    stderr === nothing || (job["stderr_path"] = stderr)
+    error_text === nothing || (job["error"] = error_text)
+
+    if target_status == "submitted"
+        job["submitted_at_utc"] = something(job["submitted_at_utc"], timestamp)
+    elseif target_status == "running"
+        job["started_at_utc"] = something(job["started_at_utc"], timestamp)
+    elseif target_status in ("complete", "failed")
+        job["completed_at_utc"] = something(job["completed_at_utc"], timestamp)
+    end
+    return job
+end
+
+function _write_oos_execution_queue!(queue_file::AbstractString, queue)
+    queue["status"] = _oos_execution_queue_status(queue["jobs"])
+    queue["updated_at_utc"] = string(now(UTC), "Z")
+    _write_oos_experiment_manifest(queue_file, queue)
+    return queue
+end
+
+"""
+    update_oos_execution_job!(queue_file, job_index, status; kwargs...)
+
+Record a manual state transition for one OOS queue job without launching it.
+
+`submitted` requires `scheduler_job_id`, and `failed` requires `error`. Manual
+updates cannot mark a job `complete`; completion is reserved for
+[`reconcile_oos_execution_queue!`](@ref), which verifies run artifacts.
+Transition history is retained in the queue manifest. A failed job may be moved
+back to `pending` to retry it.
+"""
+function update_oos_execution_job!(
+    queue_file::AbstractString,
+    job_index::Integer,
+    status::AbstractString;
+    scheduler_job_id = nothing,
+    result_dir = nothing,
+    stdout_path = nothing,
+    stderr_path = nothing,
+    error = nothing,
+)
+    lowercase(strip(status)) == "complete" && throw(ArgumentError(
+        "Manual completion is not allowed; reconcile verified run artifacts instead",
+    ))
+    target_queue, queue = _load_oos_execution_queue(queue_file)
+    job = _oos_execution_job(queue, job_index)
+    _set_oos_execution_job_status!(
+        queue,
+        job,
+        status;
+        scheduler_job_id,
+        result_dir,
+        stdout_path,
+        stderr_path,
+        error,
+        source = "manual",
+    )
+    _write_oos_execution_queue!(target_queue, queue)
+    return job
+end
+
+"""
+    next_pending_oos_job(queue_file)
+
+Return the first pending job in an OOS execution queue, or `nothing` when no
+pending job remains. This function does not modify the queue.
+"""
+function next_pending_oos_job(queue_file::AbstractString)
+    _, queue = _load_oos_execution_queue(queue_file)
+    index = findfirst(job -> job["status"] == "pending", queue["jobs"])
+    return index === nothing ? nothing : queue["jobs"][index]
+end
+
+function _validate_oos_execution_queue_inputs(queue)
+    dataset = queue["dataset"]
+    isdir(dataset["folder"]) || throw(ArgumentError(
+        "OOS queue dataset folder does not exist: $(dataset["folder"])",
+    ))
+    _oos_directory_sha256(dataset["folder"]) == dataset["sha256"] || throw(ArgumentError(
+        "OOS queue dataset checksum has changed: $(dataset["folder"])",
+    ))
+
+    config = queue["config"]
+    isfile(config["file"]) || throw(ArgumentError(
+        "OOS queue config file does not exist: $(config["file"])",
+    ))
+    _oos_sha256_file(config["file"]) == config["sha256"] || throw(ArgumentError(
+        "OOS queue config checksum has changed: $(config["file"])",
+    ))
+
+    runner = queue["runner"]
+    isfile(runner["script"]) || throw(ArgumentError(
+        "OOS queue runner script does not exist: $(runner["script"])",
+    ))
+    _oos_sha256_file(runner["script"]) == runner["script_sha256"] || throw(ArgumentError(
+        "OOS queue runner checksum has changed: $(runner["script"])",
+    ))
+
+    fixed_metadata = _oos_fixed_investment_metadata(queue["fixed_investments"]["run_dir"])
+    fixed_metadata == queue["fixed_investments"] || throw(ArgumentError(
+        "OOS queue fixed-investment inputs have changed",
+    ))
+
+    _, experiment = _load_complete_oos_experiment(queue["experiment"]["dir"])
+    trees = _validated_oos_execution_trees(queue["experiment"]["dir"], experiment)
+    length(trees) == length(queue["jobs"]) || throw(ArgumentError(
+        "OOS queue job count no longer matches the experiment",
+    ))
+    for index in eachindex(trees)
+        trees[index]["metadata_sha256"] ==
+        queue["jobs"][index]["scenario_metadata_sha256"] || throw(ArgumentError(
+            "OOS queue scenario metadata has changed for $(trees[index]["name"])",
+        ))
+    end
+    return nothing
+end
+
+function _matching_oos_run_manifest(queue, job, manifest)
+    get(manifest, "original_data_folder", nothing) == queue["dataset"]["folder"] || return false
+    get(manifest, "original_config_sha256", nothing) == queue["config"]["sha256"] || return false
+    oos = get(manifest, "out_of_sample", nothing)
+    oos isa AbstractDict || return false
+    get(oos, "enabled", false) == true || return false
+    get(oos, "scenario_tree", nothing) == job["tree"] || return false
+    get(oos, "scenario_seed", nothing) == job["seed"] || return false
+    get(oos, "base_investment_run", nothing) ==
+        queue["fixed_investments"]["run_dir"] || return false
+    expected_metadata = YAML.load_file(joinpath(job["scenario_tree"], "metadata.yaml"))
+    get(oos, "scenario_metadata", nothing) == expected_metadata || return false
+    return true
+end
+
+function _latest_matching_oos_run(queue, job)
+    result_root = job["result_root"]
+    isdir(result_root) || return nothing
+    candidates = Tuple{Float64, String, Any}[]
+    for entry in readdir(result_root; join = true)
+        isdir(entry) || continue
+        manifest_file = joinpath(entry, "run_manifest.yaml")
+        isfile(manifest_file) || continue
+        manifest = YAML.load_file(manifest_file)
+        manifest isa AbstractDict || continue
+        _matching_oos_run_manifest(queue, job, manifest) || continue
+        push!(candidates, (mtime(manifest_file), entry, manifest))
+    end
+    isempty(candidates) && return nothing
+    sort!(candidates; by = first)
+    _, result_dir, manifest = last(candidates)
+    return (; result_dir, manifest)
+end
+
+function _oos_run_acceptance_errors(queue, result_dir, manifest)
+    criteria = queue["acceptance_criteria"]
+    errors = String[]
+    get(manifest, "status", nothing) == criteria["run_manifest_status"] || push!(
+        errors,
+        "run manifest status is $(get(manifest, "status", "missing"))",
+    )
+    oos = get(manifest, "out_of_sample", Dict{String, Any}())
+    get(oos, "investments_fixed", false) == criteria["investments_fixed"] || push!(
+        errors,
+        "strategic investments were not confirmed fixed",
+    )
+    get(oos, "scenario_checksums_verified", false) ==
+    criteria["scenario_checksums_verified"] || push!(
+        errors,
+        "scenario checksums were not confirmed",
+    )
+    solution = get(manifest, "solution", Dict{String, Any}())
+    get(solution, "termination_status", nothing) == criteria["termination_status"] || push!(
+        errors,
+        "termination status is $(get(solution, "termination_status", "missing"))",
+    )
+    get(manifest, "result_dir", nothing) == result_dir || push!(
+        errors,
+        "run manifest result directory does not match $result_dir",
+    )
+    summary_path = get(manifest, "summary_path", nothing)
+    summary_path isa AbstractString && isfile(summary_path) || push!(
+        errors,
+        "run summary is missing",
+    )
+    return errors
+end
+
+"""
+    reconcile_oos_execution_queue!(queue_file)
+
+Inspect existing result directories and update queue jobs from matching
+`run_manifest.yaml` files. Started runs become `running`. Finished runs become
+`complete` only when all queue acceptance criteria pass; otherwise they become
+`failed` with a recorded reason. No command or scheduler operation is run.
+"""
+function reconcile_oos_execution_queue!(queue_file::AbstractString)
+    target_queue, queue = _load_oos_execution_queue(queue_file)
+    _validate_oos_execution_queue_inputs(queue)
+    changed = false
+    for job in queue["jobs"]
+        job["status"] == "complete" && continue
+        candidate = _latest_matching_oos_run(queue, job)
+        candidate === nothing && continue
+        manifest_status = get(candidate.manifest, "status", nothing)
+        if manifest_status == "started"
+            job["status"] == "running" && job["result_dir"] == candidate.result_dir && continue
+            _set_oos_execution_job_status!(
+                queue,
+                job,
+                "running";
+                result_dir = candidate.result_dir,
+                source = "reconcile",
+            )
+            changed = true
+        else
+            errors = _oos_run_acceptance_errors(
+                queue,
+                candidate.result_dir,
+                candidate.manifest,
+            )
+            target_status = isempty(errors) ? "complete" : "failed"
+            error_text = isempty(errors) ? nothing : join(errors, "; ")
+            job["status"] == target_status && job["result_dir"] == candidate.result_dir &&
+                job["error"] == error_text && continue
+            _set_oos_execution_job_status!(
+                queue,
+                job,
+                target_status;
+                result_dir = candidate.result_dir,
+                error = error_text,
+                source = "reconcile",
+            )
+            changed = true
+        end
+    end
+    changed && _write_oos_execution_queue!(target_queue, queue)
+    return queue
 end
 
 """

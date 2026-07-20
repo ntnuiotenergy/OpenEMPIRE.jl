@@ -223,6 +223,32 @@ existing `pending`, `submitted`, `running`, `complete`, or `failed` job state if
 the experiment, runner, fixed investments, and commands are unchanged. Changed
 inputs are rejected rather than silently replacing an active queue.
 
+Inspect and update the queue without executing its commands:
+
+```bash
+# Show all states and the next pending command.
+julia --project=. scripts/manage_oos_execution_queue.jl show \
+  --queue=OutOfSample/test/experiment_seed101_3trees/execution.yaml
+
+# Record a scheduler submission performed separately.
+julia --project=. scripts/manage_oos_execution_queue.jl mark \
+  --queue=OutOfSample/test/experiment_seed101_3trees/execution.yaml \
+  --job=1 --status=submitted --job-id=<scheduler-job-id>
+
+# Inspect matching run manifests and verify completed results.
+julia --project=. scripts/manage_oos_execution_queue.jl reconcile \
+  --queue=OutOfSample/test/experiment_seed101_3trees/execution.yaml
+```
+
+The controller never submits or starts jobs. It records audited state
+transitions and discovers run directories under each job's result root.
+Reconciliation checks that a run used the expected dataset, config,
+fixed-investment source, tree metadata, and seed. It marks a result `complete`
+only when the run manifest, fixed-capacity flag, scenario checksum flag,
+termination status, and summary satisfy the queue's acceptance criteria.
+Otherwise the job becomes `failed` with the reasons recorded. A failed job can
+be returned to `pending` with the `mark` command for a deliberate retry.
+
 ### Running one out-of-sample scenario tree
 
 Use the standard Julia runner with a completed investment run and one external
