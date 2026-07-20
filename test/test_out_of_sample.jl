@@ -286,6 +286,113 @@ function test_prepare_oos_experiment()
     end
 end
 
+function test_prepare_oos_execution_queue()
+    mktempdir() do root
+        source_data = joinpath(root, "source")
+        cp(joinpath(pkgdir(OpenEMPIRE), "data", "test"), source_data)
+        config_file = joinpath(pkgdir(OpenEMPIRE), "config", "testrun.yaml")
+        experiment_dir = OpenEMPIRE.prepare_oos_experiment(
+            config_file,
+            source_data,
+            joinpath(root, "experiment");
+            num_trees = 2,
+            seed_start = 90,
+            input_format = :csv,
+        )
+        fixed_investment_dir = joinpath(root, "investment_run")
+        _write_investment_csvs(joinpath(fixed_investment_dir, "Output"))
+        results_root = joinpath(root, "results")
+
+        queue_file = OpenEMPIRE.prepare_oos_execution_queue(
+            experiment_dir,
+            fixed_investment_dir;
+            dataset = source_data,
+            config_file,
+            results_root,
+            input_format = :csv,
+            solver = "HiGHS",
+        )
+
+        @test queue_file == joinpath(experiment_dir, "execution.yaml")
+        @test !ispath(results_root)
+        queue = YAML.load_file(queue_file)
+        @test queue["schema_version"] == 1
+        @test queue["kind"] == "oos_execution_queue"
+        @test queue["status"] == "ready"
+        @test queue["experiment"]["num_trees"] == 2
+        @test queue["dataset"]["sha256"] ==
+              OpenEMPIRE._oos_directory_sha256(source_data)
+        @test queue["fixed_investments"]["output_dir"] ==
+              joinpath(fixed_investment_dir, "Output")
+        @test length(queue["fixed_investments"]["files"]) == 8
+        @test [job["seed"] for job in queue["jobs"]] == [90, 91]
+        @test all(job["status"] == "pending" for job in queue["jobs"])
+
+        first_job = queue["jobs"][1]
+        @test first_job["scenario_tree"] == joinpath(experiment_dir, "oos_tree1")
+        @test "--out-of-sample=true" in first_job["command"]
+        @test "--fixed-investment-dir=$fixed_investment_dir" in first_job["command"]
+        @test "--scenario-data-root=$(joinpath(experiment_dir, "oos_tree1"))" in
+              first_job["command"]
+        @test "--results=$(joinpath(results_root, "oos_tree1"))" in first_job["command"]
+        @test !occursin("--result-dir=", first_job["command_display"])
+
+        first_job["status"] = "submitted"
+        first_job["scheduler_job_id"] = "12345"
+        first_job["submitted_at_utc"] = "2026-07-20T12:00:00Z"
+        YAML.write_file(queue_file, queue)
+        resumed_file = OpenEMPIRE.prepare_oos_execution_queue(
+            experiment_dir,
+            fixed_investment_dir;
+            dataset = source_data,
+            config_file,
+            results_root,
+            input_format = :csv,
+            solver = "HiGHS",
+        )
+        resumed = YAML.load_file(resumed_file)
+        @test resumed["status"] == "submitted"
+        @test resumed["jobs"][1]["status"] == "submitted"
+        @test resumed["jobs"][1]["scheduler_job_id"] == "12345"
+        @test resumed["jobs"][2]["status"] == "pending"
+
+        @test_throws ArgumentError OpenEMPIRE.prepare_oos_execution_queue(
+            experiment_dir,
+            fixed_investment_dir;
+            dataset = source_data,
+            config_file,
+            results_root,
+            input_format = :csv,
+            solver = "Gurobi",
+        )
+        @test_throws ArgumentError OpenEMPIRE.prepare_oos_execution_queue(
+            experiment_dir,
+            fixed_investment_dir;
+            dataset = source_data,
+            config_file,
+            results_root,
+            input_format = :csv,
+            solver = "HiGHS",
+            resume = false,
+        )
+
+        incompatible_config_file = joinpath(root, "incompatible.yaml")
+        incompatible_config = YAML.load_file(config_file)
+        incompatible_config["number_of_scenarios"] += 1
+        YAML.write_file(incompatible_config_file, incompatible_config)
+        @test_throws ArgumentError OpenEMPIRE.prepare_oos_execution_queue(
+            experiment_dir,
+            fixed_investment_dir;
+            dataset = source_data,
+            config_file = incompatible_config_file,
+            results_root = joinpath(root, "incompatible-results"),
+            input_format = :csv,
+            solver = "HiGHS",
+            queue_file = joinpath(root, "incompatible-execution.yaml"),
+        )
+    end
+end
+
 function _write_investment_csvs(
     output_dir;
     include_installed = true,

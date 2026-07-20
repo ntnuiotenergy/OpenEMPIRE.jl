@@ -6,6 +6,18 @@ const _OOS_SCENARIO_FILENAMES = (
 
 const _OOS_TREE_FILENAMES = (_OOS_SCENARIO_FILENAMES..., "sampling_key.csv")
 const _OOS_EXPERIMENT_MANIFEST = "experiment.yaml"
+const _OOS_EXECUTION_MANIFEST = "execution.yaml"
+
+const _OOS_FIXED_INVESTMENT_FILENAMES = (
+    ("genInvCap.csv",),
+    ("transmissionInvCap.csv", "transmisionInvCap.csv"),
+    ("storPWInvCap.csv",),
+    ("storENInvCap.csv",),
+    ("genInstalledCap.csv",),
+    ("transmissionInstalledCap.csv",),
+    ("storPWInstalledCap.csv",),
+    ("storENInstalledCap.csv",),
+)
 
 const _OOS_TREE_CONFIG_KEYS = (
     "forecast_horizon_year",
@@ -538,6 +550,456 @@ function prepare_oos_experiment(
     _mark_oos_experiment_updated!(manifest, "complete")
     _write_oos_experiment_manifest(manifest_file, manifest)
     return target_experiment
+end
+
+function _oos_fixed_investment_output_dir(path::AbstractString)
+    isdir(path) || throw(ArgumentError(
+        "Fixed-investment directory does not exist: $path",
+    ))
+    for output_folder in ("Output", "output")
+        output_dir = joinpath(path, output_folder)
+        isdir(output_dir) && return output_dir
+    end
+    return path
+end
+
+function _oos_fixed_investment_source_files(path::AbstractString)
+    output_dir = _oos_fixed_investment_output_dir(path)
+    return map(_OOS_FIXED_INVESTMENT_FILENAMES) do aliases
+        source = findfirst(filename -> isfile(joinpath(output_dir, filename)), aliases)
+        source === nothing && throw(ArgumentError(
+            "Fixed-investment directory is missing one of: $(join(aliases, ", "))",
+        ))
+        joinpath(output_dir, aliases[source])
+    end
+end
+
+function _oos_fixed_investment_metadata(path::AbstractString)
+    run_dir = abspath(normpath(path))
+    output_dir = _oos_fixed_investment_output_dir(run_dir)
+    files = _oos_fixed_investment_source_files(run_dir)
+    file_metadata = [
+        Dict{String, Any}(
+            "name" => basename(file),
+            "path" => file,
+            "bytes" => filesize(file),
+            "sha256" => _oos_sha256_file(file),
+        ) for file in files
+    ]
+    digest_input = join(
+        ("$(entry["name"])\t$(entry["sha256"])" for entry in file_metadata),
+        "\n",
+    )
+    return Dict{String, Any}(
+        "run_dir" => run_dir,
+        "output_dir" => output_dir,
+        "sha256" => bytes2hex(sha256(digest_input)),
+        "files" => file_metadata,
+    )
+end
+
+function _oos_queue_input_format(value)
+    value in (:auto, :csv, :xlsx) || throw(ArgumentError(
+        "Unsupported input format: $value. Expected :auto, :csv, or :xlsx.",
+    ))
+    return value
+end
+
+function _oos_shell_quote(value::AbstractString)
+    isempty(value) && return "''"
+    occursin(r"^[A-Za-z0-9_./:@%+=,-]+$", value) && return value
+    return "'$(replace(value, "'" => "'\"'\"'"))'"
+end
+
+function _oos_command_display(working_directory::AbstractString, command)
+    command_text = join((_oos_shell_quote(string(argument)) for argument in command), " ")
+    return "cd $(_oos_shell_quote(working_directory)) && $command_text"
+end
+
+function _load_complete_oos_experiment(experiment_dir::AbstractString)
+    manifest_file = joinpath(experiment_dir, _OOS_EXPERIMENT_MANIFEST)
+    isfile(manifest_file) || throw(ArgumentError(
+        "OOS experiment is missing experiment.yaml: $experiment_dir",
+    ))
+    manifest = YAML.load_file(manifest_file)
+    manifest isa AbstractDict || throw(ArgumentError(
+        "OOS experiment manifest must be a mapping: $manifest_file",
+    ))
+    get(manifest, "kind", nothing) == "oos_tree_experiment" || throw(ArgumentError(
+        "Not an OOS tree experiment manifest: $manifest_file",
+    ))
+    get(manifest, "status", nothing) == "complete" || throw(ArgumentError(
+        "OOS experiment must be complete before preparing execution: $manifest_file",
+    ))
+
+    for key in (
+        "schema_version",
+        "source_data_sha256",
+        "source_config_sha256",
+        "input_format",
+        "seed_start",
+        "num_trees",
+        "trees",
+    )
+        haskey(manifest, key) || throw(ArgumentError(
+            "OOS experiment manifest is missing required key: $key",
+        ))
+    end
+    trees = manifest["trees"]
+    trees isa AbstractVector || throw(ArgumentError(
+        "OOS experiment trees must be a sequence: $manifest_file",
+    ))
+    length(trees) == manifest["num_trees"] || throw(ArgumentError(
+        "OOS experiment tree count does not match num_trees: $manifest_file",
+    ))
+    return manifest_file, manifest
+end
+
+function _validated_oos_execution_trees(experiment_dir::AbstractString, manifest)
+    input_format = Symbol(manifest["input_format"])
+    trees = Dict{String, Any}[]
+    for index in 1:manifest["num_trees"]
+        entry = manifest["trees"][index]
+        entry isa AbstractDict || throw(ArgumentError(
+            "OOS experiment tree entry $index must be a mapping",
+        ))
+        expected_name = "oos_tree$index"
+        expected_seed = manifest["seed_start"] + index - 1
+        get(entry, "index", nothing) == index || throw(ArgumentError(
+            "OOS experiment tree $index has an invalid index",
+        ))
+        get(entry, "name", nothing) == expected_name || throw(ArgumentError(
+            "OOS experiment tree $index must be named $expected_name",
+        ))
+        get(entry, "seed", nothing) == expected_seed || throw(ArgumentError(
+            "OOS experiment tree $index has an invalid seed",
+        ))
+        get(entry, "status", nothing) == "complete" || throw(ArgumentError(
+            "OOS experiment tree $expected_name is not complete",
+        ))
+
+        tree_dir = joinpath(experiment_dir, expected_name)
+        _validate_oos_experiment_tree(
+            tree_dir,
+            expected_seed,
+            manifest["source_data_sha256"],
+            manifest["source_config_sha256"],
+            input_format,
+        )
+        push!(trees, Dict{String, Any}(
+            "index" => index,
+            "name" => expected_name,
+            "seed" => expected_seed,
+            "path" => tree_dir,
+            "metadata_sha256" => _oos_sha256_file(joinpath(tree_dir, "metadata.yaml")),
+        ))
+    end
+    return trees
+end
+
+function _validate_oos_execution_config(config_file::AbstractString, tree_dir::AbstractString)
+    config = YAML.load_file(config_file)
+    metadata = YAML.load_file(joinpath(tree_dir, "metadata.yaml"))
+    tree_config = get(metadata, "config", nothing)
+    tree_config isa AbstractDict || throw(ArgumentError(
+        "OOS tree metadata has no valid config mapping: $tree_dir",
+    ))
+    for key in _OOS_TREE_CONFIG_KEYS
+        key == "use_fixed_sample" && continue
+        haskey(tree_config, key) || continue
+        haskey(config, key) || throw(ArgumentError(
+            "Execution config is missing OOS scenario setting '$key': $config_file",
+        ))
+        config[key] == tree_config[key] || throw(ArgumentError(
+            "Execution config setting '$key' does not match the OOS trees: " *
+            "$(config[key]) (expected $(tree_config[key]))",
+        ))
+    end
+    return config
+end
+
+function _oos_execution_job(
+    tree,
+    julia_command::AbstractString,
+    project_dir::AbstractString,
+    runner_script::AbstractString,
+    dataset_folder::AbstractString,
+    config_file::AbstractString,
+    input_format::Symbol,
+    solver::AbstractString,
+    fixed_investment_dir::AbstractString,
+    results_root::AbstractString,
+)
+    tree_results_root = joinpath(results_root, tree["name"])
+    command = String[
+        julia_command,
+        "--project=$project_dir",
+        runner_script,
+        dataset_folder,
+        "--config=$config_file",
+        "--format=$(string(input_format))",
+        "--solver=$solver",
+        "--seed=$(tree["seed"])",
+        "--results=$tree_results_root",
+        "--out-of-sample=true",
+        "--fixed-investment-dir=$fixed_investment_dir",
+        "--scenario-data-root=$(tree["path"])",
+    ]
+    return Dict{String, Any}(
+        "index" => tree["index"],
+        "tree" => tree["name"],
+        "seed" => tree["seed"],
+        "scenario_tree" => tree["path"],
+        "scenario_metadata_sha256" => tree["metadata_sha256"],
+        "status" => "pending",
+        "scheduler_job_id" => nothing,
+        "submitted_at_utc" => nothing,
+        "started_at_utc" => nothing,
+        "completed_at_utc" => nothing,
+        "result_root" => tree_results_root,
+        "result_dir" => nothing,
+        "stdout_path" => nothing,
+        "stderr_path" => nothing,
+        "error" => nothing,
+        "command" => command,
+        "command_display" => _oos_command_display(project_dir, command),
+    )
+end
+
+function _oos_execution_queue_status(jobs)
+    statuses = Set(job["status"] for job in jobs)
+    all(status == "complete" for status in statuses) && return "complete"
+    "failed" in statuses && return "attention_required"
+    "running" in statuses && return "running"
+    "submitted" in statuses && return "submitted"
+    return "ready"
+end
+
+function _validate_oos_execution_queue_spec(existing, expected)
+    keys = (
+        "schema_version",
+        "kind",
+        "experiment",
+        "dataset",
+        "config",
+        "input_format",
+        "solver",
+        "fixed_investments",
+        "runner",
+        "results_root",
+        "acceptance_criteria",
+    )
+    for key in keys
+        haskey(existing, key) || throw(ArgumentError(
+            "Existing OOS execution queue is missing required key: $key",
+        ))
+        existing[key] == expected[key] || throw(ArgumentError(
+            "Existing OOS execution queue has a different $key specification",
+        ))
+    end
+    return nothing
+end
+
+function _resume_oos_execution_jobs!(jobs, existing_jobs)
+    existing_jobs isa AbstractVector || throw(ArgumentError(
+        "Existing OOS execution jobs must be a sequence",
+    ))
+    length(existing_jobs) == length(jobs) || throw(ArgumentError(
+        "Existing OOS execution queue has a different number of jobs",
+    ))
+    immutable_keys = (
+        "index",
+        "tree",
+        "seed",
+        "scenario_tree",
+        "scenario_metadata_sha256",
+        "result_root",
+        "command",
+        "command_display",
+    )
+    state_keys = (
+        "status",
+        "scheduler_job_id",
+        "submitted_at_utc",
+        "started_at_utc",
+        "completed_at_utc",
+        "result_dir",
+        "stdout_path",
+        "stderr_path",
+        "error",
+    )
+    allowed_statuses = Set(("pending", "submitted", "running", "complete", "failed"))
+    for index in eachindex(jobs)
+        existing = existing_jobs[index]
+        existing isa AbstractDict || throw(ArgumentError(
+            "Existing OOS execution job $index must be a mapping",
+        ))
+        for key in immutable_keys
+            get(existing, key, nothing) == jobs[index][key] || throw(ArgumentError(
+                "Existing OOS execution job $index has a different $key",
+            ))
+        end
+        status = get(existing, "status", nothing)
+        status in allowed_statuses || throw(ArgumentError(
+            "Existing OOS execution job $index has unsupported status: $status",
+        ))
+        for key in state_keys
+            jobs[index][key] = get(existing, key, nothing)
+        end
+    end
+    return jobs
+end
+
+"""
+    prepare_oos_execution_queue(
+        experiment_dir,
+        fixed_investment_dir;
+        dataset,
+        config_file,
+        results_root,
+        input_format = :auto,
+        solver = "HiGHS",
+        queue_file = joinpath(experiment_dir, "execution.yaml"),
+        julia_command = "julia",
+        resume = true,
+    )
+
+Validate an OOS experiment and fixed-investment run, then write a resumable
+execution queue without starting any processes.
+
+Each queue job contains the exact argument vector and display command for the
+current Julia runner. Existing job status and scheduler/result fields are
+preserved when `resume = true`, provided that all immutable inputs and commands
+still match. Returns the absolute queue-manifest path.
+"""
+function prepare_oos_execution_queue(
+    experiment_dir::AbstractString,
+    fixed_investment_dir::AbstractString;
+    dataset::AbstractString,
+    config_file::AbstractString,
+    results_root::AbstractString,
+    input_format::Symbol = :auto,
+    solver::AbstractString = "HiGHS",
+    queue_file::AbstractString = joinpath(experiment_dir, _OOS_EXECUTION_MANIFEST),
+    julia_command::AbstractString = "julia",
+    resume::Bool = true,
+)
+    target_experiment = abspath(normpath(experiment_dir))
+    fixed_investments = abspath(normpath(fixed_investment_dir))
+    target_results = abspath(normpath(results_root))
+    target_queue = abspath(normpath(queue_file))
+    project_dir = abspath(pkgdir(@__MODULE__))
+    runner_script = joinpath(project_dir, "scripts", "run_julia_empire.jl")
+    source_config = isabspath(config_file) ?
+                    abspath(normpath(config_file)) :
+                    abspath(normpath(joinpath(project_dir, config_file)))
+    dataset_folder = isabspath(dataset) ?
+                     abspath(normpath(dataset)) :
+                     abspath(normpath(joinpath(project_dir, "data", dataset)))
+    format_value = _oos_queue_input_format(input_format)
+
+    solver in ("HiGHS", "Gurobi") || throw(ArgumentError(
+        "Unsupported OOS execution solver: $solver. Expected HiGHS or Gurobi.",
+    ))
+    isempty(strip(julia_command)) && throw(ArgumentError("julia_command cannot be empty"))
+    isfile(source_config) || throw(ArgumentError(
+        "Execution config file does not exist: $source_config",
+    ))
+    isdir(dataset_folder) || throw(ArgumentError(
+        "Execution dataset folder does not exist: $dataset_folder",
+    ))
+    isfile(runner_script) || throw(ArgumentError("Julia runner does not exist: $runner_script"))
+
+    experiment_manifest_file, experiment =
+        _load_complete_oos_experiment(target_experiment)
+    string(format_value) == experiment["input_format"] || throw(ArgumentError(
+        "Execution input format does not match the OOS experiment: " *
+        "$(string(format_value)) (expected $(experiment["input_format"]))",
+    ))
+    dataset_sha256 = _oos_directory_sha256(dataset_folder)
+    dataset_sha256 == experiment["source_data_sha256"] || throw(ArgumentError(
+        "Execution dataset contents do not match the dataset used to generate the OOS trees",
+    ))
+    trees = _validated_oos_execution_trees(target_experiment, experiment)
+    _validate_oos_execution_config(source_config, first(trees)["path"])
+    fixed_metadata = _oos_fixed_investment_metadata(fixed_investments)
+
+    created_at = string(now(UTC), "Z")
+    jobs = [
+        _oos_execution_job(
+            tree,
+            julia_command,
+            project_dir,
+            runner_script,
+            dataset_folder,
+            source_config,
+            format_value,
+            solver,
+            fixed_investments,
+            target_results,
+        ) for tree in trees
+    ]
+    queue = Dict{String, Any}(
+        "schema_version" => 1,
+        "kind" => "oos_execution_queue",
+        "status" => "ready",
+        "created_at_utc" => created_at,
+        "updated_at_utc" => created_at,
+        "experiment" => Dict{String, Any}(
+            "dir" => target_experiment,
+            "manifest_file" => experiment_manifest_file,
+            "source_data_sha256" => experiment["source_data_sha256"],
+            "source_config_sha256" => experiment["source_config_sha256"],
+            "seed_start" => experiment["seed_start"],
+            "num_trees" => experiment["num_trees"],
+        ),
+        "dataset" => Dict{String, Any}(
+            "folder" => dataset_folder,
+            "sha256" => dataset_sha256,
+        ),
+        "config" => Dict{String, Any}(
+            "file" => source_config,
+            "sha256" => _oos_sha256_file(source_config),
+        ),
+        "input_format" => string(format_value),
+        "solver" => solver,
+        "fixed_investments" => fixed_metadata,
+        "runner" => Dict{String, Any}(
+            "julia_command" => julia_command,
+            "project_dir" => project_dir,
+            "script" => runner_script,
+            "script_sha256" => _oos_sha256_file(runner_script),
+        ),
+        "results_root" => target_results,
+        "acceptance_criteria" => Dict{String, Any}(
+            "run_manifest_status" => "complete",
+            "investments_fixed" => true,
+            "scenario_checksums_verified" => true,
+            "termination_status" => "OPTIMAL",
+        ),
+        "jobs" => jobs,
+    )
+
+    if ispath(target_queue)
+        isfile(target_queue) || throw(ArgumentError(
+            "OOS execution queue path exists but is not a file: $target_queue",
+        ))
+        resume || throw(ArgumentError(
+            "OOS execution queue already exists and resume=false: $target_queue",
+        ))
+        existing = YAML.load_file(target_queue)
+        existing isa AbstractDict || throw(ArgumentError(
+            "Existing OOS execution queue must be a mapping: $target_queue",
+        ))
+        _validate_oos_execution_queue_spec(existing, queue)
+        _resume_oos_execution_jobs!(jobs, get(existing, "jobs", nothing))
+        queue["created_at_utc"] = get(existing, "created_at_utc", created_at)
+    end
+
+    queue["status"] = _oos_execution_queue_status(jobs)
+    queue["updated_at_utc"] = string(now(UTC), "Z")
+    _write_oos_experiment_manifest(target_queue, queue)
+    return target_queue
 end
 
 """
