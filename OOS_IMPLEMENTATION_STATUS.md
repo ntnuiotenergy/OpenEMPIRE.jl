@@ -95,7 +95,7 @@ Implementation commits, oldest first:
 | 4e. Staging planner | Render revision-pinned archive, transfer, verification, queue, and SGE commands | Implemented; commands remain inert |
 | 4f. Concrete one-tree plan | Prepare actual `europe_v51` tree, queue, and Solstorm manifest | Prepared locally on 2026-07-21 |
 | 4g. Local archive preflight | Create and inspect only the two local archives | Passed on 2026-07-21 |
-| 4h. Remote staging preflight | Transfer, verify checksums, and prepare remote queue/SGE script | Transfer/extraction and Julia bootstrap passed; dependency fix implemented locally; evidence-bound command-13-only retry is ready |
+| 4h. Remote staging preflight | Transfer, Julia/dependency setup, and repository-code validation passed; validate remaining inputs and prepare queue/SGE script | Blocked on extracted remote dataset content-fingerprint mismatch |
 | 4i. One-tree solver run | Submit and monitor one SGE job | Not started; requires approval |
 | 5. Aggregation | Combine validated results across trees | Not implemented |
 | 6. Full-year OOS | Full-year evaluation described in the original plan | Not completed |
@@ -262,13 +262,27 @@ These artifacts are ignored by Git and exist only in this workspace.
   attempt 2, and contains exactly original command 13. It conditionally runs
   `Pkg.instantiate()` and `Pkg.precompile()` before checksum validation. It
   excludes commands 14-15, queue/SGE preparation, `qsub`, and the model runner.
+- With explicit approval, the third-attempt plan hash and source-evidence hash
+  were reverified and its only command was executed.
+- Solstorm updated the Julia registry, instantiated the project, created its
+  remote `Manifest.toml`, and precompiled 80 dependencies; six were already
+  precompiled. Three FilePathsBase extension warning groups were reported, but
+  the final import check passed.
+- The repository-code checksum passed. The next check failed with `dataset
+  checksum mismatch`, so execution-config, generation-config, OOS-tree, and
+  fixed-investment checks did not start.
+- Commands 14-15, queue/SGE preparation, `qsub`, and the solver remained
+  unexecuted.
+- The attempt-3 plan is now evidence-stale and must not be rerun. Updated
+  remote-preflight evidence SHA-256:
+  `b161cad58a32b3915eb78a18656add1de9140b2c73d3674e25d81f578cae0a08`.
 
 Current checkpoint:
 
 ```text
-local archives       remote transfer       Julia bootstrap       dependencies/checksums       queue/SGE       solve
-     PASS          ->      PASS          ->      PASS          ->    READY TO RETRY          -> NOT RUN     -> NOT RUN
- commands 1-2          commands 3-12       command 13 retry       attempt 3, command 13 only      14-15         Plan 4i
+local archives     remote transfer     Julia/dependencies     code checksum     dataset checksum     queue/SGE     solve
+    PASS        ->      PASS        ->        PASS          ->     PASS       ->      FAILED       -> NOT RUN   -> NOT RUN
+ commands 1-2       commands 3-12          attempt 3             command 13       diagnose locally      14-15       Plan 4i
 ```
 
 ### Regeneration commands
@@ -343,7 +357,10 @@ overwriting evidence from an in-progress or completed experiment.
   an already-ready project, and a failed instantiation. Updated focused suites
   passed with 92 staging and 49 SGE assertions.
 - The third-attempt plan passed local evidence-hash, command-order, command
-  count, target-account, and no-submit/no-solver assertions. It was not run.
+  count, target-account, and no-submit/no-solver assertions.
+- On the approved attempt-3 run, dependency setup and the repository-code
+  checksum passed. Dataset content validation failed before the remaining four
+  content checks. No queue, scheduler, or solver action occurred.
 
 ## Known gaps and risks
 
@@ -362,8 +379,9 @@ overwriting evidence from an in-progress or completed experiment.
 6. The current continuation branch is an integration branch, not a proposed
    single employee-review PR. Prefer sequential PRs: runner workflow, core OOS,
    experiment orchestration, then optional Solstorm tooling.
-7. The shared Julia fallback is proven in the Solstorm non-interactive shell.
-   Dependency setup is locally tested but has not yet run on Solstorm.
+7. The shared Julia fallback and dependency setup are now proven in the
+   Solstorm non-interactive shell. FilePathsBase emitted precompile-extension
+   warnings under Julia 1.9, but the final `OpenEMPIRE` import succeeded.
 8. The repository archive includes the tracked `europe_v51` dataset while the
    plan also transfers a separately checksummed dataset archive. This adds
    roughly 55 MB of duplicated compressed transfer data but does not alter the
@@ -373,18 +391,23 @@ overwriting evidence from an in-progress or completed experiment.
    established import-check/`Pkg.instantiate()` setup. Dependency resolution
    may take several minutes and can require package-network access on Solstorm.
 10. A partial but isolated stage exists at the documented remote path. Do not
-    overwrite, recreate, or delete it. The previous resume plan is consumed and
-    evidence-stale. Only `validation_retry_attempt3.yaml` is eligible for the
-    next explicitly approved validation retry.
+    overwrite, recreate, or delete it. Both resume plans are consumed and
+    evidence-stale; neither is eligible for another run.
+11. Although the dataset archive's byte-level SHA-256 matched before and after
+    transfer, the extracted directory fingerprint differs on Solstorm. The
+    exact differing path or cross-platform hashing assumption is not yet known.
 
 ## Next recommended task
 
-With explicit user approval, execute the only command in
-`validation_retry_attempt3.yaml`:
+Diagnose the dataset fingerprint mismatch locally before another remote call:
 
-1. Reverify the plan hash and source-evidence hash immediately before use.
-2. Run only original command 13. Allow dependency setup and checksum validation
-   to finish; this may take several minutes on the fresh Solstorm environment.
-3. Capture output and exit status in `remote_preflight.yaml` as attempt 3.
-4. Do not run commands 14-15, transfer files, invoke `qsub`, or start a solver.
-5. Stop after recording evidence, whether validation passes or fails.
+1. Inspect `_oos_directory_sha256` and the existing archive-preflight evidence
+   for cross-platform assumptions and hidden/generated files.
+2. Re-extract the already validated dataset archive locally and compare a
+   deterministic per-file path/size/SHA-256 manifest with the source dataset.
+3. Add a focused diagnostic or test that identifies the exact differing entry
+   without weakening validation.
+4. If local evidence is conclusive, implement and test the narrow correction
+   and generate a new command-13-only plan.
+5. If local evidence is inconclusive, generate—but do not execute—a read-only
+   Solstorm file-manifest command and request separate approval.
