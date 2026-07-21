@@ -100,6 +100,41 @@ function test_prepare_oos_solstorm_staging()
         commands = plan["commands"]
         command_text = join((command["display"] for command in commands), "\n")
         @test all(!command["executed"] for command in commands)
+        @test OpenEMPIRE._oos_dataset_archive_arguments(
+            "/source",
+            "/archive.tar.gz";
+            is_apple = true,
+        ) == [
+            "env",
+            "COPYFILE_DISABLE=1",
+            "tar",
+            "--no-xattrs",
+            "--no-mac-metadata",
+            "--no-fflags",
+            "-czf",
+            "/archive.tar.gz",
+            "-C",
+            "/source",
+            ".",
+        ]
+        @test OpenEMPIRE._oos_dataset_archive_arguments(
+            "/source",
+            "/archive.tar.gz";
+            is_apple = false,
+        ) == ["tar", "-czf", "/archive.tar.gz", "-C", "/source", "."]
+        dataset_archive_command = commands[2]["argv"]
+        if Sys.isapple()
+            @test dataset_archive_command[1:6] == [
+                "env",
+                "COPYFILE_DISABLE=1",
+                "tar",
+                "--no-xattrs",
+                "--no-mac-metadata",
+                "--no-fflags",
+            ]
+        else
+            @test dataset_archive_command[1] == "tar"
+        end
         @test any(occursin("git", command["display"]) &&
                   occursin("archive", command["display"]) for command in commands)
         @test any(occursin("scp", command["display"]) for command in commands)

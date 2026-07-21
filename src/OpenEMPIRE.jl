@@ -23,5 +23,6 @@ include("results.jl")
 include("out_of_sample.jl")
 include("oos_sge.jl")
 include("oos_staging.jl")
+include("oos_cleanup.jl")
 
 end # module OpenEMPIRE

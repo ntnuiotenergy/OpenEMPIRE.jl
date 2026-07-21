@@ -77,6 +77,28 @@ function _oos_remote_shell_command(
     ), "\n")
 end
 
+function _oos_dataset_archive_arguments(
+    source_dir::AbstractString,
+    archive_file::AbstractString;
+    is_apple::Bool = Sys.isapple(),
+)
+    arguments = String[]
+    if is_apple
+        append!(arguments, [
+            "env",
+            "COPYFILE_DISABLE=1",
+            "tar",
+            "--no-xattrs",
+            "--no-mac-metadata",
+            "--no-fflags",
+        ])
+    else
+        push!(arguments, "tar")
+    end
+    append!(arguments, ["-czf", archive_file, "-C", source_dir, "."])
+    return arguments
+end
+
 function _oos_staging_file_metadata(path::AbstractString; relative_to = dirname(path))
     return Dict{String, Any}(
         "name" => basename(path),
@@ -339,14 +361,10 @@ function prepare_oos_solstorm_staging(
     push!(commands, _oos_staging_command(
         "local_prepare",
         "Create the dataset archive",
-        [
-            "tar",
-            "-czf",
-            local_dataset_archive,
-            "-C",
+        _oos_dataset_archive_arguments(
             queue["dataset"]["folder"],
-            ".",
-        ],
+            local_dataset_archive,
+        ),
     ))
 
     remote_directories = [
