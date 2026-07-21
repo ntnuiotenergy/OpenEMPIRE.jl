@@ -521,7 +521,7 @@ HISTORICAL: stage 5cf05e0... -> qsub 6420 -> INFEASIBLE
                               + investment rows omitted
                                          |
 FRESH:      tree/queue -> plan -> local archives -> remote stage -> qsub -> result
-               PASS       PASS       PASS             PASS        NEXT     WAIT
+               PASS       PASS       PASS             PASS        6421     OPTIMAL
                \________________ pinned to 8a3dc07 _______________/
 ```
 
@@ -572,6 +572,39 @@ overwrite any earlier evidence.
   unchanged. The superseded draft package was preserved at
   `/private/tmp/experiment_seed101_1tree_oosfix_8a3dc07_draft` for this local
   session.
+
+### Fresh representative OOS run completed on 2026-07-21
+
+- Solstorm job `6421` ran on `compute-4-51.local` and completed with scheduler
+  `failed=0`, `exit_status=0`, and 2,857 seconds wall time. Maximum recorded
+  memory was 59.651 GB.
+- Gurobi returned `OPTIMAL`; primal and dual status are both `FEASIBLE_POINT`.
+  The run manifest is `complete`, records fixed investments and verified
+  scenario checksums, and confirms `investment_constraints_included: false`.
+- Objective value: `2.9758344543298506e12`. Build time was 718.00 seconds and
+  solve time was 564.33 seconds; remaining wall time was primarily CSV output.
+- All eight emitted investment/capacity CSV files are byte-identical to the
+  corresponding fixed-investment inputs. This verifies that the OOS solve did
+  not choose new investments.
+- Complete remote result:
+  `/home/torgrif/OpenEMPIRE.jl/stages/experiment_seed101_1tree_oosfix_8a3dc07_oos_tree1_8a3dc07c315a/results/oos_tree1/20260721_150642_dataset`
+- Complete local copy:
+  `results/julia_oos_runs/experiment_seed101_1tree_oosfix_8a3dc07/oos_tree1/20260721_150642_dataset`
+  (119 files, about 1.4 GB). A checksum-mode rsync dry run reported no remote
+  versus local differences.
+- Completion evidence:
+  `OutOfSample/europe_v51/experiment_seed101_1tree_oosfix_8a3dc07/solstorm_staging/experiment_seed101_1tree_oosfix_8a3dc07_oos_tree1_8a3dc07c315a/completion_record.yaml`.
+  Its SHA-256 is
+  `5f931cfc50fc47828d7b1f75ad36c2300df82257865579379f509a4b1e6e13d2`.
+  The reconciled remote queue and job status are both `complete`.
+- Load shedding is not zero. Of 529,200 output rows, 142 exceed `1e-6`; the
+  maximum is 21,635.71 MW at Germany, strategic period 3, scenario 2, `peak1`
+  hour 11. The raw unweighted sum is 213,652.65 MW and must not be interpreted
+  as annual energy without the representative-period weights. The load-shedding
+  objective component is `2.3471494868033577e10`.
+- This is a successful one-tree representative-period OOS solve. It does not
+  yet establish acceptable reliability across multiple trees or implement a
+  chronological full-year OOS evaluation.
 
 ### Regeneration commands
 
@@ -733,11 +766,10 @@ overwriting evidence from an in-progress or completed experiment.
 
 ## Known gaps and risks
 
-1. The historical representative OOS model built and reached Gurobi but was
-   infeasible.
-   The cause is now localized to redundant fixed-capacity investment tracking
-   equalities, and commit `9c54646` removes that constraint class in OOS. A new
-   representative run is still required to verify operational feasibility.
+1. The historical representative OOS model was infeasible because redundant
+   fixed-capacity investment equalities were retained. Commit `9c54646` removes
+   that constraint class in OOS, and fresh job 6421 is the representative
+   verification: it completed `OPTIMAL` with those constraints omitted.
 2. The fixed investment run comes from the older sibling checkout and lacks the
    current `run_manifest.yaml`. Its eight capacity tables loaded and were fixed
    in the current model. Job 6420 does not establish operational infeasibility
@@ -776,21 +808,30 @@ overwriting evidence from an in-progress or completed experiment.
 12. Job 6420's historical manifest remains `started` because it ran the old
     pinned runner. Commit `d1936ac` fixes this behavior for future runs, but the
     preserved remote evidence must not be edited to simulate a rerun.
+13. Job 6421 contains material load shedding despite being optimal. Load
+    shedding is an allowed penalized variable, so solver feasibility alone is
+    not a reliability acceptance test. Weighted energy-not-served and related
+    per-period/per-scenario metrics must be defined before scaling to many OOS
+    trees.
+14. The OOS objective still reports fixed generator, storage, and transmission
+    investment-cost components. Decide whether multi-tree reporting should
+    retain those constant costs or compare operational and load-shedding costs
+    separately.
 
 ## Next recommended task
 
-Submit and monitor exactly one fresh representative OOS job:
+Implement the local OOS result-validation and aggregation foundation:
 
-1. Revalidate `remote_preflight.yaml`, the remote queue and SGE hashes, one
-   pending seed-101 job, null job-ID/submission fields, and absence from `qstat`.
-2. Prepare a duplicate-safe submission record bound to those hashes. The only
-   permitted scheduler mutation is one `qsub` of the recorded SGE script.
-3. Submit exactly once, parse the returned job ID, and immediately persist it
-   into the remote queue plus new local evidence. Never retry automatically if
-   scheduler output is ambiguous.
-4. Monitor `qstat`, then `qacct`, scheduler stdout/stderr, result inventory, and
-   `run_manifest.yaml` read-only while the job runs. Continue independent local
-   OOS work rather than waiting idly between checks.
-5. If the job succeeds, collect and validate results against the queue's
-   acceptance criteria. If it fails, preserve all evidence and diagnose before
-   any resubmission.
+1. Define a compact per-tree result-summary schema based on `run_manifest.yaml`
+   and the output CSVs. Preserve solver status, fingerprints, seed, objective
+   components, and fixed-investment verification.
+2. Determine and document the correct representative-period weights for load
+   shedding. Report weighted energy not served by strategic period and scenario,
+   plus event count and maximum MW; do not use the raw CSV sum as annual energy.
+3. Implement streaming analysis so multi-gigabyte operational CSVs are not
+   loaded into memory. Keep fixed investment costs distinguishable from OOS
+   operational and load-shedding costs.
+4. Add deterministic unit fixtures and validate the implementation against the
+   collected seed-101 result without running a solver.
+5. Use the resulting acceptance report to decide whether to prepare multiple
+   OOS trees or first investigate the material load-shedding events.
