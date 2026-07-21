@@ -19,6 +19,7 @@ include("test_oos_sge.jl")
 include("test_oos_staging.jl")
 include("test_oos_cleanup.jl")
 include("test_oos_remote_setup.jl")
+include("test_oos_submission.jl")
 #include("test_interface.jl")
 include("test_timestruct.jl")
 include("test_solve.jl")
@@ -86,6 +87,10 @@ end
 
 @testset "OOS Solstorm remote setup" begin
     test_prepare_oos_solstorm_remote_setup()
+end
+
+@testset "OOS Solstorm submission" begin
+    test_prepare_oos_solstorm_submission()
 end
 
 @testset "Validate" begin
