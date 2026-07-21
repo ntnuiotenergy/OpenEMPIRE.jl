@@ -100,7 +100,7 @@ Implementation commits, oldest first:
 | 4f. Concrete one-tree plan | Prepare actual `europe_v51` tree, queue, and Solstorm manifest | Prepared locally on 2026-07-21 |
 | 4g. Local archive preflight | Create and inspect only the two local archives | Passed on 2026-07-21 |
 | 4h. Remote staging preflight | Transfer, dependencies, recovery, all input validations, queue, and SGE preparation | Passed; one pending job and prepared script verified remotely |
-| 4i. One-tree solver run | Submit and monitor one SGE job | Job 6420 submitted once and initially observed running on compute-4-56 |
+| 4i. One-tree solver run | Submit and monitor one SGE job | Job 6420 finished with process exit 1: model infeasible, followed by an objective-value reporting exception |
 | 5. Aggregation | Combine validated results across trees | Not implemented |
 | 6. Full-year OOS | Full-year evaluation described in the original plan | Not completed |
 
@@ -455,13 +455,48 @@ These artifacts are ignored by Git and exist only in this workspace.
   and the corresponding `.err` path.
 - No second `qsub` was executed. The model was not started directly by the
   agent; the submitted SGE script now controls job startup and solving.
+- The next monitoring observation found job `6420` absent from `qstat`.
+  `qacct` reports scheduler `failed=0`, process `exit_status=1`, wall time 738s,
+  and maximum virtual memory 46.234GB on `compute-4-56.local`.
+- Parsed accounting evidence: `qacct_6420_monitor1_parsed.yaml`, SHA-256
+  `cf05d580af8de3526c718da369eb710c472190d872ad32d58cb19eadfe2e593f`.
+- Accounting was persisted through the SGE adapter. The remote queue is now
+  `attention_required`, job `6420` is `failed`, and its SHA-256 is
+  `7709b0f0376e5c33cff7ff8de8827ef48816f3bc81e1b844d6a3e18053d87b93`.
+- The `.out` log is 8,476 bytes and the `.err` log is 45,632 bytes. Read-only
+  tail evidence is `logs_6420_monitor1.yaml`, SHA-256
+  `b79117484d85ffe4ef6e9d04ff2e94a519ac266dfa75b7ebb4bc82903ccd9720`.
+- Verified run behavior:
+  - Gurobi 13.0.2 loaded successfully;
+  - OOS scenario checks passed and all investments were fixed;
+  - the model built in 619.77s with 20,427,120 named constraints and
+    14,299,315 variables;
+  - Gurobi presolve completed and reported `Model is infeasible`;
+  - optimization returned after 13.87s;
+  - the runner then called `JuMP.objective_value(emp)` despite zero solutions,
+    raising `MathOptInterface.ObjectiveValue(1) out of bounds` at
+    `scripts/run_julia_empire.jl:753`.
+- The underlying model infeasibility and the runner's secondary result-handling
+  exception are separate problems. The logs do not yet identify which
+  constraint combination causes infeasibility.
+- Result inventory contains only the staged config, OOS metadata, and
+  `run_manifest.yaml`; there are no solution CSV tables. Inventory evidence:
+  `results_6420_inventory.yaml`, SHA-256
+  `0cbd4b5850fe94270bda4f7b7fe7c22aa41bc1e2cf03757fc803bbc1f43ff955`.
+- The run manifest SHA-256 is
+  `8104c02d3ded9721a70598257e730190845860804e7fd1c21dc86b170ff653a9`.
+  It remains `status: started` with no end time or solution block because the
+  exception escaped. It nevertheless records OOS enabled, seed 101, scenario
+  checks verified, and investments fixed. Inspection evidence:
+  `run_manifest_6420_inspection.yaml`, SHA-256
+  `c0c78115a160031fe764c197a2a6823079d282b2f58ead456a7bad5a4f964ff1`.
 
 Current checkpoint:
 
 ```text
 local archives     transfer/deps     recovery/checks     queue/SGE setup     qsub       job 6420
-    PASS        ->      PASS      ->       PASS       ->      PASS       -> PASS   -> RUNNING
- commands 1-2       commands 3-12     quarantine + 13     commands 14-15    once      compute-4-56
+    PASS        ->      PASS      ->       PASS       ->      PASS       -> PASS   -> FAILED
+ commands 1-2       commands 3-12     quarantine + 13     commands 14-15    once     INFEASIBLE
 ```
 
 ### Regeneration commands
@@ -570,14 +605,18 @@ overwriting evidence from an in-progress or completed experiment.
   pending/no-ID, one-qsub, noclobber, and no-direct-runner/solver checks.
   Scheduler output produced job ID `6420`; the submission and initial running
   state were recorded without any additional qsub invocation.
+- Completion monitoring captured `qacct`, both scheduler log tails, the result
+  inventory, and the run manifest read-only. Scheduler infrastructure passed,
+  while the process exited 1 after Gurobi proved the model infeasible and the
+  runner attempted to read a nonexistent objective value.
 
 ## Known gaps and risks
 
-1. No representative OOS model has been built or solved with the concrete
-   `europe_v51` inputs yet.
+1. The representative OOS model built and reached Gurobi, but it is infeasible.
+   The cause is not yet localized to a constraint family or input mismatch.
 2. The fixed investment run comes from the older sibling checkout and lacks the
-   current `run_manifest.yaml`. Its summary and eight capacity tables are
-   present, but model compatibility has not been proven by a current build.
+   current `run_manifest.yaml`. Its eight capacity tables loaded and were fixed
+   in the current model, but operational feasibility under tree 101 failed.
 3. The `rf/...` OOS branches and open PRs have not yet been reconciled against
    this implementation. No historical branch should be discarded without that
    comparison and coordination with its author/reviewer.
@@ -599,33 +638,32 @@ overwriting evidence from an in-progress or completed experiment.
    existing HPC deployment convention. The revised command 13 now performs the
    established import-check/`Pkg.instantiate()` setup. Dependency resolution
    may take several minutes and can require package-network access on Solstorm.
-10. An active isolated stage and running scheduler job exist at the documented
-    remote path. Do not overwrite, recreate, delete, or resubmit them. All
-    earlier plans are consumed/evidenced and must not be rerun.
+10. A failed isolated stage and scheduler record exist at the documented remote
+    path. Preserve them as debugging evidence; do not overwrite, recreate,
+    delete, or resubmit them. All earlier plans are consumed/evidenced.
 11. GNU tar materialized macOS extended-attribute metadata as 93 `._*`
     AppleDouble sidecars in the already-transferred stage. Future OOS archives
     now use the repository's macOS-safe convention. The existing stage has
     been recovered without deletion and its intended dataset fingerprint is
     verified. Directory validation remains strict.
-12. Scheduler state `running` alone does not prove that Gurobi module/license
-    setup, model construction, or solving succeeded. Inspect the scheduler
-    logs and final run manifest before treating the representative run as
-    successful.
+12. `_solve_model!` reads the objective before checking
+    `JuMP.is_solved_and_feasible`. Any infeasible/no-solution result therefore
+    escapes as an objective-index exception and leaves the manifest `started`,
+    obscuring the real termination status and preventing clean reconciliation.
 
 ## Next recommended task
 
-Monitor job `6420` without resubmitting:
+Fix no-solution handling locally before diagnosing or rerunning infeasibility:
 
-1. Reverify the recorded job ID, submission evidence, current queue record, and
-   expected log paths.
-2. Run one read-only `qstat` observation and capture short stdout/stderr log
-   metadata/tails if the files exist; never alter or truncate logs.
-3. If queued/running, persist the observed state and stop. Do not submit again.
-4. If absent from `qstat`, capture `qacct -j 6420`, persist accounting through
-   the existing SGE adapter, and inspect the run directory/manifest read-only.
-5. Only reconcile the OOS queue as complete if scheduler accounting succeeded
-   and the EMPIRE run manifest satisfies every acceptance criterion. Otherwise
-   record the exact failure/blocker for the next debugging task.
-
-While the job runs, independent work may continue, but no changes to its pinned
-remote project, inputs, queue, script, result directory, or logs are allowed.
+1. Add a small result-extraction helper that reads termination/primal status and
+   only accesses objective/objective components when a result exists.
+2. Make the runner persist terminal failure evidence—including `INFEASIBLE`, no
+   objective, timings, and a clear status/error—without an objective-index
+   exception or false `complete` state.
+3. Add deterministic unit tests using a tiny infeasible JuMP model plus an
+   optimal control case. Verify manifest-safe serializable output and no
+   solution-table write on infeasibility.
+4. Do not modify or rerun remote job `6420`. Use its preserved evidence only.
+5. After the reporting fix, plan a separate targeted infeasibility diagnosis.
+   Prefer a small/local reproduction or constraint-family checks before another
+   full Solstorm run; use an IIS only if the cheaper checks are insufficient.
