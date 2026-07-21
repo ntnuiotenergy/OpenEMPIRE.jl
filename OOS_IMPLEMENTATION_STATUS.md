@@ -51,8 +51,9 @@ OOS.
 
 - Working branch: `torgrim/oos-workbench-continuation`
 - Base branch: `torgrim/workbench`
-- The continuation branch was nine commits ahead of `torgrim/workbench` before
-  this handoff update.
+- At handoff commit `635bc2f`, the continuation branch was ten commits ahead of
+  `torgrim/workbench`. Use `git rev-list --left-right --count
+  torgrim/workbench...HEAD` for the live count.
 - No `rf/...` branch or commit has been merged or cherry-picked.
 - The `rf/...` branches and existing PRs remain reference implementations that
   must be reconciled before opening replacement OOS PRs.
@@ -73,6 +74,7 @@ Implementation commits, oldest first:
 | `d9c3bf7` | Queue state reconciliation |
 | `fa2debc` | Solstorm SGE dry-run adapter |
 | `5cf05e0` | Dry-run Solstorm staging plan |
+| `635bc2f` | Living OOS implementation and session handoff |
 
 ## Functional progress
 
@@ -87,7 +89,7 @@ Implementation commits, oldest first:
 | 4d. SGE adapter | Render SGE script and parse captured scheduler output | Implemented; no submission performed |
 | 4e. Staging planner | Render revision-pinned archive, transfer, verification, queue, and SGE commands | Implemented; commands remain inert |
 | 4f. Concrete one-tree plan | Prepare actual `europe_v51` tree, queue, and Solstorm manifest | Prepared locally on 2026-07-21 |
-| 4g. Local archive preflight | Create and inspect only the two local archives | Not started |
+| 4g. Local archive preflight | Create and inspect only the two local archives | Passed on 2026-07-21 |
 | 4h. Remote staging preflight | Transfer, verify checksums, and prepare remote queue/SGE script | Not started; requires approval |
 | 4i. One-tree solver run | Submit and monitor one SGE job | Not started; requires approval |
 | 5. Aggregation | Combine validated results across trees | Not implemented |
@@ -183,14 +185,28 @@ These artifacts are ignored by Git and exist only in this workspace.
   `OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/staging.yaml`
 - Manifest state: `ready`
 - Commands recorded: `15`
-- Commands executed: `0`
+- Local commands executed: `2` (repository archive and dataset archive)
+- Remote commands executed: `0`
 - Remote account: `torgrif@solstorm.iot.ntnu.no`
 - Remote staging root:
   `/home/torgrif/OpenEMPIRE.jl/stages/experiment_seed101_1tree_oos_tree1_5cf05e0ff211`
 - `config/cluster.json` stores `~/OpenEMPIRE.jl`; existing local launch logs show
   that this expands to `/home/torgrif/OpenEMPIRE.jl` on Solstorm. No connection
   was made to confirm it during this preparation.
-- No repository archive or dataset archive has been created yet.
+- Local archive preflight report:
+  `OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/archive_preflight.yaml`
+- Repository archive: `83,791,483` bytes, SHA-256
+  `a685f778e14ab7a8a58741d94a996130b0f928ec3850c0a81308730f7eb16de2`.
+- Dataset archive: `55,403,860` bytes, SHA-256
+  `59141c4caec4e2aa5ff57847603d300cd4a5ce0e08f11a85192093b8bcb94def`.
+- Extracted repository code fingerprint and dataset content fingerprint both
+  match the staging plan.
+- All required project, runner, queue, OOS, and SGE source files are present.
+- No `.git`, `results`, `OutOfSample`, private `config/cluster.json`, private
+  key files, or unsafe dataset paths were found.
+- The revision archive already contains the tracked `data/europe_v51`, so the
+  separate dataset archive duplicates that dataset during transfer. This is an
+  informational transfer-size inefficiency, not a checksum or execution error.
 - No SSH, SCP, remote filesystem write, SGE preparation, `qsub`, or solver run
   was performed.
 
@@ -237,8 +253,13 @@ overwriting evidence from an in-progress or completed experiment.
   `Sets/Generator.csv`.
 - Focused committed-revision staging tests: 58 passed.
 - Concrete experiment input hashes were validated while creating the queue.
-- Concrete staging manifest state is `ready` and all command entries are marked
-  `executed: false`.
+- Concrete staging manifest state is `ready`.
+- Archive preflight passed: 311 repository files and 84 dataset files were
+  extracted temporarily and checked. Both planned content fingerprints match;
+  no required files are missing and no forbidden files were found.
+- The staging manifest is an immutable plan and still records what the planner
+  itself executed (`0`). `archive_preflight.yaml` is the execution evidence
+  showing local commands 1 and 2 completed and commands 3 through 15 did not.
 
 ## Known gaps and risks
 
@@ -258,20 +279,24 @@ overwriting evidence from an in-progress or completed experiment.
    experiment orchestration, then optional Solstorm tooling.
 7. The Solstorm commands are generated from local evidence but have not been
    tested against the current remote filesystem or module environment.
+8. The repository archive includes the tracked `europe_v51` dataset while the
+   plan also transfers a separately checksummed dataset archive. This adds
+   roughly 55 MB of duplicated compressed transfer data but does not alter the
+   remote queue inputs.
 
 ## Next recommended task
 
-Plan 4g should execute only the two local preparation commands from the
-concrete staging manifest:
+Plan 4h is the remote staging preflight. With explicit approval, execute
+commands 3 through 15 from the concrete staging manifest in order:
 
-1. Create the revision-pinned repository archive.
-2. Create the dataset archive.
-3. Record their actual byte sizes and SHA-256 hashes in a local preflight
-   report or manifest update.
-4. Inspect archive contents for the required runner, queue, SGE, project, data,
-   and config files and for accidental result/credential inclusion.
-5. Do not connect, transfer, prepare remote files, submit, solve, push, or open
-   a PR.
+1. Create the isolated remote directories.
+2. Transfer the two validated archives, configs, adjusted experiment metadata,
+   selected scenario tree, and eight fixed-investment tables.
+3. Extract the archives remotely.
+4. Run the recorded remote checksum verification.
+5. Prepare the one-tree remote execution queue.
+6. Prepare the SGE script without invoking `qsub`.
+7. Record remote paths and verification evidence in this handoff document.
 
-Only after this local archive preflight passes should the user be asked for
-approval to perform remote staging and checksum verification.
+Do not submit the SGE job or start a solver during Plan 4h. Plan 4i requires a
+separate explicit approval for `qsub`.
