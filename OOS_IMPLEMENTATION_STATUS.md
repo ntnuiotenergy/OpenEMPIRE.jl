@@ -96,7 +96,7 @@ Implementation commits, oldest first:
 | 4e. Staging planner | Render revision-pinned archive, transfer, verification, queue, and SGE commands | Implemented; commands remain inert |
 | 4f. Concrete one-tree plan | Prepare actual `europe_v51` tree, queue, and Solstorm manifest | Prepared locally on 2026-07-21 |
 | 4g. Local archive preflight | Create and inspect only the two local archives | Passed on 2026-07-21 |
-| 4h. Remote staging preflight | Transfer, Julia/dependency setup, and repository-code validation passed; validate remaining inputs and prepare queue/SGE script | Root cause identified; future archives are metadata-safe and an exact recoverable quarantine plan is ready but not remotely executed |
+| 4h. Remote staging preflight | Transfer, Julia/dependency setup, and repository-code validation passed; validate remaining inputs and prepare queue/SGE script | Dataset recovered and exact 84-file fingerprint verified; command-13 validation retry is next |
 | 4i. One-tree solver run | Submit and monitor one SGE job | Not started; requires approval |
 | 5. Aggregation | Combine validated results across trees | Not implemented |
 | 6. Full-year OOS | Full-year evaluation described in the original plan | Not completed |
@@ -335,8 +335,7 @@ These artifacts are ignored by Git and exist only in this workspace.
   `OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/appledouble_quarantine_plan.yaml`
 - Quarantine-plan SHA-256:
   `aec3d9e977b27402403ae1f9771e09e121f1f7423d404f151301cda1291d9a75`.
-- The plan is locally generated, `ready`, and still a dry run with zero
-  commands executed. It contains one SSH command and 93 exact relative paths.
+- The immutable plan records one SSH command and 93 exact relative paths.
   Every target is a captured 163-byte `._*` file with SHA-256
   `5d7add0d3fe38a560e64f0d4db40f41d255e4b7540a8edac921fae0af566bb30`.
 - The command first requires the complete remote dataset to equal the captured
@@ -344,14 +343,28 @@ These artifacts are ignored by Git and exist only in this workspace.
   `artifacts/appledouble_quarantine_attempt3`, preserving relative paths, and
   requires the intended 84-file manifest and expected dataset fingerprint.
   It contains no wildcard, `rm`, transfer, `qsub`, runner, or solver action.
-- The quarantine command has **not** been executed on Solstorm.
+- With explicit approval, the plan and its four source-evidence hashes were
+  reverified and its one SSH command was executed on Solstorm. It exited 0
+  with empty stderr.
+- Quarantine execution evidence:
+  `OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/appledouble_quarantine_execution.yaml`
+  with SHA-256
+  `5434b43d7fefdbb97ded07cf0a2fe0afaf82c3b323cf7f5ff11f942a39b66558`.
+- Captured stdout SHA-256:
+  `6e2f219e24028636817efc8a96ea832d1e5960371c93dac00f4c0009b9460750`.
+  It contains exactly the 84 intended manifest entries, the expected dataset
+  fingerprint `1e015ec90929a41d1a543760a54f5298250718f09f34c21fdf9b7eadc58ac5d0`,
+  and a quarantine marker for 93 files. Captured stderr is empty.
+- The 93 sidecars now reside at the recoverable remote path
+  `artifacts/appledouble_quarantine_attempt3`. No files were deleted. Command
+  13, commands 14-15, `qsub`, the runner, and the solver were not executed.
 
 Current checkpoint:
 
 ```text
-local archives     transfer/deps     intended files     recovery plan       dataset validation     queue/SGE     solve
-    PASS        ->      PASS      ->      PASS       -> READY, NOT RUN   ->      BLOCKED        -> NOT RUN   -> NOT RUN
- commands 1-2       commands 3-12     84 unchanged      quarantine 93         then command 13       14-15       Plan 4i
+local archives     transfer/deps     intended files     sidecar recovery     dataset validation     queue/SGE     solve
+    PASS        ->      PASS      ->      PASS       ->      PASS        ->       NEXT          -> NOT RUN   -> NOT RUN
+ commands 1-2       commands 3-12     84 unchanged      93 quarantined       retry command 13      14-15       Plan 4i
 ```
 
 ### Regeneration commands
@@ -439,6 +452,9 @@ overwriting evidence from an in-progress or completed experiment.
 - The concrete quarantine plan was validated locally: 93 exact sidecar
   targets, one SSH command, recoverable moves, zero executed commands, and no
   `rm`, wildcard, `qsub`, runner, or solver action.
+- The approved quarantine command exited 0 with empty stderr. Its output
+  exactly matches the expected 84-file local manifest and dataset fingerprint,
+  and reports all 93 sidecars in the recoverable quarantine directory.
 
 ## Known gaps and risks
 
@@ -468,28 +484,30 @@ overwriting evidence from an in-progress or completed experiment.
    existing HPC deployment convention. The revised command 13 now performs the
    established import-check/`Pkg.instantiate()` setup. Dependency resolution
    may take several minutes and can require package-network access on Solstorm.
-10. A partial but isolated stage exists at the documented remote path. Do not
-    overwrite, recreate, or delete it. Both resume plans are consumed and
-    evidence-stale; neither is eligible for another run.
+10. A recovered but still incomplete isolated stage exists at the documented
+    remote path. Do not overwrite, recreate, or delete it. Both earlier resume
+    plans are consumed and evidence-stale; neither is eligible for another run.
 11. GNU tar materialized macOS extended-attribute metadata as 93 `._*`
     AppleDouble sidecars in the already-transferred stage. Future OOS archives
-    now use the repository's macOS-safe convention, but the existing stage
-    still needs the exact recoverable quarantine command before validation can
-    resume. Directory validation remains strict.
+    now use the repository's macOS-safe convention. The existing stage has
+    been recovered without deletion and its intended dataset fingerprint is
+    verified. Directory validation remains strict.
 
 ## Next recommended task
 
-With explicit user approval, execute only the one command in the concrete
-quarantine plan:
+Prepare an evidence-bound retry of original staging command 13 that additionally
+requires the successful quarantine execution evidence:
 
-1. Reverify the plan SHA-256 and every bound source-evidence SHA-256.
-2. Reverify that it targets the documented isolated stage, contains exactly 93
-   captured sidecar paths, uses recoverable moves, and contains no `rm`,
-   wildcard, `qsub`, runner, solver, or transfer action.
-3. Execute that one SSH command and capture stdout/stderr locally.
-4. Require exit code zero, the expected 84-file dataset fingerprint, and the
-   quarantine marker. Record the evidence and stop.
+1. Generate a new one-command validation plan; do not reuse either consumed
+   resume plan.
+2. Bind it to the immutable staging plan, current remote-preflight report,
+   quarantine plan, captured execution evidence, stdout hash, and expected
+   clean dataset fingerprint.
+3. Reverify that the command contains only dependency/import setup and the six
+   staging-input validations—no queue/SGE preparation, transfer, `qsub`, model
+   runner, or solver.
+4. With explicit approval, execute only command 13, capture its evidence, and
+   stop before commands 14-15.
 
-Do not retry command 13, prepare commands 14-15, submit `qsub`, or start the
-solver in the same task. Those require the next approval after the recovered
-dataset evidence has been reviewed.
+If all six validations pass, the following task can prepare the remote queue
+and SGE script. Submission and the solver remain separate approval-gated tasks.
