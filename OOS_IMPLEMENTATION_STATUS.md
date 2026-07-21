@@ -95,7 +95,7 @@ Implementation commits, oldest first:
 | 4e. Staging planner | Render revision-pinned archive, transfer, verification, queue, and SGE commands | Implemented; commands remain inert |
 | 4f. Concrete one-tree plan | Prepare actual `europe_v51` tree, queue, and Solstorm manifest | Prepared locally on 2026-07-21 |
 | 4g. Local archive preflight | Create and inspect only the two local archives | Passed on 2026-07-21 |
-| 4h. Remote staging preflight | Transfer, Julia/dependency setup, and repository-code validation passed; validate remaining inputs and prepare queue/SGE script | Blocked on extracted remote dataset content-fingerprint mismatch |
+| 4h. Remote staging preflight | Transfer, Julia/dependency setup, and repository-code validation passed; validate remaining inputs and prepare queue/SGE script | Root cause identified: GNU tar created 93 macOS AppleDouble sidecars; portable-archive fix and exact cleanup plan pending |
 | 4i. One-tree solver run | Submit and monitor one SGE job | Not started; requires approval |
 | 5. Aggregation | Combine validated results across trees | Not implemented |
 | 6. Full-year OOS | Full-year evaluation described in the original plan | Not completed |
@@ -296,14 +296,36 @@ These artifacts are ignored by Git and exist only in this workspace.
   sizes, file SHA-256 values, and the resulting directory fingerprint to local
   stdout. It uses only Julia's SHA standard library with compiled modules
   disabled. It performs no dependency setup, remote write, transfer, queue/SGE
-  preparation, `qsub`, or solver action, and it has not been executed.
+  preparation, `qsub`, or solver action.
+- The first read-only diagnostic reached Julia but failed because SSH quoting
+  stripped Julia character literals (`UndefVarError: t`). It made no remote
+  changes. A corrected, separately verified plan replaced those literals with
+  strings and then completed with exit code 0 and empty stderr.
+- Corrected diagnostic plan:
+  `OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/dataset_manifest_diagnostic_retry.yaml`
+  with SHA-256
+  `53413d193a5dd0f6955d1a08e448235fb790101fe1fa4e5eb47f5657d60d011e`.
+- Captured remote manifest:
+  `OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/dataset_manifest.remote.retry.tsv`
+  with SHA-256
+  `49f55855d72e4f9a3180ac79fea6318d7cccf624a816217470d4ed55ccf361e7`.
+- Exact manifest comparison found all 84 intended files present and
+  byte-identical, with zero missing or changed inputs. The remote extraction
+  also contains 93 extra 163-byte `._*` AppleDouble sidecars, all with SHA-256
+  `5d7add0d3fe38a560e64f0d4db40f41d255e4b7540a8edac921fae0af566bb30`.
+- Those sidecars alone change the expected directory fingerprint from
+  `1e015ec90929a41d1a543760a54f5298250718f09f34c21fdf9b7eadc58ac5d0`
+  to the remote value
+  `842cccf0b3d95ab6560b9c4e551eb850aefa03f10b5e16e852854edd11e48857`.
+- Updated remote-preflight evidence SHA-256:
+  `74b6b34a15bc78f0f67012afc32b24bbea469da6084c0e8cb1735cc9d5634982`.
 
 Current checkpoint:
 
 ```text
-local archives     remote transfer     Julia/dependencies     code checksum     dataset checksum     queue/SGE     solve
-    PASS        ->      PASS        ->        PASS          ->     PASS       ->      FAILED       -> NOT RUN   -> NOT RUN
- commands 1-2       commands 3-12          attempt 3             command 13       diagnose locally      14-15       Plan 4i
+local archives     transfer/deps     intended files     extra metadata     dataset validation     queue/SGE     solve
+    PASS        ->      PASS      ->      PASS       -> 93 SIDECARS FOUND ->      BLOCKED        -> NOT RUN   -> NOT RUN
+ commands 1-2       commands 3-12     84 unchanged       cleanup pending       rerun command 13      14-15       Plan 4i
 ```
 
 ### Regeneration commands
@@ -383,8 +405,8 @@ overwriting evidence from an in-progress or completed experiment.
   checksum passed. Dataset content validation failed before the remaining four
   content checks. No queue, scheduler, or solver action occurred.
 - Exact local archive re-extraction and per-file comparison passed for all 84
-  files. Because the mismatch is remote-only, a one-command read-only manifest
-  plan was generated and passed local evidence-binding and safety assertions.
+  files. A one-command read-only remote manifest identified 93 AppleDouble
+  sidecars and confirmed that no intended file is missing or changed.
 
 ## Known gaps and risks
 
@@ -417,22 +439,22 @@ overwriting evidence from an in-progress or completed experiment.
 10. A partial but isolated stage exists at the documented remote path. Do not
     overwrite, recreate, or delete it. Both resume plans are consumed and
     evidence-stale; neither is eligible for another run.
-11. Although the dataset archive's byte-level SHA-256 matched before and after
-    transfer, the extracted directory fingerprint differs on Solstorm. The
-    exact local archive reproduces perfectly, so the likely difference is in
-    the remote extracted directory or GNU-tar handling. The exact remote entry
-    is still unknown; do not weaken or bypass checksum validation.
+11. GNU tar materialized macOS extended-attribute metadata as 93 `._*`
+    AppleDouble sidecars. The existing OOS staging command does not apply the
+    `COPYFILE_DISABLE` and bsdtar no-metadata safeguards already used by
+    `scripts/copy_and_run_julia_on_hpc.sh`. Fix archive creation rather than
+    weakening directory validation.
 
 ## Next recommended task
 
-With explicit user approval, run the only command in
-`dataset_manifest_diagnostic_attempt3.yaml`:
+Implement the narrow archive and recovery fix locally:
 
-1. Reverify the diagnostic-plan and source-evidence hashes.
-2. Execute its single read-only SSH command and capture stdout locally.
-3. Compare the returned remote path/size/SHA manifest with
-   `dataset_manifest.local.tsv` to identify every missing, extra, or changed
-   file and verify the remote directory fingerprint.
-4. Record the diagnostic evidence and stop. Do not write remotely, transfer or
-   delete files, rerun command 13, run commands 14-15, invoke `qsub`, or start a
-   solver.
+1. Reuse the existing macOS-safe `COPYFILE_DISABLE=1`, `--no-xattrs`,
+   `--no-mac-metadata`, and `--no-fflags` archive convention in the OOS staging
+   planner, with focused platform-aware tests.
+2. Generate an evidence-bound cleanup plan listing all 93 exact sidecar paths;
+   do not use a broad wildcard or `find -delete`.
+3. Make the cleanup plan reprint the remote manifest and require the expected
+   dataset fingerprint before another command-13 retry can be generated.
+4. Update this handoff and run local tests. Do not execute deletion, transfer,
+   command 13, commands 14-15, `qsub`, or the solver without new approval.
