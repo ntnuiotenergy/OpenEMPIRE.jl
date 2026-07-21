@@ -51,7 +51,7 @@ OOS.
 
 - Working branch: `torgrim/oos-workbench-continuation`
 - Base branch: `torgrim/workbench`
-- At implementation commit `1c08af2`, the continuation branch was sixteen
+- At implementation commit `93127d1`, the continuation branch was twenty-one
   commits ahead of `torgrim/workbench`. Use `git rev-list --left-right --count
   torgrim/workbench...HEAD` for the live count.
 - No `rf/...` branch or commit has been merged or cherry-picked.
@@ -80,6 +80,7 @@ Implementation commits, oldest first:
 | `bc575f5` | Shared Solstorm Julia bootstrap and safe resume-plan generator |
 | `4e4776b` | Second command-13 failure and dependency blocker evidence |
 | `1c08af2` | Shared dependency bootstrap and command-13-only retry planning |
+| `93127d1` | Metadata-safe dataset archives and evidence-bound sidecar quarantine planning |
 
 ## Functional progress
 
@@ -95,7 +96,7 @@ Implementation commits, oldest first:
 | 4e. Staging planner | Render revision-pinned archive, transfer, verification, queue, and SGE commands | Implemented; commands remain inert |
 | 4f. Concrete one-tree plan | Prepare actual `europe_v51` tree, queue, and Solstorm manifest | Prepared locally on 2026-07-21 |
 | 4g. Local archive preflight | Create and inspect only the two local archives | Passed on 2026-07-21 |
-| 4h. Remote staging preflight | Transfer, Julia/dependency setup, and repository-code validation passed; validate remaining inputs and prepare queue/SGE script | Root cause identified: GNU tar created 93 macOS AppleDouble sidecars; portable-archive fix and exact cleanup plan pending |
+| 4h. Remote staging preflight | Transfer, Julia/dependency setup, and repository-code validation passed; validate remaining inputs and prepare queue/SGE script | Root cause identified; future archives are metadata-safe and an exact recoverable quarantine plan is ready but not remotely executed |
 | 4i. One-tree solver run | Submit and monitor one SGE job | Not started; requires approval |
 | 5. Aggregation | Combine validated results across trees | Not implemented |
 | 6. Full-year OOS | Full-year evaluation described in the original plan | Not completed |
@@ -144,6 +145,13 @@ Implementation commits, oldest first:
   - never execute those commands;
   - mark a plan blocked when relevant code is uncommitted or the selected
     revision is not `HEAD`.
+- `src/oos_cleanup.jl`
+  - compares captured local and remote per-file manifests;
+  - prepares one approval-gated command that moves only the exact proven
+    AppleDouble sidecars into a recoverable quarantine directory;
+  - refuses to move anything if the complete remote manifest has drifted;
+  - verifies the clean dataset manifest and expected fingerprint after moving;
+  - never executes SSH, deletes files, submits a job, or starts a solver.
 - `scripts/prepare_oos_solstorm_resume.jl`
   - reads the immutable staging plan and recorded failed preflight;
   - refuses to proceed unless commands 3-12 completed, command 13 alone failed
@@ -319,13 +327,31 @@ These artifacts are ignored by Git and exist only in this workspace.
   `842cccf0b3d95ab6560b9c4e551eb850aefa03f10b5e16e852854edd11e48857`.
 - Updated remote-preflight evidence SHA-256:
   `74b6b34a15bc78f0f67012afc32b24bbea469da6084c0e8cb1735cc9d5634982`.
+- Commit `93127d1` now prevents future macOS-created dataset archives from
+  carrying extended attributes by using `COPYFILE_DISABLE=1` and bsdtar's
+  `--no-xattrs`, `--no-mac-metadata`, and `--no-fflags` options. Non-macOS
+  staging retains the ordinary portable `tar` command.
+- Exact recoverable quarantine plan:
+  `OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/appledouble_quarantine_plan.yaml`
+- Quarantine-plan SHA-256:
+  `aec3d9e977b27402403ae1f9771e09e121f1f7423d404f151301cda1291d9a75`.
+- The plan is locally generated, `ready`, and still a dry run with zero
+  commands executed. It contains one SSH command and 93 exact relative paths.
+  Every target is a captured 163-byte `._*` file with SHA-256
+  `5d7add0d3fe38a560e64f0d4db40f41d255e4b7540a8edac921fae0af566bb30`.
+- The command first requires the complete remote dataset to equal the captured
+  84 intended files plus those 93 sidecars. It then moves the sidecars to
+  `artifacts/appledouble_quarantine_attempt3`, preserving relative paths, and
+  requires the intended 84-file manifest and expected dataset fingerprint.
+  It contains no wildcard, `rm`, transfer, `qsub`, runner, or solver action.
+- The quarantine command has **not** been executed on Solstorm.
 
 Current checkpoint:
 
 ```text
-local archives     transfer/deps     intended files     extra metadata     dataset validation     queue/SGE     solve
-    PASS        ->      PASS      ->      PASS       -> 93 SIDECARS FOUND ->      BLOCKED        -> NOT RUN   -> NOT RUN
- commands 1-2       commands 3-12     84 unchanged       cleanup pending       rerun command 13      14-15       Plan 4i
+local archives     transfer/deps     intended files     recovery plan       dataset validation     queue/SGE     solve
+    PASS        ->      PASS      ->      PASS       -> READY, NOT RUN   ->      BLOCKED        -> NOT RUN   -> NOT RUN
+ commands 1-2       commands 3-12     84 unchanged      quarantine 93         then command 13       14-15       Plan 4i
 ```
 
 ### Regeneration commands
@@ -407,6 +433,12 @@ overwriting evidence from an in-progress or completed experiment.
 - Exact local archive re-extraction and per-file comparison passed for all 84
   files. A one-command read-only remote manifest identified 93 AppleDouble
   sidecars and confirmed that no intended file is missing or changed.
+- Metadata-safe archive and quarantine tests passed: 95 OOS staging assertions
+  and 25 OOS cleanup assertions. The installed macOS bsdtar 3.5.3 also
+  successfully created and listed a small archive using all four safeguards.
+- The concrete quarantine plan was validated locally: 93 exact sidecar
+  targets, one SSH command, recoverable moves, zero executed commands, and no
+  `rm`, wildcard, `qsub`, runner, or solver action.
 
 ## Known gaps and risks
 
@@ -418,7 +450,7 @@ overwriting evidence from an in-progress or completed experiment.
 3. The `rf/...` OOS branches and open PRs have not yet been reconciled against
    this implementation. No historical branch should be discarded without that
    comparison and coordination with its author/reviewer.
-4. `src/oos_staging.jl` is now 819 lines and contains safety/evidence logistics
+4. `src/oos_staging.jl` is now 837 lines and contains safety/evidence logistics
    rather than model mathematics. Review whether to split it before a PR; do
    not mix that refactor into the first representative-run debugging work.
 5. Aggregation and full-year OOS remain unimplemented.
@@ -440,21 +472,24 @@ overwriting evidence from an in-progress or completed experiment.
     overwrite, recreate, or delete it. Both resume plans are consumed and
     evidence-stale; neither is eligible for another run.
 11. GNU tar materialized macOS extended-attribute metadata as 93 `._*`
-    AppleDouble sidecars. The existing OOS staging command does not apply the
-    `COPYFILE_DISABLE` and bsdtar no-metadata safeguards already used by
-    `scripts/copy_and_run_julia_on_hpc.sh`. Fix archive creation rather than
-    weakening directory validation.
+    AppleDouble sidecars in the already-transferred stage. Future OOS archives
+    now use the repository's macOS-safe convention, but the existing stage
+    still needs the exact recoverable quarantine command before validation can
+    resume. Directory validation remains strict.
 
 ## Next recommended task
 
-Implement the narrow archive and recovery fix locally:
+With explicit user approval, execute only the one command in the concrete
+quarantine plan:
 
-1. Reuse the existing macOS-safe `COPYFILE_DISABLE=1`, `--no-xattrs`,
-   `--no-mac-metadata`, and `--no-fflags` archive convention in the OOS staging
-   planner, with focused platform-aware tests.
-2. Generate an evidence-bound cleanup plan listing all 93 exact sidecar paths;
-   do not use a broad wildcard or `find -delete`.
-3. Make the cleanup plan reprint the remote manifest and require the expected
-   dataset fingerprint before another command-13 retry can be generated.
-4. Update this handoff and run local tests. Do not execute deletion, transfer,
-   command 13, commands 14-15, `qsub`, or the solver without new approval.
+1. Reverify the plan SHA-256 and every bound source-evidence SHA-256.
+2. Reverify that it targets the documented isolated stage, contains exactly 93
+   captured sidecar paths, uses recoverable moves, and contains no `rm`,
+   wildcard, `qsub`, runner, solver, or transfer action.
+3. Execute that one SSH command and capture stdout/stderr locally.
+4. Require exit code zero, the expected 84-file dataset fingerprint, and the
+   quarantine marker. Record the evidence and stop.
+
+Do not retry command 13, prepare commands 14-15, submit `qsub`, or start the
+solver in the same task. Those require the next approval after the recovered
+dataset evidence has been reviewed.
