@@ -52,7 +52,7 @@ pending.
 
 - Working branch: `torgrim/oos-workbench-continuation`
 - Base branch: `torgrim/workbench`
-- At implementation commit `d1936ac`, the continuation branch was 31 commits
+- At implementation commit `9c54646`, the continuation branch was 32 commits
   ahead of `torgrim/workbench` and zero behind. Use `git rev-list --left-right
   --count torgrim/workbench...HEAD` for the live count.
 - No `rf/...` branch or commit has been merged or cherry-picked.
@@ -89,6 +89,7 @@ Implementation commits, oldest first:
 | `075281b` | Recorded the single submitted Solstorm job 6420 |
 | `451faee` | Recorded and separated model infeasibility from the runner crash |
 | `d1936ac` | Safe no-solution reporting and deterministic runner tests |
+| `9c54646` | Omit investment-only constraints during fixed-capacity OOS evaluation |
 
 ## Functional progress
 
@@ -107,6 +108,7 @@ Implementation commits, oldest first:
 | 4h. Remote staging preflight | Transfer, dependencies, recovery, all input validations, queue, and SGE preparation | Passed; one pending job and prepared script verified remotely |
 | 4i. One-tree solver run | Submit and monitor one SGE job | Job 6420 finished with process exit 1: model infeasible, followed by an objective-value reporting exception |
 | 4j. No-solution reporting | Preserve solver status and terminal manifest evidence without reading a missing objective | Implemented locally and tested; not rerun on Solstorm |
+| 4k. Infeasibility fix | Match InternalEMPIRE by omitting investment-only constraints after capacities are fixed | Root cause demonstrated and fix locally tested; representative rerun pending |
 | 5. Aggregation | Combine validated results across trees | Not implemented |
 | 6. Full-year OOS | Full-year evaluation described in the original plan | Not completed |
 
@@ -138,7 +140,11 @@ Implementation commits, oldest first:
   - checks termination, primal/dual status, result count, and value availability
     before reading objectives or writing solution tables;
   - records a terminal `failed` manifest and a clear error for infeasible or
-    otherwise no-solution runs, then exits nonzero.
+    otherwise no-solution runs, then exits nonzero;
+  - omits investment lifetime/bound/coupling constraints in OOS after loading
+    fixed capacities, while ordinary investment runs retain them by default;
+  - records whether investment constraints were included in the manifest and
+    summary.
 
 ### Solstorm preparation
 
@@ -507,9 +513,9 @@ Current checkpoint:
 REMOTE RUN: archives -> transfer/deps -> recovery/checks -> queue/SGE -> qsub -> job 6420
                 PASS       PASS              PASS             PASS       ONCE     INFEASIBLE
                                                                                    |
-LOCAL CODE:                                                       safe failure reporting
-                                                                          IMPLEMENTED + TESTED
-NEXT:                                                        local/static infeasibility diagnosis
+LOCAL CODE:                                    safe reporting -> root-cause fix
+                                                   TESTED            TESTED
+NEXT:                                              prepare a fresh immutable one-tree rerun
 ```
 
 ### Regeneration commands
@@ -630,14 +636,40 @@ overwriting evidence from an in-progress or completed experiment.
   OOS 122, all Solstorm workflow suites, validation 16, TimeStruct 17, and
   Solve 3. The Python helper still warns because its temporary fixture lacks
   `Sets/Generator.csv`; that check was already marked broken and skipped.
+- The source investment run summary is `OPTIMAL` and reports the same
+  14,299,315 variables and 20,427,120 constraints as failed job 6420. Its core
+  model files match source commit `3901f61`; no intervening core-model diff was
+  found before the OOS-specific change.
+- A static audit evaluated all 18,875 investment-only rows using job 6420's
+  exact eight fixed-capacity tables and the current `europe_v51` parameters.
+  It found 155 equality residuals above `1e-6`: 120 generator tracking rows
+  (maximum `1.1236142108828062e-4`), 8 storage-energy rows, 5 storage-power
+  rows, and 22 transmission tracking rows. No maximum build/installed-capacity,
+  storage-ratio, or North Sea inequality exceeded `1e-6`.
+- InternalEMPIRE and OpenEMPIRE-csv both represent OOS capacities as parameters
+  and omit all investment-only constraints. Julia previously fixed those
+  capacities as variables but retained the redundant equalities, converting
+  acceptable barrier/no-crossover solution residuals into contradictory fixed
+  rows. Commit `9c54646` now matches the reference behavior while retaining all
+  operational constraints.
+- A tiny deterministic HiGHS reproduction is infeasible with inconsistent
+  capacities fixed under investment constraints and feasible when the OOS
+  constraint mode is used. Focused regression tests passed 73/73.
+- After the infeasibility fix, the full repository suite exited 0: CSV
+  scenarios 164 with one known broken parity check, runner 76, OOS 142, and all
+  remaining suites passed.
 
 ## Known gaps and risks
 
-1. The representative OOS model built and reached Gurobi, but it is infeasible.
-   The cause is not yet localized to a constraint family or input mismatch.
+1. The representative OOS model built and reached Gurobi but was infeasible.
+   The cause is now localized to redundant fixed-capacity investment tracking
+   equalities, and commit `9c54646` removes that constraint class in OOS. A new
+   representative run is still required to verify operational feasibility.
 2. The fixed investment run comes from the older sibling checkout and lacks the
    current `run_manifest.yaml`. Its eight capacity tables loaded and were fixed
-   in the current model, but operational feasibility under tree 101 failed.
+   in the current model. Job 6420 does not establish operational infeasibility
+   under tree 101 because redundant fixed investment equalities already made
+   the full model infeasible.
 3. The `rf/...` OOS branches and open PRs have not yet been reconciled against
    this implementation. No historical branch should be discarded without that
    comparison and coordination with its author/reviewer.
@@ -673,15 +705,15 @@ overwriting evidence from an in-progress or completed experiment.
 
 ## Next recommended task
 
-Diagnose the representative model infeasibility without another full run:
+Prepare a fresh immutable one-tree rerun without submitting it yet:
 
-1. Trace each of the eight fixed-investment tables to its JuMP variable and the
-   investment/installed-capacity constraints that still apply after fixing.
-2. Compare the concrete job-6420 values and configuration against the relevant
-   bounds, cumulative-capacity equations, dimensions, and period conventions.
-3. Reproduce any suspected contradiction with the smallest deterministic local
-   model or validator possible; add code only after the cause is demonstrated.
-4. Record a constraint-family evidence table and either implement the smallest
-   proven fix with tests or state precisely why an IIS/full model is necessary.
-5. Do not alter job 6420 evidence or launch another Solstorm run during this
-   task.
+1. Preserve job 6420 and its stage as historical evidence; never reuse or
+   overwrite their queue, result, log, or submission paths.
+2. Regenerate a new one-tree execution queue and Solstorm staging plan pinned to
+   the current committed revision, because the runner-code fingerprint changed.
+3. Run local archive/input/hash preflight and verify the planned OOS model will
+   omit 18,875 investment-only rows while retaining operational constraints.
+4. Produce exact new remote stage/result paths and approval-gated transfer,
+   setup, submission, and monitoring commands.
+5. Stop before any SSH write, transfer, `qsub`, or solver action. The following
+   approval can execute remote staging and one duplicate-safe submission.
