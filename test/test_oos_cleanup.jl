@@ -107,17 +107,44 @@ function test_prepare_oos_sidecar_quarantine_plan()
             directory_sha256 = remote_sha256,
         )
         stage_root = "/cluster/users/intern/oos/stages/test"
+        project_dir = joinpath(stage_root, "project")
+        commands = [
+            OpenEMPIRE._oos_staging_command(
+                "placeholder",
+                "Synthetic command $index",
+                ["true"],
+            ) for index in 1:15
+        ]
+        commands[13] = OpenEMPIRE._oos_staging_command(
+            "remote_validate",
+            "Verify all staged checksums before preparing a queue",
+            [
+                "ssh",
+                "-o",
+                "BatchMode=yes",
+                "intern@solstorm.iot.ntnu.no",
+                "cd $project_dir\njulia --project=. -e 'using OpenEMPIRE; " *
+                "OpenEMPIRE._oos_code_sha256(ARGS[1]); " *
+                "OpenEMPIRE._oos_directory_sha256(ARGS[2]); " *
+                "OpenEMPIRE._oos_sha256_file(ARGS[3]); " *
+                "OpenEMPIRE._oos_fixed_investment_metadata(ARGS[4])'",
+            ],
+        )
         staging_file = joinpath(root, "staging.yaml")
         staging = Dict{String, Any}(
             "kind" => "oos_solstorm_staging_plan",
-            "source" => Dict("dataset" => Dict("sha256" => expected_sha256)),
+            "source" => Dict(
+                "dataset" => Dict("sha256" => expected_sha256),
+                "repository" => Dict("commit" => repeat("c", 40)),
+            ),
             "remote" => Dict(
                 "user" => "intern",
                 "host" => "solstorm.iot.ntnu.no",
                 "stage_root" => stage_root,
-                "project_dir" => joinpath(stage_root, "project"),
+                "project_dir" => project_dir,
                 "dataset" => joinpath(stage_root, "inputs", "dataset"),
             ),
+            "commands" => commands,
         )
         OpenEMPIRE._write_oos_experiment_manifest(staging_file, staging)
         preflight_file = joinpath(root, "remote_preflight.yaml")
@@ -126,7 +153,21 @@ function test_prepare_oos_sidecar_quarantine_plan()
             "status" => "blocked",
             "staging_plan" => staging_file,
             "remote" => Dict("stage_root" => stage_root),
-            "failure" => Dict("attempt" => 3, "dataset_checksum_passed" => false),
+            "commands" => Dict(
+                "completed" => collect(3:12),
+                "attempted_and_failed" => [13],
+                "not_attempted" => [14, 15],
+            ),
+            "transfer" => Dict(
+                "archive_hashes_match" => true,
+                "archives_extracted" => true,
+            ),
+            "failure" => Dict(
+                "command_index" => 13,
+                "attempt" => 3,
+                "content_checksum_verification_started" => true,
+                "dataset_checksum_passed" => false,
+            ),
             "dataset_diagnostic" => Dict(
                 "status" => "root_cause_identified",
                 "local_manifest_sha256" => OpenEMPIRE._oos_sha256_file(local_manifest),
@@ -174,5 +215,78 @@ function test_prepare_oos_sidecar_quarantine_plan()
         @test !occursin("rm(", command["argv"][5])
         @test !occursin(r"(^|[[:space:]])qsub([[:space:]]|$)", command["display"])
         @test all(occursin(path, command["display"]) for path in keys(sidecars))
+
+        stdout_file = joinpath(root, "quarantine.stdout.log")
+        stdout_lines = [
+            "$path\t$(intended[path][1])\t$(intended[path][2])" for
+            path in sort!(collect(keys(intended)))
+        ]
+        push!(stdout_lines, "__DIRECTORY_SHA256__\t$expected_sha256")
+        push!(
+            stdout_lines,
+            "__QUARANTINE__\t$(cleanup["remote"]["quarantine"])\t2",
+        )
+        write(stdout_file, join(stdout_lines, "\n") * "\n")
+        stderr_file = joinpath(root, "quarantine.stderr.log")
+        write(stderr_file, "")
+        execution_file = joinpath(root, "quarantine_execution.yaml")
+        execution = Dict{String, Any}(
+            "kind" => "oos_solstorm_appledouble_quarantine_execution",
+            "plan" => cleanup_file,
+            "plan_sha256" => OpenEMPIRE._oos_sha256_file(cleanup_file),
+            "success" => true,
+            "exit_code" => 0,
+            "command_count" => 1,
+            "target_count" => 2,
+            "stdout" => stdout_file,
+            "stdout_sha256" => OpenEMPIRE._oos_sha256_file(stdout_file),
+            "stderr" => stderr_file,
+            "stderr_sha256" => OpenEMPIRE._oos_sha256_file(stderr_file),
+            "qsub_executed" => false,
+            "runner_executed" => false,
+            "solver_started" => false,
+            "files_deleted" => false,
+        )
+        OpenEMPIRE._write_oos_experiment_manifest(execution_file, execution)
+        recovered_file = OpenEMPIRE.prepare_oos_solstorm_recovered_validation(
+            staging_file,
+            preflight_file,
+            cleanup_file,
+            execution_file,
+        )
+        recovered = YAML.load_file(recovered_file)
+        @test recovered["kind"] == "oos_solstorm_recovered_validation_plan"
+        @test recovered["status"] == "ready"
+        @test recovered["dry_run"]
+        @test recovered["commands_executed"] == 0
+        @test recovered["source"]["failed_attempt"] == 3
+        @test recovered["source"]["expected_dataset_sha256"] == expected_sha256
+        @test recovered["safety"]["validates_staged_inputs_only"]
+        @test !recovered["safety"]["prepares_execution_queue"]
+        @test !recovered["safety"]["prepares_sge_script"]
+        @test !recovered["safety"]["submits_scheduler_job"]
+        @test !recovered["safety"]["starts_runner"]
+        @test !recovered["safety"]["starts_solver"]
+        @test length(recovered["commands"]) == 1
+        recovered_command = only(recovered["commands"])
+        @test recovered_command["original_command_index"] == 13
+        @test occursin(
+            "OpenEMPIRE Solstorm project dependency bootstrap",
+            recovered_command["display"],
+        )
+        @test occursin("_oos_directory_sha256", recovered_command["display"])
+        @test !occursin("prepare_oos_execution_queue.jl", recovered_command["display"])
+        @test !occursin("prepare_oos_sge_job.jl", recovered_command["display"])
+        @test !occursin(r"(^|[[:space:]])qsub([[:space:]]|$)",
+                        recovered_command["display"])
+
+        write(stdout_file, read(stdout_file, String) * "unexpected\n")
+        @test_throws ArgumentError OpenEMPIRE.prepare_oos_solstorm_recovered_validation(
+            staging_file,
+            preflight_file,
+            cleanup_file,
+            execution_file;
+            output_file = joinpath(root, "unsafe_recovered_validation.yaml"),
+        )
     end
 end
