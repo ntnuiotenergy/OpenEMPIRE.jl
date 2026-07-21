@@ -535,6 +535,7 @@ function test_create_model_with_raw_csv_scenarios()
         emp, periods, sets, params = OpenEMPIRE.create_model(
             joinpath(pkgdir(OpenEMPIRE), "data", "test_excel", "testrun.yaml"),
             dataset;
+            include_investment_constraints = false,
             input_format = :csv,
             scenario_rng = MersenneTwister(1),
         )
@@ -544,6 +545,11 @@ function test_create_model_with_raw_csv_scenarios()
         @test length(params.sload) == 3
         @test haskey(params.genCapAvail, ("Germany", "Solar"))
         @test isfile(joinpath(dataset, "ScenarioData", "sloadRaw.csv"))
+        @test haskey(JuMP.object_dictionary(emp), :flow_balance)
+        @test haskey(JuMP.object_dictionary(emp), :gen_max_prod)
+        @test !haskey(JuMP.object_dictionary(emp), :installed_cap_gen)
+        @test !haskey(JuMP.object_dictionary(emp), :storage_installed_cap_en)
+        @test !haskey(JuMP.object_dictionary(emp), :trans_track_cap)
     end
 end
 
@@ -766,6 +772,19 @@ function test_north_sea_transmission_cap_is_config_gated()
         @test JuMP.normalized_coefficient(constraint, cap) == 1.0
         @test JuMP.normalized_coefficient(constraint, gen) == -1.0
     end
+
+    emp_oos = JuMP.Model()
+    OpenEMPIRE.create_variables(emp_oos, sets, periods)
+    OpenEMPIRE.create_transmission_constraints(
+        emp_oos,
+        sets,
+        params,
+        periods;
+        north_sea = true,
+        include_investment_constraints = false,
+    )
+    @test _sparse_axis_length(emp_oos[:trans_cap]) == 4
+    @test !haskey(JuMP.object_dictionary(emp_oos), :wind_farm_transmission_cap)
 end
 
 function test_emission_constraints_match_python_formulation()

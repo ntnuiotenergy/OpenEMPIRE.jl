@@ -534,6 +534,72 @@ function test_fix_investments_from_results()
     end
 end
 
+function test_oos_omits_investment_only_constraints()
+    sets, periods = _oos_test_sets_and_periods()
+    params = OpenEMPIRE.EmpireParams(genCapAvailType = Dict("Solar" => 1.0))
+
+    mktempdir() do result_dir
+        _write_investment_csvs(joinpath(result_dir, "output"))
+
+        investment_model = JuMP.Model(HiGHS.Optimizer)
+        JuMP.set_silent(investment_model)
+        OpenEMPIRE.create_variables(investment_model, sets, periods)
+        OpenEMPIRE.create_constraints(investment_model, sets, params, periods)
+        OpenEMPIRE.fix_investments_from_results!(
+            investment_model,
+            sets,
+            periods,
+            result_dir,
+        )
+        @objective(investment_model, Min, 0)
+        optimize!(investment_model)
+        @test JuMP.termination_status(investment_model) == JuMP.MOI.INFEASIBLE
+
+        oos_model = JuMP.Model(HiGHS.Optimizer)
+        JuMP.set_silent(oos_model)
+        OpenEMPIRE.create_variables(oos_model, sets, periods)
+        OpenEMPIRE.create_constraints(
+            oos_model,
+            sets,
+            params,
+            periods;
+            include_investment_constraints = false,
+        )
+        OpenEMPIRE.fix_investments_from_results!(oos_model, sets, periods, result_dir)
+        @objective(oos_model, Min, 0)
+        optimize!(oos_model)
+
+        @test JuMP.is_solved_and_feasible(oos_model)
+        object_names = JuMP.object_dictionary(oos_model)
+        for operational_family in (
+            :flow_balance,
+            :gen_max_prod,
+            :storage_bal,
+            :trans_cap,
+        )
+            @test haskey(object_names, operational_family)
+        end
+        for investment_family in (
+            :installed_cap_gen,
+            :max_inv_tech,
+            :max_inst_tech,
+            :storage_installed_cap_en,
+            :storage_installed_cap_pow,
+            :storage_max_inv_pow,
+            :storage_max_inv_en,
+            :storage_max_inst_pow,
+            :storage_max_inst_en,
+            :storage_couple_pow_en,
+            :trans_track_cap,
+            :trans_max_capacity,
+            :trans_installed_cap,
+            :wind_farm_transmission_cap,
+        )
+            @test !haskey(object_names, investment_family)
+        end
+    end
+end
+
 function test_fix_only_investment_capacities()
     sets, periods = _oos_test_sets_and_periods()
     strategic_period = first(strat_periods(periods))
