@@ -43,17 +43,18 @@ investment run
     -> aggregate cost, reliability, emissions, and other metrics
 ```
 
-The current code reaches the preparation stage for a real one-tree run. It has
-not yet completed a representative OOS solver run, aggregation, or full-year
-OOS.
+The current code prepared and submitted one representative one-tree OOS run.
+The complete model reached Gurobi but was infeasible, so no representative OOS
+run has completed successfully. Aggregation and full-year OOS are also still
+pending.
 
 ## Branch and provenance
 
 - Working branch: `torgrim/oos-workbench-continuation`
 - Base branch: `torgrim/workbench`
-- At implementation commit `93127d1`, the continuation branch was twenty-one
-  commits ahead of `torgrim/workbench`. Use `git rev-list --left-right --count
-  torgrim/workbench...HEAD` for the live count.
+- At implementation commit `d1936ac`, the continuation branch was 31 commits
+  ahead of `torgrim/workbench` and zero behind. Use `git rev-list --left-right
+  --count torgrim/workbench...HEAD` for the live count.
 - No `rf/...` branch or commit has been merged or cherry-picked.
 - The `rf/...` branches and existing PRs remain reference implementations that
   must be reconciled before opening replacement OOS PRs.
@@ -84,6 +85,10 @@ Implementation commits, oldest first:
 | `7ef34e3` | Recovered-dataset validation bound to exact quarantine evidence |
 | `2ab5871` | Remote queue/SGE setup gated on successful input validation |
 | `8cfcd24` | Duplicate-safe, evidence-bound single-job submission planning |
+| `095a84c` | Prepared concrete remote queue and SGE job evidence |
+| `075281b` | Recorded the single submitted Solstorm job 6420 |
+| `451faee` | Recorded and separated model infeasibility from the runner crash |
+| `d1936ac` | Safe no-solution reporting and deterministic runner tests |
 
 ## Functional progress
 
@@ -101,6 +106,7 @@ Implementation commits, oldest first:
 | 4g. Local archive preflight | Create and inspect only the two local archives | Passed on 2026-07-21 |
 | 4h. Remote staging preflight | Transfer, dependencies, recovery, all input validations, queue, and SGE preparation | Passed; one pending job and prepared script verified remotely |
 | 4i. One-tree solver run | Submit and monitor one SGE job | Job 6420 finished with process exit 1: model infeasible, followed by an objective-value reporting exception |
+| 4j. No-solution reporting | Preserve solver status and terminal manifest evidence without reading a missing objective | Implemented locally and tested; not rerun on Solstorm |
 | 5. Aggregation | Combine validated results across trees | Not implemented |
 | 6. Full-year OOS | Full-year evaluation described in the original plan | Not completed |
 
@@ -128,7 +134,11 @@ Implementation commits, oldest first:
     files into an immutable run directory;
   - rewrites the staged OOS config to `use_fixed_sample: false`;
   - fixes investment variables before solving;
-  - records OOS provenance and acceptance evidence in `run_manifest.yaml`.
+  - records OOS provenance and acceptance evidence in `run_manifest.yaml`;
+  - checks termination, primal/dual status, result count, and value availability
+    before reading objectives or writing solution tables;
+  - records a terminal `failed` manifest and a clear error for infeasible or
+    otherwise no-solution runs, then exits nonzero.
 
 ### Solstorm preparation
 
@@ -447,9 +457,9 @@ These artifacts are ignored by Git and exist only in this workspace.
 - That state was persisted through the existing SGE queue adapter. Record
   evidence: `qstat_6420_record.yaml`, SHA-256
   `85736920165e481192d9f349917d289996b8498323c6f69f0eae336a281c6156`.
-- Current recorded remote queue SHA-256:
+- Initial running-state remote queue SHA-256:
   `978dd3b28ab4ad6809170ff62a81435167ab6f6417511c47acf3d7507bd9a357`.
-  Queue/job status is `running`; scheduler ID is `6420`.
+  At that observation, queue/job status was `running`; scheduler ID was `6420`.
 - Scheduler logs are expected at
   `/home/torgrif/OpenEMPIRE.jl/stages/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/inputs/experiment/sge/logs/oos_tree1_6420.out`
   and the corresponding `.err` path.
@@ -494,9 +504,12 @@ These artifacts are ignored by Git and exist only in this workspace.
 Current checkpoint:
 
 ```text
-local archives     transfer/deps     recovery/checks     queue/SGE setup     qsub       job 6420
-    PASS        ->      PASS      ->       PASS       ->      PASS       -> PASS   -> FAILED
- commands 1-2       commands 3-12     quarantine + 13     commands 14-15    once     INFEASIBLE
+REMOTE RUN: archives -> transfer/deps -> recovery/checks -> queue/SGE -> qsub -> job 6420
+                PASS       PASS              PASS             PASS       ONCE     INFEASIBLE
+                                                                                   |
+LOCAL CODE:                                                       safe failure reporting
+                                                                          IMPLEMENTED + TESTED
+NEXT:                                                        local/static infeasibility diagnosis
 ```
 
 ### Regeneration commands
@@ -609,6 +622,14 @@ overwriting evidence from an in-progress or completed experiment.
   inventory, and the run manifest read-only. Scheduler infrastructure passed,
   while the process exited 1 after Gurobi proved the model infeasible and the
   runner attempted to read a nonexistent objective value.
+- No-solution handling tests passed with a tiny infeasible HiGHS model and an
+  optimal control case. They verify that objectives/components are not read
+  without values and that terminal failure evidence is YAML-serializable.
+- After the reporting fix, the full repository suite exited 0: Excel 66, CSV
+  63, CSV scenarios 157 with one known broken Python parity check, runner 76,
+  OOS 122, all Solstorm workflow suites, validation 16, TimeStruct 17, and
+  Solve 3. The Python helper still warns because its temporary fixture lacks
+  `Sets/Generator.csv`; that check was already marked broken and skipped.
 
 ## Known gaps and risks
 
@@ -646,24 +667,21 @@ overwriting evidence from an in-progress or completed experiment.
     now use the repository's macOS-safe convention. The existing stage has
     been recovered without deletion and its intended dataset fingerprint is
     verified. Directory validation remains strict.
-12. `_solve_model!` reads the objective before checking
-    `JuMP.is_solved_and_feasible`. Any infeasible/no-solution result therefore
-    escapes as an objective-index exception and leaves the manifest `started`,
-    obscuring the real termination status and preventing clean reconciliation.
+12. Job 6420's historical manifest remains `started` because it ran the old
+    pinned runner. Commit `d1936ac` fixes this behavior for future runs, but the
+    preserved remote evidence must not be edited to simulate a rerun.
 
 ## Next recommended task
 
-Fix no-solution handling locally before diagnosing or rerunning infeasibility:
+Diagnose the representative model infeasibility without another full run:
 
-1. Add a small result-extraction helper that reads termination/primal status and
-   only accesses objective/objective components when a result exists.
-2. Make the runner persist terminal failure evidence—including `INFEASIBLE`, no
-   objective, timings, and a clear status/error—without an objective-index
-   exception or false `complete` state.
-3. Add deterministic unit tests using a tiny infeasible JuMP model plus an
-   optimal control case. Verify manifest-safe serializable output and no
-   solution-table write on infeasibility.
-4. Do not modify or rerun remote job `6420`. Use its preserved evidence only.
-5. After the reporting fix, plan a separate targeted infeasibility diagnosis.
-   Prefer a small/local reproduction or constraint-family checks before another
-   full Solstorm run; use an IIS only if the cheaper checks are insufficient.
+1. Trace each of the eight fixed-investment tables to its JuMP variable and the
+   investment/installed-capacity constraints that still apply after fixing.
+2. Compare the concrete job-6420 values and configuration against the relevant
+   bounds, cumulative-capacity equations, dimensions, and period conventions.
+3. Reproduce any suspected contradiction with the smallest deterministic local
+   model or validator possible; add code only after the cause is demonstrated.
+4. Record a constraint-family evidence table and either implement the smallest
+   proven fix with tests or state precisely why an IIS/full model is necessary.
+5. Do not alter job 6420 evidence or launch another Solstorm run during this
+   task.
