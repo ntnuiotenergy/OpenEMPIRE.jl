@@ -83,6 +83,7 @@ Implementation commits, oldest first:
 | `93127d1` | Metadata-safe dataset archives and evidence-bound sidecar quarantine planning |
 | `7ef34e3` | Recovered-dataset validation bound to exact quarantine evidence |
 | `2ab5871` | Remote queue/SGE setup gated on successful input validation |
+| `8cfcd24` | Duplicate-safe, evidence-bound single-job submission planning |
 
 ## Functional progress
 
@@ -99,7 +100,7 @@ Implementation commits, oldest first:
 | 4f. Concrete one-tree plan | Prepare actual `europe_v51` tree, queue, and Solstorm manifest | Prepared locally on 2026-07-21 |
 | 4g. Local archive preflight | Create and inspect only the two local archives | Passed on 2026-07-21 |
 | 4h. Remote staging preflight | Transfer, dependencies, recovery, all input validations, queue, and SGE preparation | Passed; one pending job and prepared script verified remotely |
-| 4i. One-tree solver run | Submit and monitor one SGE job | Ready for `qsub`; not submitted and requires approval |
+| 4i. One-tree solver run | Submit and monitor one SGE job | Job 6420 submitted once and initially observed running on compute-4-56 |
 | 5. Aggregation | Combine validated results across trees | Not implemented |
 | 6. Full-year OOS | Full-year evaluation described in the original plan | Not completed |
 
@@ -161,6 +162,11 @@ Implementation commits, oldest first:
   - reproduces only original commands 14-15 with the proven bootstrap;
   - prepares the one-tree queue and SGE script idempotently;
   - rejects transfer, `qsub`, runner, and solver actions and never executes SSH.
+- `src/oos_submission.jl`
+  - requires successful setup execution and read-only artifact inspection;
+  - atomically rechecks exact queue/script hashes and pending/no-ID state;
+  - reserves remote qsub evidence with shell noclobber before one submission;
+  - prevents automatic resubmission when any state or evidence path exists.
 - `scripts/prepare_oos_solstorm_resume.jl`
   - reads the immutable staging plan and recorded failed preflight;
   - refuses to proceed unless commands 3-12 completed, command 13 alone failed
@@ -416,14 +422,46 @@ These artifacts are ignored by Git and exist only in this workspace.
   It targets `compute-4-51|compute-4-52|compute-4-53|compute-4-55|compute-4-56`,
   loads the Gurobi module, revalidates the queue before running, and contains
   the expected OOS runner command. The script itself does not invoke `qsub`.
-- `qsub`, the runner, and the solver remain unexecuted.
+- Submission-planner implementation commit: `8cfcd24`.
+- Duplicate-safe submission plan:
+  `OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/submission_attempt1.yaml`
+  with SHA-256
+  `367a39f6b27b672e00384c6268bcbb478c1f085da6cb94abe63be0794a7d980d`.
+- The plan rechecked the exact prepared queue and SGE script hashes, required a
+  pending job without an ID, reserved attempt-1 stdout/stderr under the remote
+  stage with noclobber, and contained exactly one `qsub` invocation.
+- With explicit approval, Solstorm accepted exactly one submission:
+  `Your job 6420 ("empire_oos_1") has been submitted`. Local stderr and the
+  remotely preserved qsub stderr are empty.
+- Submission execution evidence:
+  `submission_attempt1_execution.yaml`, SHA-256
+  `a225d233e62efb9bf1aace725848d05def034ed41ee4196b72ca7f3c5966156b`.
+- Job ID `6420` was parsed with the repository SGE adapter and persisted into
+  the remote queue. Submission-record evidence: `submission_record.yaml`,
+  SHA-256
+  `7a0748086b70be02393e03a17c0d5b6c3b52af0e3388cf3fab399b4ee8f4bca9`.
+- Initial read-only `qstat` found raw state `r` (`running`) on
+  `all.q@compute-4-56.local`. Observation evidence: `qstat_6420_initial.yaml`,
+  SHA-256
+  `289f9a4d9f31e89d20fb50e371136ef1555e18799496fa9eaa525a07b3a28752`.
+- That state was persisted through the existing SGE queue adapter. Record
+  evidence: `qstat_6420_record.yaml`, SHA-256
+  `85736920165e481192d9f349917d289996b8498323c6f69f0eae336a281c6156`.
+- Current recorded remote queue SHA-256:
+  `978dd3b28ab4ad6809170ff62a81435167ab6f6417511c47acf3d7507bd9a357`.
+  Queue/job status is `running`; scheduler ID is `6420`.
+- Scheduler logs are expected at
+  `/home/torgrif/OpenEMPIRE.jl/stages/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/inputs/experiment/sge/logs/oos_tree1_6420.out`
+  and the corresponding `.err` path.
+- No second `qsub` was executed. The model was not started directly by the
+  agent; the submitted SGE script now controls job startup and solving.
 
 Current checkpoint:
 
 ```text
-local archives     transfer/deps     recovery/checks     queue/SGE setup     qsub      solve
-    PASS        ->      PASS      ->       PASS       ->      PASS       -> READY  -> NOT RUN
- commands 1-2       commands 3-12     quarantine + 13     commands 14-15    Plan 4i   hours
+local archives     transfer/deps     recovery/checks     queue/SGE setup     qsub       job 6420
+    PASS        ->      PASS      ->       PASS       ->      PASS       -> PASS   -> RUNNING
+ commands 1-2       commands 3-12     quarantine + 13     commands 14-15    once      compute-4-56
 ```
 
 ### Regeneration commands
@@ -526,6 +564,12 @@ overwriting evidence from an in-progress or completed experiment.
   inspection reran the repository's queue-input validator and verified one
   pending job, the expected hashes, SGE resources and script content, and the
   absence of submission/job-ID state.
+- Submission-focused tests passed with the existing suites: 95 staging, 45
+  cleanup/recovery, 25 setup, and 26 submission assertions (191 total).
+- The concrete submission plan passed source-hash, exact queue/script,
+  pending/no-ID, one-qsub, noclobber, and no-direct-runner/solver checks.
+  Scheduler output produced job ID `6420`; the submission and initial running
+  state were recorded without any additional qsub invocation.
 
 ## Known gaps and risks
 
@@ -555,35 +599,33 @@ overwriting evidence from an in-progress or completed experiment.
    existing HPC deployment convention. The revised command 13 now performs the
    established import-check/`Pkg.instantiate()` setup. Dependency resolution
    may take several minutes and can require package-network access on Solstorm.
-10. A validated but still incomplete isolated stage exists at the documented
-    remote path. Do not overwrite, recreate, or delete it. All earlier resume
-    and validation plans are consumed/evidenced and must not be rerun.
+10. An active isolated stage and running scheduler job exist at the documented
+    remote path. Do not overwrite, recreate, delete, or resubmit them. All
+    earlier plans are consumed/evidenced and must not be rerun.
 11. GNU tar materialized macOS extended-attribute metadata as 93 `._*`
     AppleDouble sidecars in the already-transferred stage. Future OOS archives
     now use the repository's macOS-safe convention. The existing stage has
     been recovered without deletion and its intended dataset fingerprint is
     verified. Directory validation remains strict.
-12. The prepared job has not yet proven Gurobi module/license availability on
-    its eventual compute host or model compatibility through an actual build.
-    The SGE script checks imports and queue inputs before starting the runner,
-    but those runtime risks remain until the first submitted job starts.
+12. Scheduler state `running` alone does not prove that Gurobi module/license
+    setup, model construction, or solving succeeded. Inspect the scheduler
+    logs and final run manifest before treating the representative run as
+    successful.
 
 ## Next recommended task
 
-Submit and begin monitoring the single prepared OOS job:
+Monitor job `6420` without resubmitting:
 
-1. Reverify the setup plan/execution, corrected artifact-inspection evidence,
-   current remote queue hash, SGE script hash, pending status, and no job ID.
-2. Build an evidence-bound submission plan containing exactly the recorded
-   `qsub` command for the verified script. Require explicit approval and guard
-   against any changed queue/script or existing submission state.
-3. Execute `qsub` once, capture its raw output, parse the numeric job ID with
-   the existing SGE adapter, and immediately persist that submission evidence
-   into the remote queue.
-4. Run one read-only `qstat` check, capture scheduler state/log locations, and
-   update the local handoff so another session can resume monitoring.
-5. Do not wait for completion in the submission turn. Do not resubmit if the
-   scheduler state is queued/running or temporarily unavailable.
+1. Reverify the recorded job ID, submission evidence, current queue record, and
+   expected log paths.
+2. Run one read-only `qstat` observation and capture short stdout/stderr log
+   metadata/tails if the files exist; never alter or truncate logs.
+3. If queued/running, persist the observed state and stop. Do not submit again.
+4. If absent from `qstat`, capture `qacct -j 6420`, persist accounting through
+   the existing SGE adapter, and inspect the run directory/manifest read-only.
+5. Only reconcile the OOS queue as complete if scheduler accounting succeeded
+   and the EMPIRE run manifest satisfies every acceptance criterion. Otherwise
+   record the exact failure/blocker for the next debugging task.
 
-While the job runs, proceed only with independent code/documentation work or
-explicit monitoring prompts. Result reconciliation starts after SGE completion.
+While the job runs, independent work may continue, but no changes to its pinned
+remote project, inputs, queue, script, result directory, or logs are allowed.
