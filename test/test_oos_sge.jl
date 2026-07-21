@@ -44,6 +44,59 @@ maxvmem      140.000G
     )
 end
 
+function test_oos_solstorm_project_bootstrap()
+    mktempdir() do root
+        fake_julia = joinpath(root, "fake-julia")
+        ready_file = joinpath(root, "ready")
+        log_file = joinpath(root, "calls.log")
+        write(fake_julia, """#!/bin/bash
+echo \"\$*\" >> \"\$FAKE_JULIA_LOG\"
+if [[ \"\$*\" == *\"using Pkg; Pkg.instantiate(); Pkg.precompile()\"* ]]; then
+    [[ \"\${FAKE_INSTANTIATE_FAIL:-0}\" == \"1\" ]] && exit 9
+    touch \"\$FAKE_JULIA_READY\"
+    exit 0
+fi
+[[ -f \"\$FAKE_JULIA_READY\" ]]
+""")
+        chmod(fake_julia, 0o755)
+        shell = OpenEMPIRE._oos_solstorm_project_bootstrap(
+            root,
+            fake_julia;
+            solver = "Gurobi",
+        )
+        @test occursin("OpenEMPIRE Solstorm project dependency bootstrap", shell)
+        @test occursin("import Gurobi", shell)
+
+        environment = Dict(
+            "FAKE_JULIA_LOG" => log_file,
+            "FAKE_JULIA_READY" => ready_file,
+        )
+        process = run(ignorestatus(setenv(`bash -c $shell`, environment)))
+        @test success(process)
+        calls = readlines(log_file)
+        @test length(calls) == 3
+        @test occursin("import OpenEMPIRE", calls[1])
+        @test occursin("Pkg.instantiate()", calls[2])
+        @test occursin("import OpenEMPIRE", calls[3])
+
+        write(log_file, "")
+        process = run(ignorestatus(setenv(`bash -c $shell`, environment)))
+        @test success(process)
+        calls = readlines(log_file)
+        @test length(calls) == 2
+        @test all(!occursin("Pkg.instantiate()", call) for call in calls)
+
+        rm(ready_file)
+        write(log_file, "")
+        failing_environment = merge(environment, Dict("FAKE_INSTANTIATE_FAIL" => "1"))
+        process = run(ignorestatus(setenv(`bash -c $shell`, failing_environment)))
+        @test !success(process)
+        calls = readlines(log_file)
+        @test length(calls) == 2
+        @test occursin("Pkg.instantiate()", calls[2])
+    end
+end
+
 function test_prepare_and_record_oos_sge_job()
     mktempdir() do root
         source_data = joinpath(root, "source")
@@ -87,6 +140,9 @@ function test_prepare_and_record_oos_sge_job()
         @test occursin("source /etc/profile", script)
         @test occursin("module load Julia/1.9.3", script)
         @test occursin("command -v julia", script)
+        @test occursin("OpenEMPIRE Solstorm project dependency bootstrap", script)
+        @test occursin("Pkg.instantiate()", script)
+        @test occursin("Pkg.precompile()", script)
         @test occursin("_validate_oos_execution_queue_inputs", script)
         @test occursin("--out-of-sample=true", script)
         @test occursin("--scenario-data-root=$(joinpath(experiment_dir, "oos_tree1"))", script)

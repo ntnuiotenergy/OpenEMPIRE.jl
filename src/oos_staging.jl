@@ -70,7 +70,11 @@ function _oos_remote_shell_command(
     julia_command::AbstractString,
 )
     command = _oos_command_display(working_directory, String.(arguments))
-    return _oos_solstorm_julia_bootstrap(julia_command) * "\n" * command
+    return join((
+        _oos_solstorm_julia_bootstrap(julia_command),
+        _oos_solstorm_project_bootstrap(working_directory, julia_command),
+        command,
+    ), "\n")
 end
 
 function _oos_staging_file_metadata(path::AbstractString; relative_to = dirname(path))
@@ -635,7 +639,12 @@ OpenEMPIRE._oos_fixed_investment_metadata(ARGS[11])["sha256"] == ARGS[12] ||
     return plan_file
 end
 
-function _oos_resume_command(original, command_index::Integer, julia_command::AbstractString)
+function _oos_resume_command(
+    original,
+    command_index::Integer,
+    project_dir::AbstractString,
+    julia_command::AbstractString,
+)
     get(original, "executed", false) && throw(ArgumentError(
         "Cannot resume a staging command recorded as executed: $command_index",
     ))
@@ -645,8 +654,17 @@ function _oos_resume_command(original, command_index::Integer, julia_command::Ab
             "Resume command $command_index is not a supported non-interactive SSH command",
         ),
     )
-    if !occursin(_OOS_SOLSTORM_JULIA_BOOTSTRAP_MARKER, argv[5])
-        argv[5] = _oos_solstorm_julia_bootstrap(julia_command) * "\n" * argv[5]
+    has_julia_bootstrap = occursin(_OOS_SOLSTORM_JULIA_BOOTSTRAP_MARKER, argv[5])
+    has_project_bootstrap = occursin(_OOS_SOLSTORM_PROJECT_BOOTSTRAP_MARKER, argv[5])
+    has_julia_bootstrap == has_project_bootstrap || throw(ArgumentError(
+        "Resume command $command_index has an incomplete Solstorm bootstrap",
+    ))
+    if !has_julia_bootstrap
+        argv[5] = join((
+            _oos_solstorm_julia_bootstrap(julia_command),
+            _oos_solstorm_project_bootstrap(project_dir, julia_command),
+            argv[5],
+        ), "\n")
     end
     occursin(r"(^|[[:space:]])qsub([[:space:]]|$)", argv[5]) && throw(ArgumentError(
         "Resume command $command_index unexpectedly contains qsub",
@@ -668,12 +686,12 @@ end
         julia_command = "julia",
     )
 
-Create a dry-run plan that resumes a partially completed Solstorm stage at
-commands 13 through 15. The evidence must show commands 3 through 12 complete,
-command 13 failed before checksum validation, and commands 14 and 15 were not
-attempted. The generated commands add the shared Solstorm Julia bootstrap and
-cannot transfer files, recreate the stage, submit with `qsub`, or start a
-solver. No remote command is executed.
+Create a dry-run plan that retries only failed Solstorm staging command 13.
+The evidence must show commands 3 through 12 complete, command 13 failed before
+checksum validation, and commands 14 and 15 were not attempted. The generated
+command adds the shared Julia and project-dependency bootstraps and cannot
+transfer files, recreate the stage, submit with `qsub`, or start a solver. No
+remote command is executed.
 """
 function prepare_oos_solstorm_resume(
     staging_plan_file::AbstractString,
@@ -744,13 +762,16 @@ function prepare_oos_solstorm_resume(
     length(commands) >= 15 || throw(ArgumentError(
         "Staging plan does not contain commands 13 through 15",
     ))
-    [commands[index]["phase"] for index in 13:15] == [
-        "remote_validate",
-        "remote_configure",
-        "remote_configure",
-    ] || throw(ArgumentError("Staging commands 13 through 15 have unexpected phases"))
+    commands[13]["phase"] == "remote_validate" || throw(ArgumentError(
+        "Staging command 13 is not remote validation",
+    ))
     resume_commands = [
-        _oos_resume_command(commands[index], index, julia_command) for index in 13:15
+        _oos_resume_command(
+            commands[13],
+            13,
+            plan["remote"]["project_dir"],
+            julia_command,
+        ),
     ]
     all(command["argv"][1] == "ssh" for command in resume_commands) || throw(
         ArgumentError("Resume plan contains a non-SSH command"),
@@ -775,10 +796,13 @@ function prepare_oos_solstorm_resume(
             "remote_preflight_sha256" => _oos_sha256_file(target_preflight),
             "pinned_repository_commit" => plan["source"]["repository"]["commit"],
             "failed_command_index" => 13,
+            "failed_attempt" => get(failure, "attempt", 1),
         ),
         "remote" => deepcopy(plan["remote"]),
         "safety" => Dict{String, Any}(
             "starts_at_original_command" => 13,
+            "ends_at_original_command" => 13,
+            "retries_only_failed_command" => true,
             "recreates_remote_stage" => false,
             "retransfers_files" => false,
             "submits_scheduler_job" => false,

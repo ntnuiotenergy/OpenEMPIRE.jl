@@ -130,6 +130,14 @@ function test_prepare_oos_solstorm_staging()
                   for command in remote_julia_commands)
         @test all(occursin("command -v julia", command["display"])
                   for command in remote_julia_commands)
+        @test all(occursin(
+                      "OpenEMPIRE Solstorm project dependency bootstrap",
+                      command["display"],
+                  ) for command in remote_julia_commands)
+        @test all(occursin("Pkg.instantiate()", command["display"])
+                  for command in remote_julia_commands)
+        @test all(occursin("Pkg.precompile()", command["display"])
+                  for command in remote_julia_commands)
         @test all(!occursin(r"(^|[[:space:]])qsub([[:space:]]|$)", command["display"])
                   for command in commands)
         @test !isfile(plan["generated_files"]["repository_archive"]["path"])
@@ -185,16 +193,19 @@ function test_prepare_oos_solstorm_staging()
         @test resume["commands_executed"] == 0
         @test resume["requires_explicit_remote_approval"]
         @test resume["source"]["failed_command_index"] == 13
+        @test resume["source"]["failed_attempt"] == 1
         @test resume["remote"]["stage_root"] == plan["remote"]["stage_root"]
         @test resume["safety"] == Dict(
             "starts_at_original_command" => 13,
+            "ends_at_original_command" => 13,
+            "retries_only_failed_command" => true,
             "recreates_remote_stage" => false,
             "retransfers_files" => false,
             "submits_scheduler_job" => false,
             "starts_solver" => false,
         )
         @test [command["original_command_index"] for command in resume["commands"]] ==
-              [13, 14, 15]
+              [13]
         @test all(command["argv"][1:4] == [
                       "ssh",
                       "-o",
@@ -204,6 +215,20 @@ function test_prepare_oos_solstorm_staging()
         @test all(occursin("OpenEMPIRE Solstorm Julia bootstrap", command["display"])
                   for command in resume["commands"])
         @test all(occursin("module load Julia/1.9.3", command["display"])
+                  for command in resume["commands"])
+        @test all(occursin(
+                      "OpenEMPIRE Solstorm project dependency bootstrap",
+                      command["display"],
+                  ) for command in resume["commands"])
+        @test all(occursin("Pkg.instantiate()", command["display"])
+                  for command in resume["commands"])
+        @test all(occursin("Pkg.precompile()", command["display"])
+                  for command in resume["commands"])
+        @test all(occursin("_oos_code_sha256", command["display"])
+                  for command in resume["commands"])
+        @test all(!occursin("prepare_oos_execution_queue.jl", command["display"])
+                  for command in resume["commands"])
+        @test all(!occursin("prepare_oos_sge_job.jl", command["display"])
                   for command in resume["commands"])
         @test all(!occursin("scp ", command["display"]) for command in resume["commands"])
         @test all(!occursin(r"(^|[[:space:]])qsub([[:space:]]|$)", command["display"])

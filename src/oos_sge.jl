@@ -1,6 +1,8 @@
 const _OOS_SOLSTORM_SGE_HOSTS =
     "compute-4-51|compute-4-52|compute-4-53|compute-4-55|compute-4-56"
 const _OOS_SOLSTORM_JULIA_BOOTSTRAP_MARKER = "# OpenEMPIRE Solstorm Julia bootstrap"
+const _OOS_SOLSTORM_PROJECT_BOOTSTRAP_MARKER =
+    "# OpenEMPIRE Solstorm project dependency bootstrap"
 const _OOS_SOLSTORM_JULIA_MODULE_FALLBACK =
     "module load Julia/1.9.3 2>/dev/null || " *
     "module load julia/1.9.3 2>/dev/null || " *
@@ -33,10 +35,49 @@ if ! command -v $executable >/dev/null 2>&1; then
 fi"""
 end
 
+function _oos_solstorm_project_bootstrap(
+    project_dir::AbstractString,
+    julia_command::AbstractString;
+    solver = nothing,
+)
+    solver_import = solver == "Gurobi" ? "; import Gurobi" : ""
+    import_code = "import OpenEMPIRE; import JuMP; import HiGHS$solver_import"
+    check_command = join((
+        _oos_shell_quote(julia_command),
+        "--project=$(_oos_shell_quote(project_dir))",
+        "-e",
+        _oos_shell_quote(import_code),
+    ), " ")
+    instantiate_code = "using Pkg; Pkg.instantiate(); Pkg.precompile()"
+    instantiate_command = join((
+        _oos_shell_quote(julia_command),
+        "--project=$(_oos_shell_quote(project_dir))",
+        "-e",
+        _oos_shell_quote(instantiate_code),
+    ), " ")
+    setup_error = _oos_shell_quote(
+        "ERROR: Julia project dependency setup failed: $project_dir",
+    )
+    import_error = _oos_shell_quote(
+        "ERROR: Julia project dependencies remain unavailable: $project_dir",
+    )
+    return """$_OOS_SOLSTORM_PROJECT_BOOTSTRAP_MARKER
+if ! $check_command >/dev/null 2>&1; then
+    echo "Julia project dependencies are not ready; instantiating and precompiling..."
+    if ! $instantiate_command; then
+        echo $setup_error >&2
+        exit 1
+    fi
+fi
+if ! $check_command >/dev/null 2>&1; then
+    echo $import_error >&2
+    exit 1
+fi"""
+end
+
 function _oos_sge_script_content(queue, job, plan)
     project_dir = queue["runner"]["project_dir"]
     julia_command = queue["runner"]["julia_command"]
-    solver_import = queue["solver"] == "Gurobi" ? "; import Gurobi" : ""
     command = join(
         (_oos_shell_quote(string(argument)) for argument in job["command"]),
         " ",
@@ -56,10 +97,7 @@ cd $(_oos_shell_quote(project_dir))
 
 module load gurobi/13.0 2>/dev/null || module load gurobi/12.0 2>/dev/null || true
 $(_oos_solstorm_julia_bootstrap(julia_command))
-
-if ! $(_oos_shell_quote(julia_command)) --project=$(_oos_shell_quote(project_dir)) -e 'import OpenEMPIRE; import JuMP; import HiGHS$solver_import' >/dev/null 2>&1; then
-    $(_oos_shell_quote(julia_command)) --project=$(_oos_shell_quote(project_dir)) -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
-fi
+$(_oos_solstorm_project_bootstrap(project_dir, julia_command; solver = queue["solver"]))
 
 $(_oos_shell_quote(julia_command)) --project=$(_oos_shell_quote(project_dir)) -e 'using OpenEMPIRE; _, queue = OpenEMPIRE._load_oos_execution_queue(ARGS[1]); OpenEMPIRE._validate_oos_execution_queue_inputs(queue)' $(_oos_shell_quote(plan["queue_file"]))
 

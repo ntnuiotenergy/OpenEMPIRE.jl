@@ -69,6 +69,7 @@ end
 
 @testset "OOS Solstorm SGE" begin
     test_parse_oos_sge_output()
+    test_oos_solstorm_project_bootstrap()
     test_prepare_and_record_oos_sge_job()
 end
 
