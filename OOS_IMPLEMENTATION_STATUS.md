@@ -521,7 +521,7 @@ HISTORICAL: stage 5cf05e0... -> qsub 6420 -> INFEASIBLE
                               + investment rows omitted
                                          |
 FRESH:      tree/queue -> plan -> local archives -> remote stage -> qsub -> result
-               PASS       PASS       PASS             NEXT        WAIT     WAIT
+               PASS       PASS       PASS             PASS        NEXT     WAIT
                \________________ pinned to 8a3dc07 _______________/
 ```
 
@@ -537,9 +537,9 @@ overwrite any earlier evidence.
   `OutOfSample/europe_v51/experiment_seed101_1tree_oosfix_8a3dc07/solstorm_staging/experiment_seed101_1tree_oosfix_8a3dc07_oos_tree1_8a3dc07c315a/staging.yaml`
   (SHA-256
   `20755188e9f45194ae887ecb9aa0544c4ada8f51537f6545ec7d862374d6cd2f`)
-- Planned remote stage:
+- Remote stage (created and validated 2026-07-21):
   `/home/torgrif/OpenEMPIRE.jl/stages/experiment_seed101_1tree_oosfix_8a3dc07_oos_tree1_8a3dc07c315a`
-- Planned remote results:
+- Remote results (currently empty):
   `/home/torgrif/OpenEMPIRE.jl/stages/experiment_seed101_1tree_oosfix_8a3dc07_oos_tree1_8a3dc07c315a/results`
 - Local preflight evidence:
   `OutOfSample/europe_v51/experiment_seed101_1tree_oosfix_8a3dc07/solstorm_staging/experiment_seed101_1tree_oosfix_8a3dc07_oos_tree1_8a3dc07c315a/archive_preflight.yaml`
@@ -550,9 +550,22 @@ overwrite any earlier evidence.
 - The four scenario files are byte-for-byte identical to the historical
   seed-101 tree. The dataset fingerprint is the validated 84-file fingerprint
   `1e015ec90929a41d1a543760a54f5298250718f09f34c21fdf9b7eadc58ac5d0`.
-- Only staging commands 1 and 2 were executed to create local archives.
-  Commands 3 through 15 were not executed; there was no SSH connection,
-  transfer, scheduler action, or solver run.
+- All entries in the immutable staging plan are now complete: entries 1-2
+  created local archives and entries 3-13 created and validated the isolated
+  remote stage. Earlier notes called the remote entries "commands 3-15" by
+  counting grouped file transfers separately; the generated YAML contains 13
+  command entries in total.
+- Remote preflight evidence:
+  `OutOfSample/europe_v51/experiment_seed101_1tree_oosfix_8a3dc07/solstorm_staging/experiment_seed101_1tree_oosfix_8a3dc07_oos_tree1_8a3dc07c315a/remote_preflight.yaml`
+  (SHA-256
+  `5d060ec0bd8cdcba231161207ddb69b17346c6e337fb865fdf46e7470bc49d62`).
+- The remote queue contains exactly one pending seed-101 job. Its scheduler
+  state is `prepared`; `scheduler_job_id` and `submitted_at_utc` are null.
+  `qstat -u torgrif` was empty, the result directory was empty, and no `qsub`,
+  runner, or solver command was executed.
+- After submission, scheduler stdout will be written to
+  `.../inputs/experiment/sge/logs/oos_tree1_$JOB_ID.out` under this fresh stage
+  (and stderr to the corresponding `.err` file).
 - Before regenerating, three ignored scenario outputs left by a local static
   audit (`genCapAvailStochRaw.csv`, `maxRegHydroGenRaw.csv`, and `sloadRaw.csv`)
   were removed from the base dataset. All 84 tracked source files were
@@ -704,8 +717,19 @@ overwriting evidence from an in-progress or completed experiment.
   contains 319 files and matches code fingerprint
   `5d1058cf4c5640d97ea39fb7927fbde5d82e59eb5f75e79a8ef2947c0b87cecf`;
   the dataset archive contains 84 files and matches the validated content
-  fingerprint. No forbidden or unsafe paths were found. Commands 3-15 remain
-  unexecuted.
+  fingerprint. No forbidden or unsafe paths were found. All 13 plan entries
+  retain `executed: false` because `staging.yaml` is the immutable dry-run plan;
+  actual execution is recorded separately in the preflight evidence files.
+- The fresh isolated Solstorm stage passed archive-transfer verification and
+  all six content fingerprints: repository code, dataset, execution config,
+  generation config, OOS tree, and fixed investments. Julia 1.9.3 instantiated
+  and precompiled the clean archived project successfully.
+- The generated remote queue passed a separate machine-readable audit: one job,
+  seed 101, `pending`, scheduler `prepared`, no job ID or submission timestamp,
+  and an SGE script whose SHA-256 matches the queue record. Queue SHA-256 is
+  `df66c7d0917c1be4671f5d342322cabb8b18d0d482571d94fde4929285b978e3`;
+  SGE script SHA-256 is
+  `429663d569b5dd748c37a3eba9486b93c84e164aa7f56bba025a24ce445ad909`.
 
 ## Known gaps and risks
 
@@ -718,7 +742,8 @@ overwriting evidence from an in-progress or completed experiment.
    current `run_manifest.yaml`. Its eight capacity tables loaded and were fixed
    in the current model. Job 6420 does not establish operational infeasibility
    under tree 101 because redundant fixed investment equalities already made
-   the full model infeasible. The fresh package has not yet been staged or run.
+   the full model infeasible. The fresh package is staged and validated but has
+   not yet been submitted or run.
 3. The `rf/...` OOS branches and open PRs have not yet been reconciled against
    this implementation. No historical branch should be discarded without that
    comparison and coordination with its author/reviewer.
@@ -729,9 +754,9 @@ overwriting evidence from an in-progress or completed experiment.
 6. The current continuation branch is an integration branch, not a proposed
    single employee-review PR. Prefer sequential PRs: runner workflow, core OOS,
    experiment orchestration, then optional Solstorm tooling.
-7. The shared Julia fallback and dependency setup are now proven in the
-   Solstorm non-interactive shell. FilePathsBase emitted precompile-extension
-   warnings under Julia 1.9, but the final `OpenEMPIRE` import succeeded.
+7. The shared Julia fallback and dependency setup are now proven again in the
+   fresh Solstorm stage with Julia 1.9.3. Dependency resolution took about six
+   minutes, mostly waiting on the shared network filesystem, but completed.
 8. The repository archive includes the tracked `europe_v51` dataset while the
    plan also transfers a separately checksummed dataset archive. This adds
    roughly 55 MB of duplicated compressed transfer data but does not alter the
@@ -754,16 +779,18 @@ overwriting evidence from an in-progress or completed experiment.
 
 ## Next recommended task
 
-Stage and validate the fresh package on Solstorm without submitting it:
+Submit and monitor exactly one fresh representative OOS job:
 
-1. Revalidate the SHA-256 of the staging plan and local preflight evidence.
-2. Execute only staging-plan commands 3 through 15. These create a new isolated
-   remote directory, transfer and unpack inputs, verify all six fingerprints,
-   and prepare the remote one-job queue and SGE script.
-3. Inspect the prepared remote queue and script read-only. Require exactly one
-   pending seed-101 job, no scheduler job ID, no submission record, and the
-   expected revision/code/dataset/fixed-investment fingerprints.
-4. Record command outputs and hashes in new local evidence. Preserve the
-   historical job-6420 stage and do not execute `qsub`, the runner, or Gurobi.
-5. Stop for a separate approval before preparing or executing a duplicate-safe
-   single-job submission.
+1. Revalidate `remote_preflight.yaml`, the remote queue and SGE hashes, one
+   pending seed-101 job, null job-ID/submission fields, and absence from `qstat`.
+2. Prepare a duplicate-safe submission record bound to those hashes. The only
+   permitted scheduler mutation is one `qsub` of the recorded SGE script.
+3. Submit exactly once, parse the returned job ID, and immediately persist it
+   into the remote queue plus new local evidence. Never retry automatically if
+   scheduler output is ambiguous.
+4. Monitor `qstat`, then `qacct`, scheduler stdout/stderr, result inventory, and
+   `run_manifest.yaml` read-only while the job runs. Continue independent local
+   OOS work rather than waiting idly between checks.
+5. If the job succeeds, collect and validate results against the queue's
+   acceptance criteria. If it fails, preserve all evidence and diagnose before
+   any resubmission.
