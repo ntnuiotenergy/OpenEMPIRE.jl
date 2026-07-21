@@ -51,8 +51,8 @@ OOS.
 
 - Working branch: `torgrim/oos-workbench-continuation`
 - Base branch: `torgrim/workbench`
-- At handoff commit `635bc2f`, the continuation branch was ten commits ahead of
-  `torgrim/workbench`. Use `git rev-list --left-right --count
+- At implementation commit `bc575f5`, the continuation branch was thirteen
+  commits ahead of `torgrim/workbench`. Use `git rev-list --left-right --count
   torgrim/workbench...HEAD` for the live count.
 - No `rf/...` branch or commit has been merged or cherry-picked.
 - The `rf/...` branches and existing PRs remain reference implementations that
@@ -76,6 +76,8 @@ Implementation commits, oldest first:
 | `5cf05e0` | Dry-run Solstorm staging plan |
 | `635bc2f` | Living OOS implementation and session handoff |
 | `3897820` | Local archive preflight evidence in the handoff |
+| `7eaebf3` | Blocked remote preflight evidence in the handoff |
+| `bc575f5` | Shared Solstorm Julia bootstrap and safe resume-plan generator |
 
 ## Functional progress
 
@@ -91,7 +93,7 @@ Implementation commits, oldest first:
 | 4e. Staging planner | Render revision-pinned archive, transfer, verification, queue, and SGE commands | Implemented; commands remain inert |
 | 4f. Concrete one-tree plan | Prepare actual `europe_v51` tree, queue, and Solstorm manifest | Prepared locally on 2026-07-21 |
 | 4g. Local archive preflight | Create and inspect only the two local archives | Passed on 2026-07-21 |
-| 4h. Remote staging preflight | Transfer, verify checksums, and prepare remote queue/SGE script | Blocked at Julia bootstrap after transfer/extraction |
+| 4h. Remote staging preflight | Transfer, verify checksums, and prepare remote queue/SGE script | Transfer/extraction passed; Julia fix and commands 13-15 resume plan prepared locally; remote validation still pending |
 | 4i. One-tree solver run | Submit and monitor one SGE job | Not started; requires approval |
 | 5. Aggregation | Combine validated results across trees | Not implemented |
 | 6. Full-year OOS | Full-year evaluation described in the original plan | Not completed |
@@ -126,6 +128,7 @@ Implementation commits, oldest first:
 
 - `src/oos_sge.jl` and `scripts/prepare_oos_sge_job.jl`
   - generate an SGE script but never invoke `qsub`;
+  - share a Solstorm Julia module fallback with remote staging commands;
   - parse captured `qsub`, `qstat`, and `qacct` output;
   - distinguish scheduler completion (`finished`) from accepted model completion
     (`complete`).
@@ -137,6 +140,12 @@ Implementation commits, oldest first:
   - never execute those commands;
   - mark a plan blocked when relevant code is uncommitted or the selected
     revision is not `HEAD`.
+- `scripts/prepare_oos_solstorm_resume.jl`
+  - reads the immutable staging plan and recorded failed preflight;
+  - refuses to proceed unless commands 3-12 completed, command 13 alone failed
+    before validation, commands 14-15 were untouched, and no solver or `qsub`
+    ran;
+  - emits only bootstrapped SSH commands 13-15 and never executes them.
 
 ## Concrete one-tree experiment prepared on 2026-07-21
 
@@ -223,6 +232,23 @@ These artifacts are ignored by Git and exist only in this workspace.
 - The Julia checksum code did not start; no remote queue or SGE script was
   prepared.
 - No `qsub`, solver, remote deletion, push, or PR action was performed.
+- Local recovery implementation commit: `bc575f5`.
+- Dry-run recovery plan:
+  `OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/resume.yaml`
+- Recovery plan state: `ready`, with exactly original commands 13, 14, and 15.
+- Recovery plan SHA-256:
+  `c5afbeb577e95cfc09578e701a0eb063d75f2e259f13df4a39234e496abd6d8b`.
+- The recovery plan targets the existing stage pinned to commit `5cf05e0`; it
+  does not rebuild it from current `HEAD`, recreate directories, transfer
+  files, invoke `qsub`, or start a solver.
+
+Current checkpoint:
+
+```text
+local archives       remote transfer       remote validation       queue/SGE prep       solve
+     PASS          ->      PASS           ->     READY TO RETRY    ->    NOT RUN       -> NOT RUN
+ commands 1-2          commands 3-12              command 13          commands 14-15     Plan 4i
+```
 
 ### Regeneration commands
 
@@ -254,6 +280,11 @@ julia --project=. scripts/prepare_oos_solstorm_staging.jl \
   --remote-host=solstorm.iot.ntnu.no \
   --remote-root=/home/torgrif/OpenEMPIRE.jl \
   --revision=HEAD
+
+julia --project=. scripts/prepare_oos_solstorm_resume.jl \
+  --plan=OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/staging.yaml \
+  --preflight=OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/remote_preflight.yaml \
+  --output=OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/resume.yaml
 ```
 
 If code affecting the OOS fingerprint changes, the existing execution queue is
@@ -278,6 +309,9 @@ overwriting evidence from an in-progress or completed experiment.
   dataset archive SHA-256 values as the local preflight.
 - `remote_preflight.yaml` records commands 3 through 12 complete, command 13
   failed before Julia validation started, and commands 14 and 15 not attempted.
+- Focused recovery tests passed: 82 staging assertions and 46 SGE assertions.
+- The concrete resume CLI completed locally and emitted a three-command,
+  approval-gated dry-run plan. No generated command was executed.
 
 ## Known gaps and risks
 
@@ -289,37 +323,34 @@ overwriting evidence from an in-progress or completed experiment.
 3. The `rf/...` OOS branches and open PRs have not yet been reconciled against
    this implementation. No historical branch should be discarded without that
    comparison and coordination with its author/reviewer.
-4. `src/oos_staging.jl` is 619 lines and contains logistics rather than model
-   mathematics. Review whether to split or simplify it before a PR.
+4. `src/oos_staging.jl` is now 795 lines and contains safety/evidence logistics
+   rather than model mathematics. Review whether to split it before a PR; do
+   not mix that refactor into the first representative-run debugging work.
 5. Aggregation and full-year OOS remain unimplemented.
 6. The current continuation branch is an integration branch, not a proposed
    single employee-review PR. Prefer sequential PRs: runner workflow, core OOS,
    experiment orchestration, then optional Solstorm tooling.
-7. The Solstorm commands are generated from local evidence but have not been
-   tested against the current remote filesystem or module environment.
+7. The shared Julia fallback and resume commands passed local tests but have
+   not yet been retried in the Solstorm non-interactive shell.
 8. The repository archive includes the tracked `europe_v51` dataset while the
    plan also transfers a separately checksummed dataset archive. This adds
    roughly 55 MB of duplicated compressed transfer data but does not alter the
    remote queue inputs.
-9. Remote validation, queue preparation, and SGE preparation currently assume
-   `julia` is already on `PATH`. That assumption is false for a non-interactive
-   Solstorm login shell. These commands must use the same Julia module fallback
-   convention as the generated SGE job.
-10. A partial but isolated stage now exists at the documented remote path. Do
-    not overwrite, recreate, or delete it. Resume from command 13 only after
-    the Julia bootstrap fix is reviewed and explicitly approved.
+9. The missing-Julia defect is fixed locally by sharing the SGE module fallback
+   with all three staging commands. The fix is not part of the already staged
+   commit `5cf05e0`, so the recovery plan injects the bootstrap into the SSH
+   shell before invoking that pinned code.
+10. A partial but isolated stage exists at the documented remote path. Do not
+    overwrite, recreate, or delete it. The next remote action must run only
+    recovery command 13 first and stop for evidence review.
 
 ## Next recommended task
 
-Fix the Plan 4h Julia bootstrap locally before making another remote call:
+With explicit user approval, execute only command 13 from the concrete
+`resume.yaml` against the existing isolated stage:
 
-1. Update the staging planner so remote validation, queue preparation, and SGE
-   preparation load Julia with the tested Solstorm module fallback sequence.
-2. Add focused tests that prove all three remote Julia commands contain the
-   bootstrap and still cannot invoke `qsub`.
-3. Produce explicit resume commands for existing command 13 through 15 without
-   recreating or retransferring the current isolated stage.
-4. Update this document with the fix commit and test results.
-5. Do not reconnect, transfer, submit, solve, push, or open a PR during the fix.
-
-After that local fix, request separate approval to resume remote command 13.
+1. Verify the local resume-plan hash and command index immediately before use.
+2. Run only original command 13 (Julia bootstrap plus content validation).
+3. Capture exit status and output in the remote preflight evidence.
+4. Do not run commands 14-15, transfer files, invoke `qsub`, or start a solver.
+5. If validation passes, stop and request separate approval for commands 14-15.
