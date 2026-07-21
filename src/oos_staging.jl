@@ -64,8 +64,13 @@ function _oos_staging_command(
     )
 end
 
-function _oos_remote_shell_command(working_directory::AbstractString, arguments)
-    return _oos_command_display(working_directory, String.(arguments))
+function _oos_remote_shell_command(
+    working_directory::AbstractString,
+    arguments,
+    julia_command::AbstractString,
+)
+    command = _oos_command_display(working_directory, String.(arguments))
+    return _oos_solstorm_julia_bootstrap(julia_command) * "\n" * command
 end
 
 function _oos_staging_file_metadata(path::AbstractString; relative_to = dirname(path))
@@ -468,7 +473,11 @@ OpenEMPIRE._oos_fixed_investment_metadata(ARGS[11])["sha256"] == ARGS[12] ||
             "-o",
             "BatchMode=yes",
             remote_target,
-            _oos_remote_shell_command(remote_project, verification_arguments),
+            _oos_remote_shell_command(
+                remote_project,
+                verification_arguments,
+                queue["runner"]["julia_command"],
+            ),
         ],
     ))
 
@@ -495,7 +504,11 @@ OpenEMPIRE._oos_fixed_investment_metadata(ARGS[11])["sha256"] == ARGS[12] ||
             "-o",
             "BatchMode=yes",
             remote_target,
-            _oos_remote_shell_command(remote_project, queue_arguments),
+            _oos_remote_shell_command(
+                remote_project,
+                queue_arguments,
+                queue["runner"]["julia_command"],
+            ),
         ],
     ))
     sge_arguments = [
@@ -512,7 +525,11 @@ OpenEMPIRE._oos_fixed_investment_metadata(ARGS[11])["sha256"] == ARGS[12] ||
             "-o",
             "BatchMode=yes",
             remote_target,
-            _oos_remote_shell_command(remote_project, sge_arguments),
+            _oos_remote_shell_command(
+                remote_project,
+                sge_arguments,
+                queue["runner"]["julia_command"],
+            ),
         ],
     ))
 
@@ -616,4 +633,163 @@ OpenEMPIRE._oos_fixed_investment_metadata(ARGS[11])["sha256"] == ARGS[12] ||
     plan_file = joinpath(target_output, "staging.yaml")
     _write_oos_experiment_manifest(plan_file, plan)
     return plan_file
+end
+
+function _oos_resume_command(original, command_index::Integer, julia_command::AbstractString)
+    get(original, "executed", false) && throw(ArgumentError(
+        "Cannot resume a staging command recorded as executed: $command_index",
+    ))
+    argv = String.(original["argv"])
+    length(argv) == 5 && argv[1:3] == ["ssh", "-o", "BatchMode=yes"] || throw(
+        ArgumentError(
+            "Resume command $command_index is not a supported non-interactive SSH command",
+        ),
+    )
+    if !occursin(_OOS_SOLSTORM_JULIA_BOOTSTRAP_MARKER, argv[5])
+        argv[5] = _oos_solstorm_julia_bootstrap(julia_command) * "\n" * argv[5]
+    end
+    occursin(r"(^|[[:space:]])qsub([[:space:]]|$)", argv[5]) && throw(ArgumentError(
+        "Resume command $command_index unexpectedly contains qsub",
+    ))
+    resumed = _oos_staging_command(
+        "remote_resume",
+        original["purpose"],
+        argv,
+    )
+    resumed["original_command_index"] = Int(command_index)
+    return resumed
+end
+
+"""
+    prepare_oos_solstorm_resume(
+        staging_plan_file,
+        remote_preflight_file;
+        output_file = joinpath(dirname(staging_plan_file), "resume.yaml"),
+        julia_command = "julia",
+    )
+
+Create a dry-run plan that resumes a partially completed Solstorm stage at
+commands 13 through 15. The evidence must show commands 3 through 12 complete,
+command 13 failed before checksum validation, and commands 14 and 15 were not
+attempted. The generated commands add the shared Solstorm Julia bootstrap and
+cannot transfer files, recreate the stage, submit with `qsub`, or start a
+solver. No remote command is executed.
+"""
+function prepare_oos_solstorm_resume(
+    staging_plan_file::AbstractString,
+    remote_preflight_file::AbstractString;
+    output_file::AbstractString = joinpath(dirname(staging_plan_file), "resume.yaml"),
+    julia_command::AbstractString = "julia",
+)
+    target_plan = abspath(normpath(staging_plan_file))
+    target_preflight = abspath(normpath(remote_preflight_file))
+    isfile(target_plan) || throw(ArgumentError("Staging plan does not exist: $target_plan"))
+    isfile(target_preflight) || throw(ArgumentError(
+        "Remote preflight evidence does not exist: $target_preflight",
+    ))
+    isempty(strip(julia_command)) && throw(ArgumentError("julia_command cannot be empty"))
+
+    plan = YAML.load_file(target_plan)
+    preflight = YAML.load_file(target_preflight)
+    get(plan, "kind", nothing) == "oos_solstorm_staging_plan" || throw(ArgumentError(
+        "Not an OOS Solstorm staging plan: $target_plan",
+    ))
+    get(preflight, "kind", nothing) == "oos_remote_staging_preflight" || throw(
+        ArgumentError("Not OOS remote staging preflight evidence: $target_preflight"),
+    )
+    get(preflight, "status", nothing) == "blocked" || throw(ArgumentError(
+        "Remote preflight must be blocked before preparing this resume plan",
+    ))
+
+    recorded_plan = abspath(normpath(string(preflight["staging_plan"])))
+    recorded_plan == target_plan || throw(ArgumentError(
+        "Remote preflight refers to a different staging plan: $recorded_plan",
+    ))
+    get(preflight["remote"], "stage_root", nothing) ==
+    get(plan["remote"], "stage_root", nothing) || throw(ArgumentError(
+        "Remote preflight and staging plan use different stage roots",
+    ))
+
+    evidence_commands = preflight["commands"]
+    Set(Int.(evidence_commands["completed"])) == Set(3:12) || throw(ArgumentError(
+        "Resume requires evidence that staging commands 3 through 12 completed",
+    ))
+    Int.(evidence_commands["attempted_and_failed"]) == [13] || throw(ArgumentError(
+        "Resume requires command 13 as the only attempted and failed command",
+    ))
+    Int.(evidence_commands["not_attempted"]) == [14, 15] || throw(ArgumentError(
+        "Resume requires commands 14 and 15 to be unattempted",
+    ))
+    failure = preflight["failure"]
+    get(failure, "command_index", nothing) == 13 || throw(ArgumentError(
+        "Remote preflight failure is not command 13",
+    ))
+    get(failure, "content_checksum_verification_started", true) == false || throw(
+        ArgumentError("Checksum validation already started; automatic resume is unsafe"),
+    )
+    get(preflight["transfer"], "archive_hashes_match", false) == true || throw(
+        ArgumentError("Remote archive hashes were not verified before the failure"),
+    )
+    get(preflight["transfer"], "archives_extracted", false) == true || throw(
+        ArgumentError("Remote archives were not recorded as extracted"),
+    )
+    get(preflight["safety"], "qsub_executed", true) == false || throw(ArgumentError(
+        "Cannot prepare a no-submit resume after qsub execution",
+    ))
+    get(preflight["safety"], "solver_started", true) == false || throw(ArgumentError(
+        "Cannot prepare this resume after a solver started",
+    ))
+
+    commands = plan["commands"]
+    length(commands) >= 15 || throw(ArgumentError(
+        "Staging plan does not contain commands 13 through 15",
+    ))
+    [commands[index]["phase"] for index in 13:15] == [
+        "remote_validate",
+        "remote_configure",
+        "remote_configure",
+    ] || throw(ArgumentError("Staging commands 13 through 15 have unexpected phases"))
+    resume_commands = [
+        _oos_resume_command(commands[index], index, julia_command) for index in 13:15
+    ]
+    all(command["argv"][1] == "ssh" for command in resume_commands) || throw(
+        ArgumentError("Resume plan contains a non-SSH command"),
+    )
+    expected_target = "$(plan["remote"]["user"])@$(plan["remote"]["host"])"
+    all(command["argv"][4] == expected_target for command in resume_commands) || throw(
+        ArgumentError("Resume plan contains an unexpected remote account"),
+    )
+
+    resume = Dict{String, Any}(
+        "schema_version" => 1,
+        "kind" => "oos_solstorm_resume_plan",
+        "status" => "ready",
+        "created_at_utc" => string(now(UTC), "Z"),
+        "dry_run" => true,
+        "commands_executed" => 0,
+        "requires_explicit_remote_approval" => true,
+        "source" => Dict{String, Any}(
+            "staging_plan" => target_plan,
+            "staging_plan_sha256" => _oos_sha256_file(target_plan),
+            "remote_preflight" => target_preflight,
+            "remote_preflight_sha256" => _oos_sha256_file(target_preflight),
+            "pinned_repository_commit" => plan["source"]["repository"]["commit"],
+            "failed_command_index" => 13,
+        ),
+        "remote" => deepcopy(plan["remote"]),
+        "safety" => Dict{String, Any}(
+            "starts_at_original_command" => 13,
+            "recreates_remote_stage" => false,
+            "retransfers_files" => false,
+            "submits_scheduler_job" => false,
+            "starts_solver" => false,
+        ),
+        "commands" => resume_commands,
+    )
+    target_output = abspath(normpath(output_file))
+    target_output in (target_plan, target_preflight) && throw(ArgumentError(
+        "Resume output cannot overwrite its source evidence: $target_output",
+    ))
+    _write_oos_experiment_manifest(target_output, resume)
+    return target_output
 end

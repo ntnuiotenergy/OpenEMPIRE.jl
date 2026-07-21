@@ -116,11 +116,112 @@ function test_prepare_oos_solstorm_staging()
                   command in commands)
         @test any(occursin("prepare_oos_sge_job.jl", command["display"]) for
                   command in commands)
+        remote_julia_commands = commands[13:15]
+        @test [command["phase"] for command in remote_julia_commands] == [
+            "remote_validate",
+            "remote_configure",
+            "remote_configure",
+        ]
+        @test all(occursin("OpenEMPIRE Solstorm Julia bootstrap", command["display"])
+                  for command in remote_julia_commands)
+        @test all(occursin("source /etc/profile", command["display"])
+                  for command in remote_julia_commands)
+        @test all(occursin("module load Julia/1.9.3", command["display"])
+                  for command in remote_julia_commands)
+        @test all(occursin("command -v julia", command["display"])
+                  for command in remote_julia_commands)
         @test all(!occursin(r"(^|[[:space:]])qsub([[:space:]]|$)", command["display"])
                   for command in commands)
         @test !isfile(plan["generated_files"]["repository_archive"]["path"])
         @test !isfile(plan["generated_files"]["dataset_archive"]["path"])
         @test !ispath(results_root)
+
+        legacy_plan = deepcopy(plan)
+        for index in 13:15
+            remote_shell = legacy_plan["commands"][index]["argv"][5]
+            command_start = findfirst("\ncd ", remote_shell)
+            @test command_start !== nothing
+            legacy_plan["commands"][index]["argv"][5] =
+                remote_shell[(first(command_start) + 1):end]
+        end
+        legacy_plan_file = joinpath(staging_dir, "staging.without-bootstrap.yaml")
+        OpenEMPIRE._write_oos_experiment_manifest(legacy_plan_file, legacy_plan)
+        preflight = Dict{String, Any}(
+            "schema_version" => 1,
+            "kind" => "oos_remote_staging_preflight",
+            "status" => "blocked",
+            "staging_plan" => legacy_plan_file,
+            "remote" => Dict(
+                "stage_root" => legacy_plan["remote"]["stage_root"],
+            ),
+            "commands" => Dict(
+                "completed" => collect(3:12),
+                "attempted_and_failed" => [13],
+                "not_attempted" => [14, 15],
+            ),
+            "transfer" => Dict(
+                "archive_hashes_match" => true,
+                "archives_extracted" => true,
+            ),
+            "failure" => Dict(
+                "command_index" => 13,
+                "content_checksum_verification_started" => false,
+            ),
+            "safety" => Dict(
+                "qsub_executed" => false,
+                "solver_started" => false,
+            ),
+        )
+        preflight_file = joinpath(staging_dir, "remote_preflight.yaml")
+        OpenEMPIRE._write_oos_experiment_manifest(preflight_file, preflight)
+        resume_file = OpenEMPIRE.prepare_oos_solstorm_resume(
+            legacy_plan_file,
+            preflight_file,
+        )
+        resume = YAML.load_file(resume_file)
+        @test resume["kind"] == "oos_solstorm_resume_plan"
+        @test resume["status"] == "ready"
+        @test resume["dry_run"]
+        @test resume["commands_executed"] == 0
+        @test resume["requires_explicit_remote_approval"]
+        @test resume["source"]["failed_command_index"] == 13
+        @test resume["remote"]["stage_root"] == plan["remote"]["stage_root"]
+        @test resume["safety"] == Dict(
+            "starts_at_original_command" => 13,
+            "recreates_remote_stage" => false,
+            "retransfers_files" => false,
+            "submits_scheduler_job" => false,
+            "starts_solver" => false,
+        )
+        @test [command["original_command_index"] for command in resume["commands"]] ==
+              [13, 14, 15]
+        @test all(command["argv"][1:4] == [
+                      "ssh",
+                      "-o",
+                      "BatchMode=yes",
+                      "intern.user@solstorm.iot.ntnu.no",
+                  ] for command in resume["commands"])
+        @test all(occursin("OpenEMPIRE Solstorm Julia bootstrap", command["display"])
+                  for command in resume["commands"])
+        @test all(occursin("module load Julia/1.9.3", command["display"])
+                  for command in resume["commands"])
+        @test all(!occursin("scp ", command["display"]) for command in resume["commands"])
+        @test all(!occursin(r"(^|[[:space:]])qsub([[:space:]]|$)", command["display"])
+                  for command in resume["commands"])
+        @test !ispath(results_root)
+
+        mismatched_preflight = deepcopy(preflight)
+        mismatched_preflight["remote"]["stage_root"] = "/different/stage"
+        mismatched_preflight_file = joinpath(staging_dir, "mismatched_preflight.yaml")
+        OpenEMPIRE._write_oos_experiment_manifest(
+            mismatched_preflight_file,
+            mismatched_preflight,
+        )
+        @test_throws ArgumentError OpenEMPIRE.prepare_oos_solstorm_resume(
+            legacy_plan_file,
+            mismatched_preflight_file;
+            output_file = joinpath(staging_dir, "unsafe-resume.yaml"),
+        )
 
         old_revision_plan_file = OpenEMPIRE.prepare_oos_solstorm_staging(
             queue_file;

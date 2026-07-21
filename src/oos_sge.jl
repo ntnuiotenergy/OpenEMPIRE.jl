@@ -1,9 +1,36 @@
 const _OOS_SOLSTORM_SGE_HOSTS =
     "compute-4-51|compute-4-52|compute-4-53|compute-4-55|compute-4-56"
+const _OOS_SOLSTORM_JULIA_BOOTSTRAP_MARKER = "# OpenEMPIRE Solstorm Julia bootstrap"
+const _OOS_SOLSTORM_JULIA_MODULE_FALLBACK =
+    "module load Julia/1.9.3 2>/dev/null || " *
+    "module load julia/1.9.3 2>/dev/null || " *
+    "module load Julia/1.10.0 2>/dev/null || " *
+    "module load julia/1.10.0 2>/dev/null || " *
+    "module load Julia/1.11.2 2>/dev/null || " *
+    "module load julia/1.11.2 2>/dev/null || " *
+    "module load Julia 2>/dev/null || " *
+    "module load julia 2>/dev/null || true"
 
 function _validate_oos_sge_value(value::AbstractString, name::AbstractString, pattern)
     occursin(pattern, value) || throw(ArgumentError("Unsupported $name value: $value"))
     return value
+end
+
+function _oos_solstorm_julia_bootstrap(julia_command::AbstractString)
+    executable = _oos_shell_quote(julia_command)
+    missing_message = _oos_shell_quote(
+        "ERROR: Julia executable not found after Solstorm module fallback: $julia_command",
+    )
+    return """$_OOS_SOLSTORM_JULIA_BOOTSTRAP_MARKER
+if ! command -v $executable >/dev/null 2>&1; then
+    type module >/dev/null 2>&1 || source /etc/profile >/dev/null 2>&1 || true
+    $_OOS_SOLSTORM_JULIA_MODULE_FALLBACK
+fi
+export JULIA_PKG_UNPACK_REGISTRY=true
+if ! command -v $executable >/dev/null 2>&1; then
+    echo $missing_message >&2
+    exit 1
+fi"""
 end
 
 function _oos_sge_script_content(queue, job, plan)
@@ -28,13 +55,7 @@ set -euo pipefail
 cd $(_oos_shell_quote(project_dir))
 
 module load gurobi/13.0 2>/dev/null || module load gurobi/12.0 2>/dev/null || true
-module load Julia/1.9.3 2>/dev/null || module load julia/1.9.3 2>/dev/null || module load Julia/1.10.0 2>/dev/null || module load julia/1.10.0 2>/dev/null || module load Julia/1.11.2 2>/dev/null || module load julia/1.11.2 2>/dev/null || module load Julia 2>/dev/null || module load julia 2>/dev/null || true
-export JULIA_PKG_UNPACK_REGISTRY=true
-
-if ! command -v $(_oos_shell_quote(julia_command)) >/dev/null 2>&1; then
-    echo \"ERROR: Julia executable not found: $julia_command\" >&2
-    exit 1
-fi
+$(_oos_solstorm_julia_bootstrap(julia_command))
 
 if ! $(_oos_shell_quote(julia_command)) --project=$(_oos_shell_quote(project_dir)) -e 'import OpenEMPIRE; import JuMP; import HiGHS$solver_import' >/dev/null 2>&1; then
     $(_oos_shell_quote(julia_command)) --project=$(_oos_shell_quote(project_dir)) -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
