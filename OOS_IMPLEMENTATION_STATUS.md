@@ -51,7 +51,7 @@ OOS.
 
 - Working branch: `torgrim/oos-workbench-continuation`
 - Base branch: `torgrim/workbench`
-- At implementation commit `bc575f5`, the continuation branch was thirteen
+- At implementation commit `1c08af2`, the continuation branch was sixteen
   commits ahead of `torgrim/workbench`. Use `git rev-list --left-right --count
   torgrim/workbench...HEAD` for the live count.
 - No `rf/...` branch or commit has been merged or cherry-picked.
@@ -78,6 +78,8 @@ Implementation commits, oldest first:
 | `3897820` | Local archive preflight evidence in the handoff |
 | `7eaebf3` | Blocked remote preflight evidence in the handoff |
 | `bc575f5` | Shared Solstorm Julia bootstrap and safe resume-plan generator |
+| `4e4776b` | Second command-13 failure and dependency blocker evidence |
+| `1c08af2` | Shared dependency bootstrap and command-13-only retry planning |
 
 ## Functional progress
 
@@ -93,7 +95,7 @@ Implementation commits, oldest first:
 | 4e. Staging planner | Render revision-pinned archive, transfer, verification, queue, and SGE commands | Implemented; commands remain inert |
 | 4f. Concrete one-tree plan | Prepare actual `europe_v51` tree, queue, and Solstorm manifest | Prepared locally on 2026-07-21 |
 | 4g. Local archive preflight | Create and inspect only the two local archives | Passed on 2026-07-21 |
-| 4h. Remote staging preflight | Transfer, verify checksums, and prepare remote queue/SGE script | Transfer/extraction and Julia bootstrap passed; blocked because the fresh remote project dependencies are not instantiated |
+| 4h. Remote staging preflight | Transfer, verify checksums, and prepare remote queue/SGE script | Transfer/extraction and Julia bootstrap passed; dependency fix implemented locally; evidence-bound command-13-only retry is ready |
 | 4i. One-tree solver run | Submit and monitor one SGE job | Not started; requires approval |
 | 5. Aggregation | Combine validated results across trees | Not implemented |
 | 6. Full-year OOS | Full-year evaluation described in the original plan | Not completed |
@@ -129,6 +131,8 @@ Implementation commits, oldest first:
 - `src/oos_sge.jl` and `scripts/prepare_oos_sge_job.jl`
   - generate an SGE script but never invoke `qsub`;
   - share a Solstorm Julia module fallback with remote staging commands;
+  - share an import-check and conditional `Pkg.instantiate()`/`Pkg.precompile()`
+    dependency bootstrap with remote staging commands;
   - parse captured `qsub`, `qstat`, and `qacct` output;
   - distinguish scheduler completion (`finished`) from accepted model completion
     (`complete`).
@@ -145,7 +149,8 @@ Implementation commits, oldest first:
   - refuses to proceed unless commands 3-12 completed, command 13 alone failed
     before validation, commands 14-15 were untouched, and no solver or `qsub`
     ran;
-  - emits only bootstrapped SSH commands 13-15 and never executes them.
+  - emits only the failed validation command 13, with Julia and dependency
+    bootstraps, and never executes it.
 
 ## Concrete one-tree experiment prepared on 2026-07-21
 
@@ -248,13 +253,22 @@ These artifacts are ignored by Git and exist only in this workspace.
 - The recovery plan targets the existing stage pinned to commit `5cf05e0`; it
   does not rebuild it from current `HEAD`, recreate directories, transfer
   files, invoke `qsub`, or start a solver.
+- Dependency-bootstrap implementation commit: `1c08af2`.
+- Third-attempt validation-only plan:
+  `OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/validation_retry_attempt3.yaml`
+- Third-attempt plan SHA-256:
+  `e9a7a81edcdd1cd4f8c60b8ae101cddf74f7556d13f8fbf47456b6ed3fdfe3af`.
+- The new plan is bound to the updated remote-preflight hash, records failed
+  attempt 2, and contains exactly original command 13. It conditionally runs
+  `Pkg.instantiate()` and `Pkg.precompile()` before checksum validation. It
+  excludes commands 14-15, queue/SGE preparation, `qsub`, and the model runner.
 
 Current checkpoint:
 
 ```text
 local archives       remote transfer       Julia bootstrap       dependencies/checksums       queue/SGE       solve
-     PASS          ->      PASS          ->      PASS          ->       BLOCKED             -> NOT RUN     -> NOT RUN
- commands 1-2          commands 3-12       command 13 retry        instantiate then validate     14-15         Plan 4i
+     PASS          ->      PASS          ->      PASS          ->    READY TO RETRY          -> NOT RUN     -> NOT RUN
+ commands 1-2          commands 3-12       command 13 retry       attempt 3, command 13 only      14-15         Plan 4i
 ```
 
 ### Regeneration commands
@@ -325,6 +339,11 @@ overwriting evidence from an in-progress or completed experiment.
 - Verified repository convention: `Manifest.toml` is ignored and deliberately
   excluded from normal HPC transfers; `scripts/run_empire_julia_basic_sge.sh`
   runs `Pkg.instantiate()` and `Pkg.precompile()` when imports are unavailable.
+- Dependency-bootstrap tests passed: 13 assertions covering a fresh project,
+  an already-ready project, and a failed instantiation. Updated focused suites
+  passed with 92 staging and 49 SGE assertions.
+- The third-attempt plan passed local evidence-hash, command-order, command
+  count, target-account, and no-submit/no-solver assertions. It was not run.
 
 ## Known gaps and risks
 
@@ -336,37 +355,36 @@ overwriting evidence from an in-progress or completed experiment.
 3. The `rf/...` OOS branches and open PRs have not yet been reconciled against
    this implementation. No historical branch should be discarded without that
    comparison and coordination with its author/reviewer.
-4. `src/oos_staging.jl` is now 795 lines and contains safety/evidence logistics
+4. `src/oos_staging.jl` is now 819 lines and contains safety/evidence logistics
    rather than model mathematics. Review whether to split it before a PR; do
    not mix that refactor into the first representative-run debugging work.
 5. Aggregation and full-year OOS remain unimplemented.
 6. The current continuation branch is an integration branch, not a proposed
    single employee-review PR. Prefer sequential PRs: runner workflow, core OOS,
    experiment orchestration, then optional Solstorm tooling.
-7. The shared Julia fallback is now proven in the Solstorm non-interactive
-   shell. Dependency setup has not yet been added to staging command 13.
+7. The shared Julia fallback is proven in the Solstorm non-interactive shell.
+   Dependency setup is locally tested but has not yet run on Solstorm.
 8. The repository archive includes the tracked `europe_v51` dataset while the
    plan also transfers a separately checksummed dataset archive. This adds
    roughly 55 MB of duplicated compressed transfer data but does not alter the
    remote queue inputs.
 9. The staged archive intentionally has no `Manifest.toml`, matching the
-   existing HPC deployment convention. Command 13 must therefore perform the
-   existing import-check/`Pkg.instantiate()` setup before importing
-   `OpenEMPIRE` for content validation. Dependency resolution may take several
-   minutes and can require package-network access on Solstorm.
+   existing HPC deployment convention. The revised command 13 now performs the
+   established import-check/`Pkg.instantiate()` setup. Dependency resolution
+   may take several minutes and can require package-network access on Solstorm.
 10. A partial but isolated stage exists at the documented remote path. Do not
     overwrite, recreate, or delete it. The previous resume plan is consumed and
-    evidence-stale; do not rerun it.
+    evidence-stale. Only `validation_retry_attempt3.yaml` is eligible for the
+    next explicitly approved validation retry.
 
 ## Next recommended task
 
-Fix the dependency bootstrap locally without reconnecting to Solstorm:
+With explicit user approval, execute the only command in
+`validation_retry_attempt3.yaml`:
 
-1. Reuse the repository's established import-check, `Pkg.instantiate()`, and
-   `Pkg.precompile()` convention before content validation.
-2. Apply it consistently to remote validation and generated SGE preparation
-   without duplicating shell logic.
-3. Add focused tests for a fresh environment and the no-`qsub` safety boundary.
-4. Generate a new evidence-bound plan containing only revised command 13.
-5. Update this handoff, run local checks, and request separate approval before
-   another remote attempt. Do not run commands 14-15 or a solver.
+1. Reverify the plan hash and source-evidence hash immediately before use.
+2. Run only original command 13. Allow dependency setup and checksum validation
+   to finish; this may take several minutes on the fresh Solstorm environment.
+3. Capture output and exit status in `remote_preflight.yaml` as attempt 3.
+4. Do not run commands 14-15, transfer files, invoke `qsub`, or start a solver.
+5. Stop after recording evidence, whether validation passes or fails.
