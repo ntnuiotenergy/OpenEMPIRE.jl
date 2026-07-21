@@ -44,15 +44,16 @@ investment run
 ```
 
 The current code prepared and submitted one representative one-tree OOS run.
-The complete model reached Gurobi but was infeasible, so no representative OOS
-run has completed successfully. Aggregation and full-year OOS are also still
-pending.
+That historical model reached Gurobi but was infeasible. The identified cause
+has been fixed locally, and a new immutable one-tree rerun package pinned to
+`8a3dc07` has passed local preflight. No representative OOS run has completed
+successfully yet. Aggregation and full-year OOS are also still pending.
 
 ## Branch and provenance
 
 - Working branch: `torgrim/oos-workbench-continuation`
 - Base branch: `torgrim/workbench`
-- At implementation commit `9c54646`, the continuation branch was 33 commits
+- At handoff commit `8a3dc07`, the continuation branch was 35 commits
   ahead of `torgrim/workbench` and zero behind. Use `git rev-list --left-right
   --count torgrim/workbench...HEAD` for the live count.
 - No `rf/...` branch or commit has been merged or cherry-picked.
@@ -90,6 +91,8 @@ Implementation commits, oldest first:
 | `451faee` | Recorded and separated model infeasibility from the runner crash |
 | `d1936ac` | Safe no-solution reporting and deterministic runner tests |
 | `9c54646` | Omit investment-only constraints during fixed-capacity OOS evaluation |
+| `4b007ad` | Record the infeasibility diagnosis and rerun plan |
+| `8a3dc07` | Correct the handoff test totals and constraint terminology |
 
 ## Functional progress
 
@@ -109,6 +112,7 @@ Implementation commits, oldest first:
 | 4i. One-tree solver run | Submit and monitor one SGE job | Job 6420 finished with process exit 1: model infeasible, followed by an objective-value reporting exception |
 | 4j. No-solution reporting | Preserve solver status and terminal manifest evidence without reading a missing objective | Implemented locally and tested; not rerun on Solstorm |
 | 4k. Infeasibility fix | Match InternalEMPIRE by omitting investment-only constraints after capacities are fixed | Root cause demonstrated and fix locally tested; representative rerun pending |
+| 4l. Fresh rerun package | Create a new revision-pinned queue, staging plan, and archives without touching job 6420 | Local preflight passed at `8a3dc07`; remote staging not started |
 | 5. Aggregation | Combine validated results across trees | Not implemented |
 | 6. Full-year OOS | Full-year evaluation described in the original plan | Not completed |
 
@@ -510,17 +514,56 @@ These artifacts are ignored by Git and exist only in this workspace.
 Current checkpoint:
 
 ```text
-REMOTE RUN: archives -> transfer/deps -> recovery/checks -> queue/SGE -> qsub -> job 6420
-                PASS       PASS              PASS             PASS       ONCE     INFEASIBLE
-                                                                                   |
-LOCAL CODE:                                    safe reporting -> root-cause fix
-                                                   TESTED            TESTED
-NEXT:                                              prepare a fresh immutable one-tree rerun
+HISTORICAL: stage 5cf05e0... -> qsub 6420 -> INFEASIBLE
+                                         |
+                              root cause identified
+                              + runner reporting fixed
+                              + investment rows omitted
+                                         |
+FRESH:      tree/queue -> plan -> local archives -> remote stage -> qsub -> result
+               PASS       PASS       PASS             NEXT        WAIT     WAIT
+               \________________ pinned to 8a3dc07 _______________/
 ```
+
+### Fresh immutable rerun prepared on 2026-07-21
+
+This package is separate from the historical job-6420 stage and does not
+overwrite any earlier evidence.
+
+- Revision: `8a3dc07c315a3da174449c9710831d864c2273d4`
+- Experiment and local queue:
+  `OutOfSample/europe_v51/experiment_seed101_1tree_oosfix_8a3dc07`
+- Local staging plan:
+  `OutOfSample/europe_v51/experiment_seed101_1tree_oosfix_8a3dc07/solstorm_staging/experiment_seed101_1tree_oosfix_8a3dc07_oos_tree1_8a3dc07c315a/staging.yaml`
+  (SHA-256
+  `20755188e9f45194ae887ecb9aa0544c4ada8f51537f6545ec7d862374d6cd2f`)
+- Planned remote stage:
+  `/home/torgrif/OpenEMPIRE.jl/stages/experiment_seed101_1tree_oosfix_8a3dc07_oos_tree1_8a3dc07c315a`
+- Planned remote results:
+  `/home/torgrif/OpenEMPIRE.jl/stages/experiment_seed101_1tree_oosfix_8a3dc07_oos_tree1_8a3dc07c315a/results`
+- Local preflight evidence:
+  `OutOfSample/europe_v51/experiment_seed101_1tree_oosfix_8a3dc07/solstorm_staging/experiment_seed101_1tree_oosfix_8a3dc07_oos_tree1_8a3dc07c315a/archive_preflight.yaml`
+  (SHA-256
+  `1383af27a0d12cc4466efd49a53aa9b01b8ea4ae1b192a385747bf94d6849ca6`)
+- The experiment is `complete`; the queue is `ready` with one pending seed-101
+  job; the dry-run staging plan is `ready` with no blockers.
+- The four scenario files are byte-for-byte identical to the historical
+  seed-101 tree. The dataset fingerprint is the validated 84-file fingerprint
+  `1e015ec90929a41d1a543760a54f5298250718f09f34c21fdf9b7eadc58ac5d0`.
+- Only staging commands 1 and 2 were executed to create local archives.
+  Commands 3 through 15 were not executed; there was no SSH connection,
+  transfer, scheduler action, or solver run.
+- Before regenerating, three ignored scenario outputs left by a local static
+  audit (`genCapAvailStochRaw.csv`, `maxRegHydroGenRaw.csv`, and `sloadRaw.csv`)
+  were removed from the base dataset. All 84 tracked source files were
+  unchanged. The superseded draft package was preserved at
+  `/private/tmp/experiment_seed101_1tree_oosfix_8a3dc07_draft` for this local
+  session.
 
 ### Regeneration commands
 
-Run from the repository root. These commands prepare local state only.
+Run from the repository root at revision `8a3dc07` to reproduce the fresh
+checkpoint. These commands prepare local state only.
 
 ```bash
 julia --project=. scripts/prepare_oos_experiment.jl europe_v51 \
@@ -528,31 +571,26 @@ julia --project=. scripts/prepare_oos_experiment.jl europe_v51 \
   --format=csv \
   --num-trees=1 \
   --seed-start=101 \
-  --output=OutOfSample/europe_v51/experiment_seed101_1tree \
+  --output=OutOfSample/europe_v51/experiment_seed101_1tree_oosfix_8a3dc07 \
   --resume=true
 
 julia --project=. scripts/prepare_oos_execution_queue.jl europe_v51 \
   --config=/Users/torgrim/Documents/NTNU/iot/empire/OpenEMPIRE.jl/results/julia_runs/20260630_124809_europe_v51/fixed_sample_config.yaml \
   --format=csv \
   --solver=Gurobi \
-  --experiment=OutOfSample/europe_v51/experiment_seed101_1tree \
+  --experiment=OutOfSample/europe_v51/experiment_seed101_1tree_oosfix_8a3dc07 \
   --fixed-investment-dir=/Users/torgrim/Documents/NTNU/iot/empire/OpenEMPIRE.jl/results/julia_runs/20260630_124809_europe_v51 \
-  --results=results/julia_oos_runs/experiment_seed101_1tree \
-  --queue-file=OutOfSample/europe_v51/experiment_seed101_1tree/execution.yaml \
+  --results=results/julia_oos_runs/experiment_seed101_1tree_oosfix_8a3dc07 \
+  --queue-file=OutOfSample/europe_v51/experiment_seed101_1tree_oosfix_8a3dc07/execution.yaml \
   --julia-command=julia \
   --resume=true
 
 julia --project=. scripts/prepare_oos_solstorm_staging.jl \
-  --queue=OutOfSample/europe_v51/experiment_seed101_1tree/execution.yaml \
+  --queue=OutOfSample/europe_v51/experiment_seed101_1tree_oosfix_8a3dc07/execution.yaml \
   --remote-user=torgrif \
   --remote-host=solstorm.iot.ntnu.no \
   --remote-root=/home/torgrif/OpenEMPIRE.jl \
-  --revision=HEAD
-
-julia --project=. scripts/prepare_oos_solstorm_resume.jl \
-  --plan=OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/staging.yaml \
-  --preflight=OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/remote_preflight.yaml \
-  --output=OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/resume.yaml
+  --revision=8a3dc07c315a3da174449c9710831d864c2273d4
 ```
 
 If code affecting the OOS fingerprint changes, the existing execution queue is
@@ -658,10 +696,21 @@ overwriting evidence from an in-progress or completed experiment.
 - After the infeasibility fix, the full repository suite exited 0: CSV
   scenarios 164 with one known broken parity check, runner 76, OOS 142, and all
   remaining suites passed.
+- The fresh seed-101 experiment regenerated successfully and reproduced all
+  four historical scenario-file SHA-256 values. Its queue records the expected
+  fixed-investment fingerprint, current runner fingerprint, and one pending
+  job.
+- Fresh local archive preflight passed: the revision-pinned repository archive
+  contains 319 files and matches code fingerprint
+  `5d1058cf4c5640d97ea39fb7927fbde5d82e59eb5f75e79a8ef2947c0b87cecf`;
+  the dataset archive contains 84 files and matches the validated content
+  fingerprint. No forbidden or unsafe paths were found. Commands 3-15 remain
+  unexecuted.
 
 ## Known gaps and risks
 
-1. The representative OOS model built and reached Gurobi but was infeasible.
+1. The historical representative OOS model built and reached Gurobi but was
+   infeasible.
    The cause is now localized to redundant fixed-capacity investment tracking
    equalities, and commit `9c54646` removes that constraint class in OOS. A new
    representative run is still required to verify operational feasibility.
@@ -669,7 +718,7 @@ overwriting evidence from an in-progress or completed experiment.
    current `run_manifest.yaml`. Its eight capacity tables loaded and were fixed
    in the current model. Job 6420 does not establish operational infeasibility
    under tree 101 because redundant fixed investment equalities already made
-   the full model infeasible.
+   the full model infeasible. The fresh package has not yet been staged or run.
 3. The `rf/...` OOS branches and open PRs have not yet been reconciled against
    this implementation. No historical branch should be discarded without that
    comparison and coordination with its author/reviewer.
@@ -705,15 +754,16 @@ overwriting evidence from an in-progress or completed experiment.
 
 ## Next recommended task
 
-Prepare a fresh immutable one-tree rerun without submitting it yet:
+Stage and validate the fresh package on Solstorm without submitting it:
 
-1. Preserve job 6420 and its stage as historical evidence; never reuse or
-   overwrite their queue, result, log, or submission paths.
-2. Regenerate a new one-tree execution queue and Solstorm staging plan pinned to
-   the current committed revision, because the runner-code fingerprint changed.
-3. Run local archive/input/hash preflight and verify the planned OOS model will
-   omit 18,875 investment-only rows while retaining operational constraints.
-4. Produce exact new remote stage/result paths and approval-gated transfer,
-   setup, submission, and monitoring commands.
-5. Stop before any SSH write, transfer, `qsub`, or solver action. The following
-   approval can execute remote staging and one duplicate-safe submission.
+1. Revalidate the SHA-256 of the staging plan and local preflight evidence.
+2. Execute only staging-plan commands 3 through 15. These create a new isolated
+   remote directory, transfer and unpack inputs, verify all six fingerprints,
+   and prepare the remote one-job queue and SGE script.
+3. Inspect the prepared remote queue and script read-only. Require exactly one
+   pending seed-101 job, no scheduler job ID, no submission record, and the
+   expected revision/code/dataset/fixed-investment fingerprints.
+4. Record command outputs and hashes in new local evidence. Preserve the
+   historical job-6420 stage and do not execute `qsub`, the runner, or Gurobi.
+5. Stop for a separate approval before preparing or executing a duplicate-safe
+   single-job submission.
