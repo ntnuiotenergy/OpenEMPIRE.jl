@@ -75,6 +75,7 @@ Implementation commits, oldest first:
 | `fa2debc` | Solstorm SGE dry-run adapter |
 | `5cf05e0` | Dry-run Solstorm staging plan |
 | `635bc2f` | Living OOS implementation and session handoff |
+| `3897820` | Local archive preflight evidence in the handoff |
 
 ## Functional progress
 
@@ -90,7 +91,7 @@ Implementation commits, oldest first:
 | 4e. Staging planner | Render revision-pinned archive, transfer, verification, queue, and SGE commands | Implemented; commands remain inert |
 | 4f. Concrete one-tree plan | Prepare actual `europe_v51` tree, queue, and Solstorm manifest | Prepared locally on 2026-07-21 |
 | 4g. Local archive preflight | Create and inspect only the two local archives | Passed on 2026-07-21 |
-| 4h. Remote staging preflight | Transfer, verify checksums, and prepare remote queue/SGE script | Not started; requires approval |
+| 4h. Remote staging preflight | Transfer, verify checksums, and prepare remote queue/SGE script | Blocked at Julia bootstrap after transfer/extraction |
 | 4i. One-tree solver run | Submit and monitor one SGE job | Not started; requires approval |
 | 5. Aggregation | Combine validated results across trees | Not implemented |
 | 6. Full-year OOS | Full-year evaluation described in the original plan | Not completed |
@@ -186,13 +187,14 @@ These artifacts are ignored by Git and exist only in this workspace.
 - Manifest state: `ready`
 - Commands recorded: `15`
 - Local commands executed: `2` (repository archive and dataset archive)
-- Remote commands executed: `0`
+- Remote commands completed: `10` (commands 3 through 12)
+- Remote command 13 attempted and failed before checksum code started.
+- Remote commands 14 and 15 were not attempted.
 - Remote account: `torgrif@solstorm.iot.ntnu.no`
 - Remote staging root:
   `/home/torgrif/OpenEMPIRE.jl/stages/experiment_seed101_1tree_oos_tree1_5cf05e0ff211`
-- `config/cluster.json` stores `~/OpenEMPIRE.jl`; existing local launch logs show
-  that this expands to `/home/torgrif/OpenEMPIRE.jl` on Solstorm. No connection
-  was made to confirm it during this preparation.
+- `config/cluster.json` stores `~/OpenEMPIRE.jl`; existing local launch logs and
+  the successful remote stage creation confirm `/home/torgrif/OpenEMPIRE.jl`.
 - Local archive preflight report:
   `OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/archive_preflight.yaml`
 - Repository archive: `83,791,483` bytes, SHA-256
@@ -207,8 +209,20 @@ These artifacts are ignored by Git and exist only in this workspace.
 - The revision archive already contains the tracked `data/europe_v51`, so the
   separate dataset archive duplicates that dataset during transfer. This is an
   informational transfer-size inefficiency, not a checksum or execution error.
-- No SSH, SCP, remote filesystem write, SGE preparation, `qsub`, or solver run
-  was performed.
+- Remote preflight report:
+  `OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/remote_preflight.yaml`
+- The isolated remote directory was absent before creation.
+- Commands 3 through 11 created the stage and transferred the validated
+  archives, configs, adjusted metadata, four scenario files, and eight fixed
+  capacity tables.
+- Remote `sha256sum` exactly matched both local archive hashes.
+- Command 12 extracted both archives successfully. GNU tar warned that it
+  ignored macOS `LIBARCHIVE.xattr.com.apple.provenance` headers.
+- Command 13 stopped immediately with `bash: julia: command not found`. The
+  non-interactive Solstorm login shell requires a Julia module to be loaded.
+- The Julia checksum code did not start; no remote queue or SGE script was
+  prepared.
+- No `qsub`, solver, remote deletion, push, or PR action was performed.
 
 ### Regeneration commands
 
@@ -259,7 +273,11 @@ overwriting evidence from an in-progress or completed experiment.
   no required files are missing and no forbidden files were found.
 - The staging manifest is an immutable plan and still records what the planner
   itself executed (`0`). `archive_preflight.yaml` is the execution evidence
-  showing local commands 1 and 2 completed and commands 3 through 15 did not.
+  showing local commands 1 and 2 completed.
+- Remote transfer integrity passed: Solstorm reported the same repository and
+  dataset archive SHA-256 values as the local preflight.
+- `remote_preflight.yaml` records commands 3 through 12 complete, command 13
+  failed before Julia validation started, and commands 14 and 15 not attempted.
 
 ## Known gaps and risks
 
@@ -283,20 +301,25 @@ overwriting evidence from an in-progress or completed experiment.
    plan also transfers a separately checksummed dataset archive. This adds
    roughly 55 MB of duplicated compressed transfer data but does not alter the
    remote queue inputs.
+9. Remote validation, queue preparation, and SGE preparation currently assume
+   `julia` is already on `PATH`. That assumption is false for a non-interactive
+   Solstorm login shell. These commands must use the same Julia module fallback
+   convention as the generated SGE job.
+10. A partial but isolated stage now exists at the documented remote path. Do
+    not overwrite, recreate, or delete it. Resume from command 13 only after
+    the Julia bootstrap fix is reviewed and explicitly approved.
 
 ## Next recommended task
 
-Plan 4h is the remote staging preflight. With explicit approval, execute
-commands 3 through 15 from the concrete staging manifest in order:
+Fix the Plan 4h Julia bootstrap locally before making another remote call:
 
-1. Create the isolated remote directories.
-2. Transfer the two validated archives, configs, adjusted experiment metadata,
-   selected scenario tree, and eight fixed-investment tables.
-3. Extract the archives remotely.
-4. Run the recorded remote checksum verification.
-5. Prepare the one-tree remote execution queue.
-6. Prepare the SGE script without invoking `qsub`.
-7. Record remote paths and verification evidence in this handoff document.
+1. Update the staging planner so remote validation, queue preparation, and SGE
+   preparation load Julia with the tested Solstorm module fallback sequence.
+2. Add focused tests that prove all three remote Julia commands contain the
+   bootstrap and still cannot invoke `qsub`.
+3. Produce explicit resume commands for existing command 13 through 15 without
+   recreating or retransferring the current isolated stage.
+4. Update this document with the fix commit and test results.
+5. Do not reconnect, transfer, submit, solve, push, or open a PR during the fix.
 
-Do not submit the SGE job or start a solver during Plan 4h. Plan 4i requires a
-separate explicit approval for `qsub`.
+After that local fix, request separate approval to resume remote command 13.
