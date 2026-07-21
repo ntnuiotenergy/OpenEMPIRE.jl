@@ -81,6 +81,7 @@ Implementation commits, oldest first:
 | `4e4776b` | Second command-13 failure and dependency blocker evidence |
 | `1c08af2` | Shared dependency bootstrap and command-13-only retry planning |
 | `93127d1` | Metadata-safe dataset archives and evidence-bound sidecar quarantine planning |
+| `7ef34e3` | Recovered-dataset validation bound to exact quarantine evidence |
 
 ## Functional progress
 
@@ -96,7 +97,7 @@ Implementation commits, oldest first:
 | 4e. Staging planner | Render revision-pinned archive, transfer, verification, queue, and SGE commands | Implemented; commands remain inert |
 | 4f. Concrete one-tree plan | Prepare actual `europe_v51` tree, queue, and Solstorm manifest | Prepared locally on 2026-07-21 |
 | 4g. Local archive preflight | Create and inspect only the two local archives | Passed on 2026-07-21 |
-| 4h. Remote staging preflight | Transfer, Julia/dependency setup, and repository-code validation passed; validate remaining inputs and prepare queue/SGE script | Dataset recovered and exact 84-file fingerprint verified; command-13 validation retry is next |
+| 4h. Remote staging preflight | Transfer, dependencies, recovery, and all six staged-input validations | Passed; commands 14-15 are next and remain unexecuted |
 | 4i. One-tree solver run | Submit and monitor one SGE job | Not started; requires approval |
 | 5. Aggregation | Combine validated results across trees | Not implemented |
 | 6. Full-year OOS | Full-year evaluation described in the original plan | Not completed |
@@ -151,6 +152,8 @@ Implementation commits, oldest first:
     AppleDouble sidecars into a recoverable quarantine directory;
   - refuses to move anything if the complete remote manifest has drifted;
   - verifies the clean dataset manifest and expected fingerprint after moving;
+  - prepares a command-13-only retry only when the immutable quarantine plan,
+    execution evidence, stdout/stderr hashes, and exact clean manifest agree;
   - never executes SSH, deletes files, submits a job, or starts a solver.
 - `scripts/prepare_oos_solstorm_resume.jl`
   - reads the immutable staging plan and recorded failed preflight;
@@ -358,13 +361,34 @@ These artifacts are ignored by Git and exist only in this workspace.
 - The 93 sidecars now reside at the recoverable remote path
   `artifacts/appledouble_quarantine_attempt3`. No files were deleted. Command
   13, commands 14-15, `qsub`, the runner, and the solver were not executed.
+- Recovered-validation implementation commit: `7ef34e3`.
+- Evidence-bound validation plan:
+  `OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/recovered_validation_attempt4.yaml`
+  with SHA-256
+  `d8262fc53ec348edb82295e1f7affe388c1c333558b2b81dda33c0774cf7cf9f`.
+- The plan is bound to the staging plan, remote-preflight evidence, quarantine
+  plan, quarantine execution, and both captured quarantine logs. It contains
+  only original command 13 and the repository, dataset, execution-config,
+  generation-config, OOS-tree, and fixed-investment validations.
+- With explicit approval, command 13 ran once and exited 0. Both stdout and
+  stderr are empty, as expected from the silent assertion-based validator.
+  Therefore all six staged-input validations passed.
+- Validation execution evidence:
+  `OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/recovered_validation_attempt4_execution.yaml`
+  with SHA-256
+  `542b2c08b2d4d8079d70c7eb1ffa4a5fe2b4a6297b6be5846a6ae6db1ef460d3`.
+- The sandboxed launcher returned before its asynchronously completed evidence
+  became visible. A proposed retry was stopped locally by the no-overwrite
+  guard before SSH, confirming there was only one evidenced command-13 run.
+- Commands 14-15, queue/SGE preparation, `qsub`, the runner, and the solver
+  remain unexecuted.
 
 Current checkpoint:
 
 ```text
-local archives     transfer/deps     intended files     sidecar recovery     dataset validation     queue/SGE     solve
-    PASS        ->      PASS      ->      PASS       ->      PASS        ->       NEXT          -> NOT RUN   -> NOT RUN
- commands 1-2       commands 3-12     84 unchanged      93 quarantined       retry command 13      14-15       Plan 4i
+local archives     transfer/deps     sidecar recovery     all input checks     queue/SGE setup     qsub/solve
+    PASS        ->      PASS      ->       PASS        ->       PASS       ->      NEXT       -> NOT RUN
+ commands 1-2       commands 3-12     93 quarantined       command 13         commands 14-15    Plan 4i
 ```
 
 ### Regeneration commands
@@ -455,6 +479,12 @@ overwriting evidence from an in-progress or completed experiment.
 - The approved quarantine command exited 0 with empty stderr. Its output
   exactly matches the expected 84-file local manifest and dataset fingerprint,
   and reports all 93 sidecars in the recoverable quarantine directory.
+- Recovered-validation tests passed together with the existing focused suites:
+  95 staging assertions and 45 cleanup/recovery assertions.
+- The concrete command-13 plan passed six source-hash, command-index,
+  target-account, six-validation, and no-queue/no-SGE/no-submit/no-run checks.
+  Its one approved remote command exited 0 with empty stdout and stderr, which
+  proves every assertion in all six staged-input validations passed.
 
 ## Known gaps and risks
 
@@ -484,9 +514,9 @@ overwriting evidence from an in-progress or completed experiment.
    existing HPC deployment convention. The revised command 13 now performs the
    established import-check/`Pkg.instantiate()` setup. Dependency resolution
    may take several minutes and can require package-network access on Solstorm.
-10. A recovered but still incomplete isolated stage exists at the documented
-    remote path. Do not overwrite, recreate, or delete it. Both earlier resume
-    plans are consumed and evidence-stale; neither is eligible for another run.
+10. A validated but still incomplete isolated stage exists at the documented
+    remote path. Do not overwrite, recreate, or delete it. All earlier resume
+    and validation plans are consumed/evidenced and must not be rerun.
 11. GNU tar materialized macOS extended-attribute metadata as 93 `._*`
     AppleDouble sidecars in the already-transferred stage. Future OOS archives
     now use the repository's macOS-safe convention. The existing stage has
@@ -495,19 +525,19 @@ overwriting evidence from an in-progress or completed experiment.
 
 ## Next recommended task
 
-Prepare an evidence-bound retry of original staging command 13 that additionally
-requires the successful quarantine execution evidence:
+Prepare and execute an evidence-bound commands-14-and-15 setup plan:
 
-1. Generate a new one-command validation plan; do not reuse either consumed
-   resume plan.
-2. Bind it to the immutable staging plan, current remote-preflight report,
-   quarantine plan, captured execution evidence, stdout hash, and expected
-   clean dataset fingerprint.
-3. Reverify that the command contains only dependency/import setup and the six
-   staging-input validations—no queue/SGE preparation, transfer, `qsub`, model
-   runner, or solver.
-4. With explicit approval, execute only command 13, capture its evidence, and
-   stop before commands 14-15.
+1. Bind it to the successful command-13 execution evidence and every upstream
+   immutable plan/evidence hash.
+2. Reproduce only original command 14 (write the one-tree execution queue) and
+   command 15 (write the SGE script/plan), adding the proven Julia/dependency
+   bootstrap where needed.
+3. Reject existing or inconsistent output unless the repository's explicit
+   resume behavior proves it is identical and safe.
+4. Capture and validate the resulting remote queue and SGE artifacts, including
+   one pending tree job, expected fixed-investment/input hashes, scheduler
+   resources, and the absence of submission evidence.
+5. Stop before `qsub`, the runner, or the solver.
 
-If all six validations pass, the following task can prepare the remote queue
-and SGE script. Submission and the solver remain separate approval-gated tasks.
+Only after those artifacts are reviewed should a separate task submit the
+one-tree job and begin long-running monitoring.
