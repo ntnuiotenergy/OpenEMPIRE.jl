@@ -121,6 +121,9 @@ key and the derived files are written deterministically from `(raw inputs, key)`
 
 ### Generating one out-of-sample scenario tree
 
+Current implementation status, concrete experiment state, and session handoff
+instructions are maintained in [`OOS_IMPLEMENTATION_STATUS.md`](OOS_IMPLEMENTATION_STATUS.md).
+
 Generate one self-contained tree without modifying the source dataset:
 
 ```bash
