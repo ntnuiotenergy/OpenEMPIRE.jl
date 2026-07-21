@@ -167,3 +167,112 @@ function test_reject_incomplete_oos_runner_options()
     @test_throws ArgumentError _validate_out_of_sample_options(options, true, "auto")
     @test_throws ArgumentError _validate_out_of_sample_options(options, false, "true")
 end
+
+function test_runner_solver_result_extraction()
+    infeasible = Model(HiGHS.Optimizer)
+    set_silent(infeasible)
+    @variable(infeasible, x)
+    @constraint(infeasible, x >= 1)
+    @constraint(infeasible, x <= 0)
+    @objective(infeasible, Min, x)
+    optimize!(infeasible)
+
+    components_called = Ref(false)
+    infeasible_result = _extract_solver_result(infeasible) do
+        components_called[] = true
+        (test_component = 1.0,)
+    end
+    @test string(infeasible_result.termination) == "INFEASIBLE"
+    @test string(infeasible_result.primal_status) == "NO_SOLUTION"
+    @test infeasible_result.result_count >= 0
+    @test !infeasible_result.has_values
+    @test !infeasible_result.solved_and_feasible
+    @test infeasible_result.objective === nothing
+    @test infeasible_result.objective_components === nothing
+    @test !components_called[]
+
+    failure_message = _solver_failure_message(infeasible_result)
+    @test occursin("termination=INFEASIBLE", failure_message)
+    @test occursin("result_count=$(infeasible_result.result_count)", failure_message)
+    manifest = Dict{String, Any}("timings" => Dict{String, Any}())
+    succeeded, recorded_error = _finalize_run_manifest!(
+        manifest,
+        merge(infeasible_result, (; solve_seconds = 0.1)),
+        true;
+        summary_path = "/tmp/summary.txt",
+        scenario_artifact = nothing,
+        perf_enabled = false,
+        wall_seconds = 1.23456,
+        end_time = DateTime(2026, 7, 21, 13),
+    )
+    @test !succeeded
+    @test recorded_error == failure_message
+    @test manifest["status"] == "failed"
+    @test manifest["error"] == failure_message
+    @test manifest["end_time"] == "2026-07-21T13:00:00"
+    @test manifest["timings"]["wall_seconds"] == 1.235
+    @test manifest["solution"] == Dict{String, Any}(
+        "termination_status" => "INFEASIBLE",
+        "primal_status" => "NO_SOLUTION",
+        "dual_status" => string(infeasible_result.dual_status),
+        "result_count" => infeasible_result.result_count,
+        "has_values" => false,
+        "is_solved_and_feasible" => false,
+        "objective_value" => nothing,
+        "objective_components" => nothing,
+    )
+    mktempdir() do root
+        manifest_file = joinpath(root, "run_manifest.yaml")
+        _write_run_manifest(manifest_file, manifest)
+        loaded = YAML.load_file(manifest_file)
+        @test loaded["status"] == "failed"
+        @test loaded["solution"]["termination_status"] == "INFEASIBLE"
+        @test loaded["solution"]["objective_value"] === nothing
+    end
+
+    optimal = Model(HiGHS.Optimizer)
+    set_silent(optimal)
+    @variable(optimal, y >= 1)
+    @objective(optimal, Min, y)
+    optimize!(optimal)
+    components_called[] = false
+    optimal_result = _extract_solver_result(optimal) do
+        components_called[] = true
+        (test_component = value(y),)
+    end
+    @test string(optimal_result.termination) == "OPTIMAL"
+    @test optimal_result.result_count == 1
+    @test optimal_result.has_values
+    @test optimal_result.solved_and_feasible
+    @test optimal_result.objective ≈ 1.0
+    @test optimal_result.objective_components.test_component ≈ 1.0
+    @test components_called[]
+    @test _solver_run_state(optimal_result, true) == (true, nothing)
+
+    not_optimized = (
+        termination = nothing,
+        primal_status = nothing,
+        dual_status = nothing,
+        result_count = 0,
+        has_values = false,
+        solved_and_feasible = false,
+        objective = nothing,
+        objective_components = nothing,
+        solve_seconds = 0.0,
+    )
+    not_optimized_manifest = Dict{String, Any}("timings" => Dict{String, Any}())
+    succeeded, recorded_error = _finalize_run_manifest!(
+        not_optimized_manifest,
+        not_optimized,
+        false;
+        summary_path = "/tmp/summary.txt",
+        scenario_artifact = nothing,
+        perf_enabled = false,
+        wall_seconds = 0.1,
+    )
+    @test succeeded
+    @test recorded_error === nothing
+    @test not_optimized_manifest["status"] == "complete"
+    @test not_optimized_manifest["solution"]["termination_status"] == "not_optimized"
+    @test not_optimized_manifest["solution"]["objective_value"] == "not_optimized"
+end
