@@ -276,6 +276,27 @@ These artifacts are ignored by Git and exist only in this workspace.
 - The attempt-3 plan is now evidence-stale and must not be rerun. Updated
   remote-preflight evidence SHA-256:
   `b161cad58a32b3915eb78a18656add1de9140b2c73d3674e25d81f578cae0a08`.
+- Local re-extraction of the exact transferred dataset archive reproduced the
+  expected fingerprint `1e015ec90929a41d1a543760a54f5298250718f09f34c21fdf9b7eadc58ac5d0`.
+  The source and extraction each contain 84 files, with no missing, extra, or
+  changed path/size/file-SHA entries. `.DS_Store` is present and identical in
+  both; the archive contains no AppleDouble `._*` file entries.
+- The local system has bsdtar 3.5.3/libarchive 3.7.4, not GNU tar, so the
+  Solstorm extraction behavior cannot be reproduced exactly without remote
+  inspection.
+- Local expected per-file manifest:
+  `OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/dataset_manifest.local.tsv`
+  with SHA-256
+  `0ee1e37c71f5f48626c67f315860f1d7258e79ff46f575e2eb73e5960b011a63`.
+- Approval-gated read-only diagnostic plan:
+  `OutOfSample/europe_v51/experiment_seed101_1tree/solstorm_staging/experiment_seed101_1tree_oos_tree1_5cf05e0ff211/dataset_manifest_diagnostic_attempt3.yaml`
+  with SHA-256
+  `1ffdc69e03fb19afe4d25ecb7339341a778acbaae57a2bd8d69d525c24293553`.
+- The diagnostic contains one SSH command that prints remote relative paths,
+  sizes, file SHA-256 values, and the resulting directory fingerprint to local
+  stdout. It uses only Julia's SHA standard library with compiled modules
+  disabled. It performs no dependency setup, remote write, transfer, queue/SGE
+  preparation, `qsub`, or solver action, and it has not been executed.
 
 Current checkpoint:
 
@@ -361,6 +382,9 @@ overwriting evidence from an in-progress or completed experiment.
 - On the approved attempt-3 run, dependency setup and the repository-code
   checksum passed. Dataset content validation failed before the remaining four
   content checks. No queue, scheduler, or solver action occurred.
+- Exact local archive re-extraction and per-file comparison passed for all 84
+  files. Because the mismatch is remote-only, a one-command read-only manifest
+  plan was generated and passed local evidence-binding and safety assertions.
 
 ## Known gaps and risks
 
@@ -395,19 +419,20 @@ overwriting evidence from an in-progress or completed experiment.
     evidence-stale; neither is eligible for another run.
 11. Although the dataset archive's byte-level SHA-256 matched before and after
     transfer, the extracted directory fingerprint differs on Solstorm. The
-    exact differing path or cross-platform hashing assumption is not yet known.
+    exact local archive reproduces perfectly, so the likely difference is in
+    the remote extracted directory or GNU-tar handling. The exact remote entry
+    is still unknown; do not weaken or bypass checksum validation.
 
 ## Next recommended task
 
-Diagnose the dataset fingerprint mismatch locally before another remote call:
+With explicit user approval, run the only command in
+`dataset_manifest_diagnostic_attempt3.yaml`:
 
-1. Inspect `_oos_directory_sha256` and the existing archive-preflight evidence
-   for cross-platform assumptions and hidden/generated files.
-2. Re-extract the already validated dataset archive locally and compare a
-   deterministic per-file path/size/SHA-256 manifest with the source dataset.
-3. Add a focused diagnostic or test that identifies the exact differing entry
-   without weakening validation.
-4. If local evidence is conclusive, implement and test the narrow correction
-   and generate a new command-13-only plan.
-5. If local evidence is inconclusive, generate—but do not execute—a read-only
-   Solstorm file-manifest command and request separate approval.
+1. Reverify the diagnostic-plan and source-evidence hashes.
+2. Execute its single read-only SSH command and capture stdout locally.
+3. Compare the returned remote path/size/SHA manifest with
+   `dataset_manifest.local.tsv` to identify every missing, extra, or changed
+   file and verify the remote directory fingerprint.
+4. Record the diagnostic evidence and stop. Do not write remotely, transfer or
+   delete files, rerun command 13, run commands 14-15, invoke `qsub`, or start a
+   solver.
