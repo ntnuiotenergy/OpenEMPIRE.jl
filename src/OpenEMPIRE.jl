@@ -24,5 +24,6 @@ include("out_of_sample.jl")
 include("oos_sge.jl")
 include("oos_staging.jl")
 include("oos_cleanup.jl")
+include("oos_remote_setup.jl")
 
 end # module OpenEMPIRE
