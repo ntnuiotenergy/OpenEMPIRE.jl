@@ -216,12 +216,57 @@ function test_full_year_oos_generation()
             length(strat_periods(model_periods)) * 2
         @test length(collect(eachindex(model[:storage_cyclic]))) == expected_storage_cycles
 
-        investment_run = joinpath(root, "investment-run")
-        _write_investment_csvs(joinpath(investment_run, "Output"))
-        _write_test_investment_run_evidence(investment_run, config_file)
+        investment_data = joinpath(root, "investment-data")
+        cp(source_data, investment_data)
+        investment_model, investment_periods, investment_sets, _ = OpenEMPIRE.create_model(
+            config_file,
+            investment_data;
+            optimizer = HiGHS.Optimizer,
+            input_format = :csv,
+            include_string_names = false,
+            scenario_rng = Xoshiro(1),
+        )
+        JuMP.set_silent(investment_model)
+        JuMP.optimize!(investment_model)
+        @test JuMP.termination_status(investment_model) == JuMP.MOI.OPTIMAL
+        investment_run = joinpath(root, "full-year-investment-run")
+        OpenEMPIRE.write_investment_csvs(
+            joinpath(investment_run, "Output"),
+            investment_model,
+            investment_sets,
+            investment_periods,
+        )
+
+        oos_model, oos_periods, oos_sets, _ = OpenEMPIRE.create_model(
+            execution_config_file,
+            staged_data;
+            optimizer = HiGHS.Optimizer,
+            input_format = :csv,
+            include_investment_constraints = false,
+            include_string_names = false,
+        )
+        OpenEMPIRE.fix_investments_from_results!(
+            oos_model,
+            oos_sets,
+            oos_periods,
+            investment_run,
+        )
+        JuMP.set_silent(oos_model)
+        JuMP.optimize!(oos_model)
+        @test JuMP.termination_status(oos_model) == JuMP.MOI.OPTIMAL
+        @test JuMP.is_solved_and_feasible(oos_model)
+        @test all(
+            JuMP.is_fixed(oos_model[:genInvCap][node, generator, strategic_period]) for
+            (node, generator) in OpenEMPIRE.node_generators(oos_sets),
+            strategic_period in strat_periods(oos_periods)
+        )
+
+        queue_investment_run = joinpath(root, "investment-run")
+        _write_investment_csvs(joinpath(queue_investment_run, "Output"))
+        _write_test_investment_run_evidence(queue_investment_run, config_file)
         queue_file = OpenEMPIRE.prepare_oos_execution_queue(
             prepared,
-            investment_run;
+            queue_investment_run;
             dataset = source_data,
             config_file = execution_config_file,
             results_root = joinpath(root, "results"),
@@ -242,7 +287,7 @@ function test_full_year_oos_generation()
         YAML.write_file(mismatched_config_file, mismatched_config)
         @test_throws ArgumentError OpenEMPIRE.prepare_oos_execution_queue(
             prepared,
-            investment_run;
+            queue_investment_run;
             dataset = source_data,
             config_file = mismatched_config_file,
             results_root = joinpath(root, "other-results"),

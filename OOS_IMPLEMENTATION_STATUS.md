@@ -153,7 +153,7 @@ Implementation commits, oldest first:
 | 4k. Infeasibility fix | Match InternalEMPIRE by omitting investment-only constraints after capacities are fixed | Root cause demonstrated, locally regression-tested, and verified by job 6421 |
 | 4l. Fresh representative rerun | Create, stage, submit, and verify a new immutable run without touching job 6420 | Job 6421 completed `OPTIMAL`; all acceptance evidence passed |
 | 5. Aggregation | Validate, summarize, and combine results across trees | Implemented; deterministic two-tree tests and job 6421 local validation passed; real seed-201/202 input and queue prepared, solves pending |
-| 6. Full-year OOS | InternalEMPIRE-equivalent 24 independently solved 365-hour chunks, each with one winter scenario and one dummy peak hour | Implemented and deterministically tested locally; fixed-investment smoke solve, direct Python comparison, and controlled runtime evidence remain pending |
+| 6. Full-year OOS | InternalEMPIRE-equivalent 24 independently solved 365-hour chunks, each with one winter scenario and one dummy peak hour | Implemented, deterministically tested, and one generated tree solved locally with fixed investments; direct Python comparison and controlled runtime evidence remain pending |
 
 ## Completion evidence matrix
 
@@ -164,7 +164,7 @@ Treat a `pending` row as incomplete even when its code and local tests pass.
 | 1. Export, provenance-check, compatibility-check, and apply fixed investments | Deterministic provenance/compatibility/key-set tests; job 6421 fixed all eight tables and reproduced them byte-for-byte | Proven |
 | 2. Execute and aggregate multiple representative trees | Synthetic two-tree aggregation passes; real seed-201/202 queue and stage metadata are distinct and ready, but neither solve has run | Pending runtime evidence |
 | 3. Physical ENS weighting and conditional/expected distinction | Representative fixtures and job 6421 prove representative semantics; full-year tests prove winter `(8760-1)/365`, unit dummy-peak weight, dummy exclusion, and ordered 24-tree aggregation | Proven locally; controlled full-year result evidence pending |
-| 4. InternalEMPIRE-equivalent full-year construction and solve | Julia now generates exact chunks 1:365 through 8396:8760, builds each as winter 365 + dummy peak 1, creates 24 independent queue jobs, and concatenates winter results to HourFullYear 1:8760 | Implementation and model-build evidence proven; local fixed-investment solve, direct Python output comparison, and controlled Solstorm runs pending |
+| 4. InternalEMPIRE-equivalent full-year construction and solve | Julia generates exact chunks 1:365 through 8396:8760, builds winter 365 + dummy peak 1, creates 24 jobs, solves a generated test tree with exported/fixed investments, and concatenates winter results to HourFullYear 1:8760 | Local implementation and smoke solve proven; direct Python output comparison and controlled Solstorm runs pending |
 | 5. Separate fixed investment and second-stage costs with documented units | Aggregation tests and job 6421 summary reconcile fixed EUR, non-investment EUR, load-shed EUR, and undiscounted physical MWh | Proven |
 | 6. Deterministic regression tests plus controlled Solstorm evidence | Full suite and job 6421 pass; completion requires both real representative trees and controlled 24 × 365-hour Solstorm evidence; job 6424 cannot satisfy this gate | Pending runtime evidence |
 | 7. Living documentation and reviewable PR plan | This handoff plus the dependency-ordered employee-review sequence below | Proven as integration-branch planning |
@@ -314,6 +314,11 @@ support comparison while the InternalEMPIRE-equivalent replacement is built.
 - Full-year ENS summaries ignore dummy-peak rows but retain TimeStruct's winter
   multiplicity for each independently annualized tree. Fixed investment cost
   remains separate from each tree's second-stage operating cost.
+- A local HiGHS smoke test solves the ordinary test investment model, exports
+  all eight investment/installed-capacity tables, builds generated full-year
+  `oos_tree1`, fixes every generator investment variable from those tables, and
+  solves the 365+1 OOS model to `OPTIMAL` with investment-only constraints
+  omitted.
 - Provenance: commits `cc59b61`, `5d3e0c7`, and `6d15ede` are new Julia work
   based directly on checked-in InternalEMPIRE source. No `rf/...` branch was
   merged or cherry-picked. Reusable timestamp validation came from the
@@ -1030,6 +1035,10 @@ overwriting evidence from an in-progress or completed experiment.
   and a 24-job execution queue. A generated 365+1 tree builds a 47,580-variable
   generator-operation model on the test dataset with two representative
   periods per strategic period and two storage-cycle boundaries.
+- The focused fixed-investment smoke function passes 81/81 assertions. Its
+  source investment solve contains 56,160 generator-operation variables; its
+  generated 365+1 OOS solve contains 47,580 and finishes `OPTIMAL` with all
+  generator investment variables fixed.
 - Full-year aggregation tests create 24 completed result fixtures, deliberately
   reverse their input order, ignore 24 extreme dummy-peak rows, and verify that
   the streamed combined CSV contains 8,760 ordered winter rows with matching
@@ -1210,12 +1219,12 @@ overwriting evidence from an in-progress or completed experiment.
 4. `src/oos_staging.jl` is now 837 lines and contains safety/evidence logistics
    rather than model mathematics. Review whether to split it before a PR; do
    not mix that refactor into the first representative-run debugging work.
-5. The accepted 24 x 365-hour generator, model configuration, queue, and
-   aggregation now pass deterministic tests. Missing evidence is a local
-   fixed-investment solve of a generated 365+1 tree, a direct intermediate
-   output comparison with InternalEMPIRE, and controlled runtime evidence for
-   all 24 chunks. The superseded one-period job `6424` remains in expensive
-   post-solve diagnostics and cannot satisfy those gates.
+5. The accepted 24 x 365-hour generator, model configuration, queue,
+   aggregation, and one-tree local fixed-investment solve now pass. Missing
+   evidence is a direct intermediate-output comparison with InternalEMPIRE and
+   controlled runtime evidence for all 24 chunks. The superseded one-period job
+   `6424` remains in expensive post-solve diagnostics and cannot satisfy those
+   gates.
 6. The current continuation branch is an integration branch, not a proposed
    single employee-review PR. Prefer sequential PRs: runner workflow, core OOS,
    experiment orchestration, then optional Solstorm tooling.
@@ -1256,13 +1265,13 @@ Continue controlled Solstorm evidence without starting more than one long job:
 1. Preserve and monitor superseded job `6424`; do not resubmit it. On
    completion, collect scheduler accounting, final manifest, output inventory,
    and post-solve memory/timing evidence as diagnostics only.
-2. Add a fast local fixed-investment solve for one generated 365+1 tree and
-   prove the dummy defaults, fixed-capacity application, feasibility, and
-   objective/ENS reporting through the actual runner path.
-3. Generate a small authoritative InternalEMPIRE reference and compare its
+2. Generate a small authoritative InternalEMPIRE reference and compare its
    chunk rows, defaults after model loading, TimeStruct/Pyomo weights, and
    concatenated identifiers with Julia. Record any intentional file-format
    differences explicitly.
+3. Exercise one generated 365+1 tree through the actual Julia runner so its
+   manifest, objective components, fixed-capacity outputs, and ENS summary are
+   validated together without Solstorm.
 4. After job `6424` is terminal, execute the two representative jobs
    sequentially and aggregate them. Later submit controlled 24 x 365-hour
    evidence only after the local parity and smoke-test gates pass.
