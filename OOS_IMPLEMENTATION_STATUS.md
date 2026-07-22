@@ -1143,3 +1143,26 @@ Prepare controlled Solstorm evidence without starting more than one long job:
 - The previous full-year stage pinned to `fb56a887ac83` remains preserved as
   evidence, but is superseded for execution: it does not contain the explicit
   resource requests and its code fingerprint cannot represent the new adapter.
+
+### Full-year staging metadata defect found by remote preflight
+
+- Commit `56643a1` added and locally validated explicit `h_vmem=320G`,
+  `h_rt=12:00:00`, and `mem_free=320G` requests. A new isolated remote stage
+  was created at
+  `/home/torgrif/OpenEMPIRE.jl/stages/full_year_2015_3a0915a_oos_tree1_56643a101fb8`.
+- Archive transfer, extraction, Julia 1.9.3 dependency setup, and all six remote
+  fingerprints passed. No queue existed and no scheduler command had run.
+- Remote queue preparation then stopped before creating a queue because the
+  staged experiment manifest defaulted to `representative_period` while the
+  tree metadata correctly said `chronological_full_year`. This is a staging
+  metadata-preservation defect, not a model infeasibility or solver result.
+- `_oos_remote_experiment_manifest` now selects the requested source tree and
+  preserves its evaluation mode, sample year, annual operational hours, and
+  generation-config fingerprint. The regression test covers both existing
+  representative-period staging and chronological full-year metadata.
+- The complete local test suite passes after the fix: staging 108 assertions,
+  SGE 69, full-year 64, core OOS 161, and every other suite; the one known
+  broken Python fixture-parity check is unchanged.
+- The failed `56643a1` stage remains preserved as preflight evidence and must
+  not be patched or submitted. A fresh revision-pinned stage is required after
+  committing this fix.

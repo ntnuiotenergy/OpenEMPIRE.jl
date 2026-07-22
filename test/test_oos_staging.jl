@@ -86,6 +86,7 @@ function test_prepare_oos_solstorm_staging()
         @test remote_experiment["status"] == "complete"
         @test remote_experiment["num_trees"] == 1
         @test remote_experiment["seed_start"] == 211
+        @test remote_experiment["evaluation_mode"] == "representative_period"
         @test remote_experiment["trees"][1]["index"] == 1
         @test remote_experiment["trees"][1]["name"] == "oos_tree1"
 
@@ -111,6 +112,25 @@ function test_prepare_oos_solstorm_staging()
         cp(remote_metadata_file, joinpath(mock_remote_tree, "metadata.yaml"))
         @test OpenEMPIRE._oos_directory_sha256(mock_remote_tree) ==
               plan["remote"]["tree_sha256"]
+
+        full_year_source = deepcopy(remote_experiment)
+        full_year_source["evaluation_mode"] = "chronological_full_year"
+        full_year_source["operational_hours_per_year"] = 8760
+        full_year_source["generation_source_config_sha256"] = repeat("a", 64)
+        full_year_source["sample_years"] = [2015]
+        full_year_source["trees"][1]["sample_year"] = 2015
+        full_year_remote = OpenEMPIRE._oos_remote_experiment_manifest(
+            full_year_source,
+            "oos_tree1",
+            "/remote/dataset",
+            "/remote/config.yaml",
+            "/remote/experiment",
+        )
+        @test full_year_remote["evaluation_mode"] == "chronological_full_year"
+        @test full_year_remote["operational_hours_per_year"] == 8760
+        @test full_year_remote["generation_source_config_sha256"] == repeat("a", 64)
+        @test full_year_remote["sample_years"] == [2015]
+        @test full_year_remote["trees"][1]["sample_year"] == 2015
 
         commands = plan["commands"]
         command_text = join((command["display"] for command in commands), "\n")

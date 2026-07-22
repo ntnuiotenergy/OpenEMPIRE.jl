@@ -147,14 +147,34 @@ end
 
 function _oos_remote_experiment_manifest(
     source_experiment,
-    seed::Integer,
+    source_tree_name::AbstractString,
     remote_dataset::AbstractString,
     remote_config::AbstractString,
     remote_experiment::AbstractString,
 )
     created_at = get(source_experiment, "created_at_utc", string(now(UTC), "Z"))
     remote_tree = joinpath(remote_experiment, "oos_tree1")
-    return Dict{String, Any}(
+    source_tree_index = findfirst(
+        tree -> tree["name"] == source_tree_name,
+        source_experiment["trees"],
+    )
+    source_tree_index === nothing && throw(ArgumentError(
+        "Source experiment does not contain selected tree: $source_tree_name",
+    ))
+    source_tree = source_experiment["trees"][source_tree_index]
+    remote_tree_entry = Dict{String, Any}(
+        "index" => 1,
+        "name" => "oos_tree1",
+        "seed" => Int(source_tree["seed"]),
+        "path" => remote_tree,
+        "status" => "complete",
+        "metadata_file" => joinpath(remote_tree, "metadata.yaml"),
+        "error" => nothing,
+    )
+    haskey(source_tree, "sample_year") &&
+        (remote_tree_entry["sample_year"] = Int(source_tree["sample_year"]))
+
+    manifest = Dict{String, Any}(
         "schema_version" => 1,
         "kind" => "oos_tree_experiment",
         "status" => "complete",
@@ -165,18 +185,20 @@ function _oos_remote_experiment_manifest(
         "source_config_file" => remote_config,
         "source_config_sha256" => source_experiment["source_config_sha256"],
         "input_format" => source_experiment["input_format"],
-        "seed_start" => Int(seed),
+        "seed_start" => Int(source_tree["seed"]),
         "num_trees" => 1,
-        "trees" => Any[Dict{String, Any}(
-            "index" => 1,
-            "name" => "oos_tree1",
-            "seed" => Int(seed),
-            "path" => remote_tree,
-            "status" => "complete",
-            "metadata_file" => joinpath(remote_tree, "metadata.yaml"),
-            "error" => nothing,
-        )],
+        "trees" => Any[remote_tree_entry],
     )
+    for key in (
+        "evaluation_mode",
+        "operational_hours_per_year",
+        "generation_source_config_sha256",
+    )
+        haskey(source_experiment, key) && (manifest[key] = source_experiment[key])
+    end
+    haskey(source_tree, "sample_year") &&
+        (manifest["sample_years"] = [Int(source_tree["sample_year"])])
+    return manifest
 end
 
 function _write_oos_staging_yaml(path::AbstractString, value)
@@ -345,7 +367,7 @@ function prepare_oos_solstorm_staging(
 
     adjusted_experiment = _oos_remote_experiment_manifest(
         experiment_manifest,
-        job["seed"],
+        job["tree"],
         remote_dataset,
         remote_generation_config,
         remote_experiment,
