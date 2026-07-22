@@ -286,6 +286,51 @@ function test_reject_incomplete_oos_runner_options()
     return nothing
 end
 
+function test_reject_mismatched_oos_tree_config()
+    mktempdir() do root
+        tree_dir = joinpath(root, "full-year-tree")
+        mkpath(tree_dir)
+        config = YAML.load_file(joinpath(pkgdir(OpenEMPIRE), "config", "testrun.yaml"))
+        full_year_config = OpenEMPIRE._chronological_oos_config(config, 8760)
+        metadata_config = Dict{String, Any}(
+            key => full_year_config[key] for key in OpenEMPIRE._OOS_TREE_CONFIG_KEYS
+            if haskey(full_year_config, key)
+        )
+        YAML.write_file(
+            joinpath(tree_dir, "metadata.yaml"),
+            Dict{String, Any}(
+                "evaluation_mode" => "chronological_full_year",
+                "config" => metadata_config,
+                "chronology" => Dict{String, Any}(
+                    "operational_hours" => 8760,
+                    "representative_periods" => 1,
+                    "operational_scenarios" => 1,
+                    "expected_hour_multiplicity" => 1,
+                    "dummy_peak" => false,
+                    "storage_cycle_boundaries_per_strategic_period" => 1,
+                ),
+            ),
+        )
+        matching_config_file = joinpath(root, "matching.yaml")
+        YAML.write_file(matching_config_file, full_year_config)
+        @test _validate_oos_tree_execution_config(matching_config_file, tree_dir) === nothing
+
+        mismatched_config = deepcopy(full_year_config)
+        mismatched_config["length_of_regular_season"] = 365
+        mismatched_config_file = joinpath(root, "mismatched.yaml")
+        YAML.write_file(mismatched_config_file, mismatched_config)
+        @test_throws ArgumentError _validate_oos_tree_execution_config(
+            mismatched_config_file,
+            tree_dir,
+        )
+
+        legacy_tree = joinpath(root, "legacy-tree")
+        mkpath(legacy_tree)
+        YAML.write_file(joinpath(legacy_tree, "metadata.yaml"), Dict("seed" => 1))
+        @test _validate_oos_tree_execution_config(matching_config_file, legacy_tree) === nothing
+    end
+end
+
 function test_runner_solver_result_extraction()
     infeasible = Model(HiGHS.Optimizer)
     set_silent(infeasible)

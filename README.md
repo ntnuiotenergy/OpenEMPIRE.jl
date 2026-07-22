@@ -280,6 +280,39 @@ prove `optimize=true` and `OPTIMAL`; these are explicitly labelled
 `reconstructed_legacy_run`. The runner stages this evidence as
 `fixed_investment_provenance.yaml` and `source_config.yaml`.
 
+### Preparing chronological full-year OOS
+
+Prepare one OOS tree for each selected complete non-leap historical year:
+
+```bash
+julia --project=. scripts/prepare_full_year_oos_experiment.jl europe_v51 \
+  --config=config/run_2045_3sce.yaml \
+  --sample-years=2015 \
+  --format=csv \
+  --output=OutOfSample/europe_v51/full_year_2015
+```
+
+The command only prepares inputs; it does not build or solve EMPIRE. It writes
+`full_year_config.yaml`, `experiment.yaml`, and one checksummed `oos_treeN` per
+sample year. Supply the generated `full_year_config.yaml`—not the original
+representative-period config—to `prepare_oos_execution_queue.jl` and the Julia
+runner.
+
+Each strategic period receives the same selected historical profile as one
+ordered 8760-hour operational scenario. The time structure contains one
+regular period, one scenario, no dummy peak, and one storage cycle boundary at
+the end of the year. `operational_hours_per_year: 8760` makes every modeled
+hour's representative multiplicity exactly one. All required raw files must
+contain exactly the same gap-free hourly non-leap year; source rows are sorted
+by parsed timestamp before output because some historical files are stored in
+a non-chronological row order.
+
+This intentionally differs from InternalEMPIRE's current 24 independent
+365-hour runs. In Julia, placing a 365-hour block inside
+`RepresentativePeriods(8760, ...)` scales that block to a representative year,
+and independent blocks also reset cyclic storage 24 times. Those semantics are
+not a continuous chronological full-year evaluation.
+
 Forecast horizon, investment-period length, North Sea mode, emission-cap mode,
 discount rate, WACC, and load-change mode must match the investment run.
 Scenario count and operational season/time settings may differ intentionally

@@ -14,6 +14,7 @@ include("test_excel.jl")
 include("test_csv.jl")
 include("test_scenario_csv.jl")
 include("test_out_of_sample.jl")
+include("test_oos_full_year.jl")
 include("test_oos_aggregation.jl")
 include("test_runner_performance.jl")
 include("test_runner_manifest.jl")
@@ -78,6 +79,12 @@ end
     test_oos_omits_investment_only_constraints()
 end
 
+@testset "OOS full-year" begin
+    test_full_year_oos_generation()
+    test_chronological_oos_fixture_semantics()
+    test_chronological_source_validation()
+end
+
 @testset "OOS aggregation" begin
     test_oos_physical_time_weights()
     test_summarize_and_aggregate_oos_results()
@@ -100,6 +107,7 @@ end
     test_resolve_julia_run_spec()
     test_resolve_single_tree_oos_run_spec()
     test_reject_incomplete_oos_runner_options()
+    test_reject_mismatched_oos_tree_config()
     test_runner_solver_result_extraction()
 end
 
@@ -113,6 +121,7 @@ end
 
 @testset "TimeStruct" begin
     test_timestruct()
+    test_chronological_timestruct()
     test_variables()
     test_variable_large()
     test_constraints()
