@@ -314,6 +314,52 @@ tree, and investment result are not modified. When the tree contains
 and records the tree seed, full provenance, and base investment run in
 `run_manifest.yaml`.
 
+### Aggregating out-of-sample results
+
+Aggregate one or more completed OOS run directories without rebuilding or
+solving a model:
+
+```bash
+julia --project=. scripts/aggregate_out_of_sample_results.jl \
+  results/julia_oos_runs/<experiment> \
+  --output=results/julia_oos_aggregations/<experiment>
+```
+
+The command discovers OOS `run_manifest.yaml` files beneath the supplied
+paths. Every selected run must be complete and feasible, must confirm fixed
+investments and scenario checksums, and must have byte-identical staged
+configurations and fixed-investment tables. It also verifies that all eight
+capacity outputs still match their staged fixed inputs.
+
+The aggregation writes:
+
+```text
+oos_tree_summary.csv
+oos_ens_by_period_scenario.csv
+oos_ens_by_period_scenario_season.csv
+aggregation_manifest.yaml
+combined/genOperational.csv
+combined/transmissionOperational.csv
+combined/storCharge.csv
+combined/storDischarge.csv
+combined/loadShed.csv
+```
+
+Combined operational files are streamed rather than loaded into memory and
+add `Tree`, `Seed`, and `Run` identifiers. Use `--files=loadShed` to select a
+smaller set or `--files=none` to produce only summaries. Existing non-empty
+aggregation directories are rejected unless `--overwrite=true` is explicit.
+
+Physical energy not served (ENS) is calculated from each load-shedding row as
+`loadShed_MW * multiple_strat * probability * duration`. The scenario table
+reports both conditional annual ENS (without scenario probability) and its
+probability-weighted contribution. ENS is never discounted. Objective
+components remain financial and discounted: fixed generator, storage, and
+transmission investment costs are reported separately from the varying
+non-investment objective so constant investment offsets do not dominate
+cross-tree comparisons. The manifest records source and output checksums,
+units, formula, threshold, and tree provenance.
+
 ### Comparable multi-seed Julia/Python parity runs
 
 Scenario draws are **not** cross-language reproducible (Julia's RNG differs from

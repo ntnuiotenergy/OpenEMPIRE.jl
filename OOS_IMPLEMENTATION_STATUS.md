@@ -1,6 +1,6 @@
 # OOS implementation status and handoff
 
-Last updated: 2026-07-21
+Last updated: 2026-07-22
 
 This is the living handoff document for out-of-sample (OOS) work in the Julia
 version of EMPIRE. Update it whenever OOS behavior, workflow, concrete
@@ -43,11 +43,12 @@ investment run
     -> aggregate cost, reliability, emissions, and other metrics
 ```
 
-The current code prepared and submitted one representative one-tree OOS run.
-That historical model reached Gurobi but was infeasible. The identified cause
-has been fixed locally, and a new immutable one-tree rerun package pinned to
-`8a3dc07` has passed local preflight. No representative OOS run has completed
-successfully yet. Aggregation and full-year OOS are also still pending.
+The current code has completed one representative one-tree OOS run successfully
+and now validates and aggregates completed OOS results locally. Job 6421 reached
+`OPTIMAL`, reproduced all eight fixed-capacity tables, and has been converted
+from raw load-shedding MW into correctly weighted physical ENS. Deterministic
+two-tree fixtures validate the cross-tree path. Multiple real trees have not
+yet been run, and chronological full-year OOS is still pending.
 
 ## Branch and provenance
 
@@ -93,6 +94,9 @@ Implementation commits, oldest first:
 | `9c54646` | Omit investment-only constraints during fixed-capacity OOS evaluation |
 | `4b007ad` | Record the infeasibility diagnosis and rerun plan |
 | `8a3dc07` | Correct the handoff test totals and constraint terminology |
+| `c0b0916` | Record the fresh rerun preflight checkpoint |
+| `e0d736c` | Record the validated fresh Solstorm stage |
+| `ab38075` | Record successful representative OOS job 6421 |
 
 ## Functional progress
 
@@ -110,10 +114,10 @@ Implementation commits, oldest first:
 | 4g. Local archive preflight | Create and inspect only the two local archives | Passed on 2026-07-21 |
 | 4h. Remote staging preflight | Transfer, dependencies, recovery, all input validations, queue, and SGE preparation | Passed; one pending job and prepared script verified remotely |
 | 4i. One-tree solver run | Submit and monitor one SGE job | Job 6420 finished with process exit 1: model infeasible, followed by an objective-value reporting exception |
-| 4j. No-solution reporting | Preserve solver status and terminal manifest evidence without reading a missing objective | Implemented locally and tested; not rerun on Solstorm |
-| 4k. Infeasibility fix | Match InternalEMPIRE by omitting investment-only constraints after capacities are fixed | Root cause demonstrated and fix locally tested; representative rerun pending |
-| 4l. Fresh rerun package | Create a new revision-pinned queue, staging plan, and archives without touching job 6420 | Local preflight passed at `8a3dc07`; remote staging not started |
-| 5. Aggregation | Combine validated results across trees | Not implemented |
+| 4j. No-solution reporting | Preserve solver status and terminal manifest evidence without reading a missing objective | Implemented and tested; the corrected runner was included in successful job 6421 |
+| 4k. Infeasibility fix | Match InternalEMPIRE by omitting investment-only constraints after capacities are fixed | Root cause demonstrated, locally regression-tested, and verified by job 6421 |
+| 4l. Fresh representative rerun | Create, stage, submit, and verify a new immutable run without touching job 6420 | Job 6421 completed `OPTIMAL`; all acceptance evidence passed |
+| 5. Aggregation | Validate, summarize, and combine results across trees | Implemented; deterministic two-tree tests and job 6421 local validation passed |
 | 6. Full-year OOS | Full-year evaluation described in the original plan | Not completed |
 
 ## Main code and data flow
@@ -149,6 +153,34 @@ Implementation commits, oldest first:
     fixed capacities, while ordinary investment runs retain them by default;
   - records whether investment constraints were included in the manifest and
     summary.
+
+### Result validation and aggregation
+
+- `src/oos_aggregation.jl`
+  - accepts only complete, feasible OOS manifests with verified scenario inputs
+    and fixed investments;
+  - checks the staged config and scenario metadata against the run manifest;
+  - verifies that all eight emitted capacity tables are byte-identical to the
+    staged fixed-investment inputs;
+  - calculates conditional physical ENS with
+    `loadShed * multiple_strat * duration` and expected ENS contributions with
+    `loadShed * multiple_strat * probability * duration`, without discounting;
+  - keeps discounted fixed-investment cost separate from the non-investment
+    objective used for cross-tree comparison;
+  - streams the five operational result files named in Plan step 5 into combined
+    CSVs with `Tree`, `Seed`, and `Run` identifiers;
+  - rejects mixed configs, mixed fixed investments, duplicate tree names, and
+    non-empty output directories unless overwrite is explicit.
+- `scripts/aggregate_out_of_sample_results.jl`
+  - discovers one or more result manifests and writes tree, scenario, and
+    scenario-season summaries plus a checksummed aggregation manifest;
+  - supports `--files=<list>` for selected combined outputs and `--files=none`
+    for summary-only analysis.
+- Provenance: the default file list and `Tree`/`Run` identifier convention were
+  manually ported from `origin/pr/14` (`8d3af69`). Its old batch-summary reader
+  was not used because the workbench runner now has stronger manifests. The
+  `origin/rf/result_aggregates` helper was inspected but not ported: its load
+  shedding calculation does not explicitly apply the required duration.
 
 ### Solstorm preparation
 
@@ -606,6 +638,29 @@ overwrite any earlier evidence.
   yet establish acceptable reliability across multiple trees or implement a
   chronological full-year OOS evaluation.
 
+### Job 6421 aggregation completed locally on 2026-07-22
+
+- Aggregation output:
+  `results/julia_oos_aggregations/job6421_seed101`.
+- The validator reproduced the fixed-investment fingerprint
+  `9321df4c69cf2664ade384e5c2f9d59f7455a527725fcf813dd49a1b25fd9274`
+  and verified all eight fixed-capacity outputs byte-for-byte.
+- Discounted fixed-investment cost is `2.1165135004239844e12` EUR; discounted
+  non-investment objective is `8.593209539058662e11` EUR. These are now separate
+  comparison columns rather than one dominated objective value.
+- Probability-weighted physical annual ENS summed across the five strategic
+  periods is `462020.62800057005` MWh. This aggregate is not a discounted
+  financial quantity; period/scenario values are retained separately in
+  `oos_ens_by_period_scenario.csv`.
+- The material-event count is 142 node-hour rows above `1e-6` MW. The maximum
+  remains `21635.71246762143` MW at Germany, period 3, scenario 2, `peak1`, hour
+  11. This independently reproduces the earlier raw-event audit.
+- A combined `loadShed.csv` with 529,200 rows was written by the streaming path.
+  The other Plan-step-5 operational files are covered by the same generic path
+  and deterministic tests but were not duplicated locally for this one-tree
+  validation because their source files are already preserved in the 1.4 GB
+  result.
+
 ### Regeneration commands
 
 Run from the repository root at revision `8a3dc07` to reproduce the fresh
@@ -644,6 +699,17 @@ intentionally stale. Prepare a new queue path instead of deleting or
 overwriting evidence from an in-progress or completed experiment.
 
 ## Verification completed
+
+- OOS aggregation focused tests pass 29/29. They cover exact time weights,
+  conditional versus expected ENS, fixed/non-investment cost separation,
+  two-tree discovery and aggregation, streaming combined CSV identifiers,
+  output overwrite protection, and changed-capacity rejection.
+- The full repository suite passed after aggregation: Excel 66, CSV 63, CSV
+  scenarios 164 with one known broken Python fixture check, runner 76, core OOS
+  142, aggregation 29, all Solstorm workflow suites, validation 16, TimeStruct
+  17, and solve 3.
+- The job 6421 aggregation completed in about nine seconds when validating ENS
+  and streaming all 529,200 load-shedding rows.
 
 - Full repository suite after Plan 4e: 587 passed, with one pre-existing broken
   Python scenario-parity check caused by missing Python-side
@@ -774,15 +840,17 @@ overwriting evidence from an in-progress or completed experiment.
    current `run_manifest.yaml`. Its eight capacity tables loaded and were fixed
    in the current model. Job 6420 does not establish operational infeasibility
    under tree 101 because redundant fixed investment equalities already made
-   the full model infeasible. The fresh package is staged and validated but has
-   not yet been submitted or run.
+   the full model infeasible. Job 6421 is the successful corrected run, but the
+   legacy base run still lacks explicit configuration provenance and
+   compatibility evidence.
 3. The `rf/...` OOS branches and open PRs have not yet been reconciled against
    this implementation. No historical branch should be discarded without that
    comparison and coordination with its author/reviewer.
 4. `src/oos_staging.jl` is now 837 lines and contains safety/evidence logistics
    rather than model mathematics. Review whether to split it before a PR; do
    not mix that refactor into the first representative-run debugging work.
-5. Aggregation and full-year OOS remain unimplemented.
+5. Representative-period aggregation is implemented and validated locally.
+   Chronological full-year OOS remains unimplemented.
 6. The current continuation branch is an integration branch, not a proposed
    single employee-review PR. Prefer sequential PRs: runner workflow, core OOS,
    experiment orchestration, then optional Solstorm tooling.
@@ -808,30 +876,28 @@ overwriting evidence from an in-progress or completed experiment.
 12. Job 6420's historical manifest remains `started` because it ran the old
     pinned runner. Commit `d1936ac` fixes this behavior for future runs, but the
     preserved remote evidence must not be edited to simulate a rerun.
-13. Job 6421 contains material load shedding despite being optimal. Load
-    shedding is an allowed penalized variable, so solver feasibility alone is
-    not a reliability acceptance test. Weighted energy-not-served and related
-    per-period/per-scenario metrics must be defined before scaling to many OOS
-    trees.
-14. The OOS objective still reports fixed generator, storage, and transmission
-    investment-cost components. Decide whether multi-tree reporting should
-    retain those constant costs or compare operational and load-shedding costs
-    separately.
+13. Job 6421 contains material load shedding despite being optimal. The new
+    aggregation reports weighted ENS by period/scenario and season, but a
+    reliability acceptance threshold has not been chosen. Do not treat solver
+    feasibility alone as reliability acceptance.
+14. The OOS objective still correctly contains fixed generator, storage, and
+    transmission investment costs, matching InternalEMPIRE. Aggregation now
+    reports that constant offset separately from the non-investment objective.
 
 ## Next recommended task
 
-Implement the local OOS result-validation and aggregation foundation:
+Close the base-investment provenance and compatibility gap before full-year
+work:
 
-1. Define a compact per-tree result-summary schema based on `run_manifest.yaml`
-   and the output CSVs. Preserve solver status, fingerprints, seed, objective
-   components, and fixed-investment verification.
-2. Determine and document the correct representative-period weights for load
-   shedding. Report weighted energy not served by strategic period and scenario,
-   plus event count and maximum MW; do not use the raw CSV sum as annual energy.
-3. Implement streaming analysis so multi-gigabyte operational CSVs are not
-   loaded into memory. Keep fixed investment costs distinguishable from OOS
-   operational and load-shedding costs.
-4. Add deterministic unit fixtures and validate the implementation against the
-   collected seed-101 result without running a solver.
-5. Use the resulting acceptance report to decide whether to prepare multiple
-   OOS trees or first investigate the material load-shedding events.
+1. Define which investment-run configuration fields must match an OOS run and
+   which fields may intentionally differ (scenario seed/tree generation and the
+   full-year operational structure).
+2. Record a normalized structural-configuration summary and the eight-table
+   fingerprint in new investment run manifests.
+3. Validate available legacy investment runs from their staged config and
+   capacity tables, recording that the provenance was reconstructed rather than
+   claiming a manifest existed.
+4. Make OOS queue/runner preparation fail clearly on incompatible structural
+   settings while permitting documented full-year differences.
+5. Add deterministic compatibility tests. Then proceed to Plan step 6 with a
+   small chronological fixture before any full Solstorm run.
