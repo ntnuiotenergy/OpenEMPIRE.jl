@@ -95,6 +95,32 @@ function test_oos_physical_time_weights()
     @test sum(weight.expected for weight in values(weights)) ≈ 8760.0
 end
 
+function test_oos_chronological_full_year_time_weights()
+    config = Dict{String, Any}(
+        "forecast_horizon_year" => 2025,
+        "leap_years_investment" => 5,
+        "regular_seasons" => ["full_year"],
+        "length_of_regular_season" => 8760,
+        "n_peak_seasons" => 0,
+        "len_peak_season" => 0,
+        "number_of_scenarios" => 1,
+        "operational_hours_per_year" => 8760,
+    )
+    weights = OpenEMPIRE._oos_time_weights(config)
+    @test length(weights) == 8760
+    @test weights[(1, 1, "full_year", 1)] == (
+        conditional = 1.0,
+        probability = 1.0,
+        expected = 1.0,
+    )
+    @test weights[(1, 1, "full_year", 8760)] == (
+        conditional = 1.0,
+        probability = 1.0,
+        expected = 1.0,
+    )
+    @test sum(weight.expected for weight in values(weights)) == 8760.0
+end
+
 function test_summarize_and_aggregate_oos_results()
     mktempdir() do root
         shed_rows = [

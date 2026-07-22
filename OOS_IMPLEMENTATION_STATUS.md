@@ -49,8 +49,9 @@ and now validates and aggregates completed OOS results locally. Job 6421 reached
 from raw load-shedding MW into correctly weighted physical ENS. Deterministic
 two-tree fixtures validate the cross-tree path. A true chronological full-year
 input path is now implemented and locally validated, including a complete 2015
-`europe_v51` tree and ready execution queue. Multiple real representative trees
-and the full-year Solstorm solve have not yet been run.
+`europe_v51` tree. Controlled full-year job `6424` is currently running the
+intended 43,800-time-step model on Solstorm. The two real representative trees
+remain prepared but unsubmitted until that sole long job is terminal.
 
 ## Branch and provenance
 
@@ -102,6 +103,11 @@ Implementation commits, oldest first:
 | `7c98a04` | Add validated OOS result aggregation |
 | `97972b0` | Validate OOS investment provenance |
 | `3a0915a` | Add chronological full-year OOS foundation |
+| `56643a1` | Add explicit OOS SGE resource requests |
+| `4011f4c` | Preserve full-year mode in isolated Solstorm staging |
+| `9551a16` | Record controlled full-year OOS submission 6424 |
+| `9c861a5` | Preserve logical scenario-tree identity across isolated stages |
+| `d7e2494` | Record refreshed representative queue and staging plans |
 
 ## Functional progress
 
@@ -123,7 +129,7 @@ Implementation commits, oldest first:
 | 4k. Infeasibility fix | Match InternalEMPIRE by omitting investment-only constraints after capacities are fixed | Root cause demonstrated, locally regression-tested, and verified by job 6421 |
 | 4l. Fresh representative rerun | Create, stage, submit, and verify a new immutable run without touching job 6420 | Job 6421 completed `OPTIMAL`; all acceptance evidence passed |
 | 5. Aggregation | Validate, summarize, and combine results across trees | Implemented; deterministic two-tree tests and job 6421 local validation passed; real seed-201/202 input and queue prepared, solves pending |
-| 6. Full-year OOS | One ordered 8760-hour scenario with unit multiplicity and one annual storage cycle | Implemented and locally validated; real `europe_v51` inputs and queue prepared, Solstorm solve pending |
+| 6. Full-year OOS | One ordered 8760-hour scenario with unit multiplicity and one annual storage cycle | Implemented and locally validated; real job 6424 is running the intended 43,800-time-step model on Solstorm |
 
 ## Main code and data flow
 
@@ -878,8 +884,8 @@ rejected them as duplicates.
 - Focused checks pass (runner 35/35 and aggregation identity 23/23), and the
   complete repository suite exits successfully. Relevant full-suite totals
   are runner staging 84/84, core OOS 161/161, full-year OOS 64/64, and
-  aggregation 30/30; the existing broken Python fixture-parity check remains
-  unchanged.
+  aggregation 30/30 at that commit; the existing broken Python fixture-parity
+  check remains unchanged.
 - The earlier seed-201/202 queues and revision-pinned staging plans remain
   preserved as superseded evidence. A fresh queue is ready at
   `OutOfSample/europe_v51/experiment_seed201_2trees_2e76193/execution_9c861a5.yaml`;
@@ -945,7 +951,8 @@ overwriting evidence from an in-progress or completed experiment.
 - The full-year `europe_v51` input and queue audit passed locally: experiment
   `complete`, queue `ready`, job `pending`, fixed investments `compatible`, and
   exactly 8760.0 probability-weighted hours in each strategic period.
-- OOS aggregation focused tests pass 30/30. They cover exact time weights,
+- OOS aggregation focused tests pass 34/34. They cover exact representative
+  weights, direct 8,760-hour chronological unit weights,
   conditional versus expected ENS, fixed/non-investment cost separation,
   two-tree discovery and aggregation, streaming combined CSV identifiers,
   staged logical-tree identity, output overwrite protection, and
