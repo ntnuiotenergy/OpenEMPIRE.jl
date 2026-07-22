@@ -761,6 +761,57 @@ julia --project=. scripts/prepare_oos_execution_queue.jl europe_v51 \
   --julia-command=julia --resume=true
 ```
 
+### Chronological model size and local Solstorm preflight on 2026-07-22
+
+The size calculation uses the actual `europe_v51` sets and the constraint
+families in `src/model_definition.jl`. As a calibration check, the same formula
+exactly reproduces successful fixed-capacity job 6421: `14,299,315` variables
+and `20,408,245` constraints. The previously documented `20,427,120` count is
+from failed job 6420, before its `18,875` investment-only constraints were
+removed from OOS.
+
+| Fixed-capacity model | Time steps | Operational scenarios | Variables | Constraints |
+| --- | ---: | ---: | ---: | ---: |
+| Representative job 6421 | 10,800 | 90 | 14,299,315 | 20,408,245 |
+| Chronological full year | 43,800 | 5 | 57,957,825 | 82,911,765 |
+
+- The full-year model is `4.0532` times the variables and `4.0627` times the
+  constraints of job 6421.
+- Linear scaling from job 6421's `59.651 GB` maximum virtual memory predicts
+  about `242.3 GB`. Linear wall-time scaling predicts about `3.2 hours`, split
+  approximately into 49 minutes building, 38 minutes solving, and 106 minutes
+  staging/writing results. Solver scaling and output volume need not be linear.
+- Conservative launch target: a high-memory node with at least `320 GB`
+  actually free and a 12-hour execution window. Before submission, query the
+  current Solstorm host capacity and supported SGE resource syntax. The current
+  generated SGE script restricts the job to the known high-memory hosts but
+  does not yet request `h_vmem` or `h_rt` explicitly.
+
+The revision-pinned staging plan is:
+
+`OutOfSample/europe_v51/full_year_2015_3a0915a/solstorm_staging/full_year_2015_3a0915a_oos_tree1_fb56a887ac83/staging.yaml`
+
+- Pinned commit: `fb56a887ac8390dfe7753a4e7bf8379aba94a2aa`.
+- Remote destination reserved by the plan:
+  `/home/torgrif/OpenEMPIRE.jl/stages/full_year_2015_3a0915a_oos_tree1_fb56a887ac83`.
+- The plan is `ready` with no blockers. It records the unrelated dirty launch
+  profile but excludes it from the committed archive.
+- Only local commands 1 and 2 were executed. No SSH, SCP, `qsub`, runner, or
+  solver command was executed.
+- Local archive evidence:
+  `OutOfSample/europe_v51/full_year_2015_3a0915a/solstorm_staging/full_year_2015_3a0915a_oos_tree1_fb56a887ac83/archive_preflight.yaml`.
+- Repository archive: 325 files, 83,850,476 bytes, SHA-256
+  `80ebf6cfd88306416f183cca1ed30117707ff0b80e17bb620958229442673868`.
+  Its extracted OOS code fingerprint is the planned
+  `c63a03cd2f786f19be9047adb8c6886987c7e98c25a95eacfe3b3dbf4a42a180`.
+- Dataset archive: 84 files, 55,390,875 bytes, SHA-256
+  `2d082dc52de87c20c2ac97e6e2ea51924cec7d32b331e463b02d49f9a16efb48`.
+  Its extracted content fingerprint is the planned
+  `1e015ec90929a41d1a543760a54f5298250718f09f34c21fdf9b7eadc58ac5d0`.
+- Both archives extracted cleanly in an isolated temporary directory. Required
+  files were present and no Git metadata, results, OOS artifacts, or private
+  key files were found.
+
 ### Regeneration commands
 
 Run from the repository root at revision `8a3dc07` to reproduce the fresh
@@ -975,9 +1026,9 @@ overwriting evidence from an in-progress or completed experiment.
    not mix that refactor into the first representative-run debugging work.
 5. Chronological full-year generation and local small-case solving are
    implemented, but the 419 MB `europe_v51` tree has not been built or solved.
-   Its operational dimension is substantially larger than the successful
-   representative run, so cluster memory/build time and solver behavior remain
-   unverified.
+   Its exact fixed-capacity size is now estimated and calibrated at 57,957,825
+   variables and 82,911,765 constraints. Cluster memory, build time, solver
+   behavior, and the assumed 320 GB / 12-hour launch envelope remain unverified.
 6. The current continuation branch is an integration branch, not a proposed
    single employee-review PR. Prefer sequential PRs: runner workflow, core OOS,
    experiment orchestration, then optional Solstorm tooling.
@@ -1015,11 +1066,11 @@ overwriting evidence from an in-progress or completed experiment.
 
 Prepare controlled Solstorm evidence without starting more than one long job:
 
-1. Estimate and record the full-year `europe_v51` model dimensions relative to
-   job 6421, then choose an evidence-backed memory/time request.
-2. Create a new revision-pinned Solstorm staging plan from
-   `OutOfSample/europe_v51/full_year_2015_3a0915a/execution.yaml`; run only the
-   local archive preflight first and preserve all earlier stages unchanged.
+1. With explicit approval, make a read-only Solstorm capacity/queue query to
+   verify that at least 320 GB is available on a permitted high-memory host and
+   determine whether `h_vmem`/`h_rt` requests are supported or required.
+2. Execute remote commands 3-14 from the immutable full-year staging plan,
+   recording checksum and queue/SGE preflight evidence without submitting.
 3. After remote input verification, submit exactly one full-year job and record
    its ID, command, logs, expected outputs, and acceptance criteria. Do not
    automatically resubmit an ambiguous failure.
