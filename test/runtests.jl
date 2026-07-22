@@ -86,6 +86,7 @@ end
 @testset "OOS aggregation" begin
     test_oos_physical_time_weights()
     test_oos_chronological_full_year_time_weights()
+    test_internalempire_full_year_aggregation()
     test_summarize_and_aggregate_oos_results()
     test_oos_aggregation_rejects_changed_investments()
 end

@@ -66,6 +66,43 @@ function _oos_result_tree_identity(oos, scenario_metadata)
     return String(identity)
 end
 
+function _oos_full_year_info(scenario_metadata)
+    chronology = get(scenario_metadata, "chronology", nothing)
+    chronology isa AbstractDict || return (
+        formulation = "representative_period",
+        tree_index = 0,
+        dummy_peak_results_ignored = false,
+    )
+    formulation = String(get(chronology, "formulation", "single_chronology"))
+    formulation == "internalempire_24x365" || return (
+        formulation,
+        tree_index = 0,
+        dummy_peak_results_ignored = false,
+    )
+    tree_index = get(chronology, "tree_index", nothing)
+    tree_index isa Integer && tree_index in 1:_OOS_FULL_YEAR_TREE_COUNT || throw(
+        ArgumentError("Full-year OOS result metadata has an invalid tree index"),
+    )
+    get(chronology, "dummy_peak_results_ignored", nothing) == true || throw(
+        ArgumentError("Full-year OOS result metadata must declare ignored dummy-peak results"),
+    )
+    return (
+        formulation,
+        tree_index = Int(tree_index),
+        dummy_peak_results_ignored = true,
+    )
+end
+
+function _internalempire_full_year_hour(tree_index::Int, hour::Int)
+    tree_index in 1:_OOS_FULL_YEAR_TREE_COUNT || throw(ArgumentError(
+        "Full-year tree index must be in 1:$_OOS_FULL_YEAR_TREE_COUNT; got $tree_index",
+    ))
+    hour in 1:_OOS_FULL_YEAR_CHUNK_HOURS || throw(ArgumentError(
+        "Full-year winter hour must be in 1:$_OOS_FULL_YEAR_CHUNK_HOURS; got $hour",
+    ))
+    return hour + (tree_index - 1) * _OOS_FULL_YEAR_CHUNK_HOURS
+end
+
 function _stream_combined_oos_csv(summaries, filename::AbstractString, output_dir::AbstractString)
     output_file = joinpath(output_dir, filename)
     mkpath(dirname(output_file))
@@ -104,6 +141,85 @@ function _stream_combined_oos_csv(summaries, filename::AbstractString, output_di
         name = filename,
         path = output_file,
         rows = rows_written,
+        dummy_peak_rows_ignored = 0,
+        sha256 = _oos_sha256_file(output_file),
+        bytes = filesize(output_file),
+    )
+end
+
+function _stream_internalempire_full_year_csv(
+    summaries,
+    filename::AbstractString,
+    output_dir::AbstractString,
+)
+    output_file = joinpath(output_dir, filename)
+    mkpath(dirname(output_file))
+    expected_header = nothing
+    rows_written = 0
+    dummy_peak_rows_ignored = 0
+    open(output_file, "w") do io
+        for summary in summaries
+            input_file = joinpath(_oos_result_output_dir(summary.RunDirectory), filename)
+            isfile(input_file) || throw(ArgumentError(
+                "OOS result $(summary.Tree) is missing $filename: $input_file",
+            ))
+            rows = CSV.Rows(input_file; reusebuffer = true)
+            peeled = Iterators.peel(rows)
+            peeled === nothing && throw(ArgumentError("OOS result CSV is empty: $input_file"))
+            first_row, remaining_rows = peeled
+            header = propertynames(first_row)
+            :Season in header || throw(ArgumentError(
+                "Full-year OOS result CSV has no Season column: $input_file",
+            ))
+            :Hour in header || throw(ArgumentError(
+                "Full-year OOS result CSV has no Hour column: $input_file",
+            ))
+            if expected_header === nothing
+                expected_header = header
+                println(
+                    io,
+                    "Tree,Seed,Run,ScenarioTree,HourFullYear,",
+                    join(string.(header), ","),
+                )
+            elseif header != expected_header
+                throw(ArgumentError("OOS result CSV header mismatch for $input_file"))
+            end
+            prefix = join(
+                _csv_field.((summary.Tree, summary.Seed, basename(summary.RunDirectory))),
+                ",",
+            )
+            for row in Iterators.flatten(((first_row,), remaining_rows))
+                season = String(row.Season)
+                if season != "winter"
+                    dummy_peak_rows_ignored += 1
+                    continue
+                end
+                hour = row.Hour isa Integer ? Int(row.Hour) : parse(Int, String(row.Hour))
+                full_year_hour = _internalempire_full_year_hour(
+                    summary.FullYearTreeIndex,
+                    hour,
+                )
+                print(
+                    io,
+                    prefix,
+                    ",",
+                    _csv_field(summary.Tree),
+                    ",",
+                    full_year_hour,
+                )
+                for name in header
+                    print(io, ",", _csv_field(getproperty(row, name)))
+                end
+                println(io)
+                rows_written += 1
+            end
+        end
+    end
+    return (
+        name = filename,
+        path = output_file,
+        rows = rows_written,
+        dummy_peak_rows_ignored,
         sha256 = _oos_sha256_file(output_file),
         bytes = filesize(output_file),
     )
@@ -243,6 +359,7 @@ function _oos_ens_rows(
     tree::AbstractString,
     seed::Int;
     event_threshold_mw::Float64,
+    ignored_seasons::Set{String} = Set{String}(),
 )
     weights = _oos_time_weights(config)
     scenario_accumulators = Dict{Tuple{Int, Int}, _OOSEnsAccumulator}()
@@ -267,6 +384,7 @@ function _oos_ens_rows(
         period = Int(row.Period)
         scenario = Int(row.Scenario)
         season = String(row.Season)
+        season in ignored_seasons && continue
         hour = Int(row.Hour)
         node = String(row.Node)
         key = (period, scenario, season, hour)
@@ -391,17 +509,24 @@ function summarize_oos_result(
     seed = Int(seed_value)
     objective = _oos_objective_summary(solution)
     config = YAML.load_file(config_file)
+    full_year = _oos_full_year_info(staged_metadata)
+    ignored_seasons = full_year.dummy_peak_results_ignored ? Set(["peak1"]) : Set{String}()
     scenario_rows, season_rows, total = _oos_ens_rows(
         joinpath(output_dir, "loadShed.csv"),
         config,
         tree,
         seed;
         event_threshold_mw = threshold,
+        ignored_seasons,
     )
 
     summary = (
         Tree = tree,
         Seed = seed,
+        EvaluationMode = String(get(staged_metadata, "evaluation_mode", "representative_period")),
+        FullYearFormulation = full_year.formulation,
+        FullYearTreeIndex = full_year.tree_index,
+        DummyPeakResultsIgnored = full_year.dummy_peak_results_ignored,
         RunDirectory = normalized_result_dir,
         RunManifestSHA256 = _oos_sha256_file(manifest_file),
         ConfigSHA256 = config_sha256,
@@ -479,6 +604,22 @@ function aggregate_oos_results(
     results = [
         summarize_oos_result(result_dir; event_threshold_mw) for result_dir in result_dirs
     ]
+    formulations = unique(result.summary.FullYearFormulation for result in results)
+    length(formulations) == 1 || throw(ArgumentError(
+        "OOS aggregation cannot mix representative and full-year formulations",
+    ))
+    internalempire_full_year = only(formulations) == "internalempire_24x365"
+    if internalempire_full_year
+        length(results) == _OOS_FULL_YEAR_TREE_COUNT || throw(ArgumentError(
+            "InternalEMPIRE full-year aggregation requires exactly " *
+            "$_OOS_FULL_YEAR_TREE_COUNT completed trees",
+        ))
+        sort!(results; by = result -> result.summary.FullYearTreeIndex)
+        [result.summary.FullYearTreeIndex for result in results] ==
+        collect(1:_OOS_FULL_YEAR_TREE_COUNT) || throw(ArgumentError(
+            "InternalEMPIRE full-year aggregation requires tree indices 1:$_OOS_FULL_YEAR_TREE_COUNT",
+        ))
+    end
     summaries = [result.summary for result in results]
     trees = [row.Tree for row in summaries]
     allunique(trees) || throw(ArgumentError("OOS aggregation contains duplicate tree names"))
@@ -507,7 +648,9 @@ function aggregate_oos_results(
     )
     combined_dir = joinpath(normalized_output, "combined")
     combined_results = [
-        _stream_combined_oos_csv(summaries, String(filename), combined_dir) for
+        (internalempire_full_year ?
+         _stream_internalempire_full_year_csv(summaries, String(filename), combined_dir) :
+         _stream_combined_oos_csv(summaries, String(filename), combined_dir)) for
         filename in combined_files
     ]
     output_files = [summary_file, scenario_file, season_file]
@@ -518,6 +661,8 @@ function aggregate_oos_results(
         "event_threshold_mw" => Float64(event_threshold_mw),
         "ens_formula" => "load_shed_mw * multiple_strat * probability * duration",
         "ens_discounted" => false,
+        "full_year_formulation" => only(formulations),
+        "dummy_peak_results_ignored" => internalempire_full_year,
         "tree_count" => length(results),
         "trees" => [
             Dict{String, Any}(
@@ -537,6 +682,7 @@ function aggregate_oos_results(
                 "name" => result.name,
                 "path" => relpath(result.path, normalized_output),
                 "rows" => result.rows,
+                "dummy_peak_rows_ignored" => result.dummy_peak_rows_ignored,
                 "sha256" => result.sha256,
                 "bytes" => result.bytes,
             ) for result in combined_results

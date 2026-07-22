@@ -5,6 +5,7 @@ function _write_oos_aggregation_fixture(
     shed_rows,
     staged_tree = tree,
     manifest_tree = staged_tree,
+    full_year_tree_index = nothing,
 )
     result_dir = joinpath(root, tree, "run")
     input_dir = joinpath(result_dir, "Input")
@@ -13,15 +14,28 @@ function _write_oos_aggregation_fixture(
     mkpath(fixed_dir)
     mkpath(output_dir)
 
-    config = Dict{String, Any}(
-        "forecast_horizon_year" => 2025,
-        "leap_years_investment" => 5,
-        "regular_seasons" => ["winter", "summer"],
-        "length_of_regular_season" => 2,
-        "n_peak_seasons" => 1,
-        "len_peak_season" => 1,
-        "number_of_scenarios" => 2,
-    )
+    config = if full_year_tree_index === nothing
+        Dict{String, Any}(
+            "forecast_horizon_year" => 2025,
+            "leap_years_investment" => 5,
+            "regular_seasons" => ["winter", "summer"],
+            "length_of_regular_season" => 2,
+            "n_peak_seasons" => 1,
+            "len_peak_season" => 1,
+            "number_of_scenarios" => 2,
+        )
+    else
+        Dict{String, Any}(
+            "forecast_horizon_year" => 2025,
+            "leap_years_investment" => 5,
+            "regular_seasons" => ["winter"],
+            "length_of_regular_season" => 365,
+            "n_peak_seasons" => 1,
+            "len_peak_season" => 1,
+            "number_of_scenarios" => 1,
+            "operational_hours_per_year" => 8760,
+        )
+    end
     config_file = joinpath(input_dir, "config.yaml")
     metadata_file = joinpath(input_dir, "oos_tree_metadata.yaml")
     YAML.write_file(config_file, config)
@@ -30,6 +44,17 @@ function _write_oos_aggregation_fixture(
         "seed" => seed,
         "staged_from_metadata_sha256" => "source-tree-metadata-$seed",
     )
+    if full_year_tree_index !== nothing
+        chunk = OpenEMPIRE._internalempire_full_year_chunks()[full_year_tree_index]
+        metadata["evaluation_mode"] = "chronological_full_year"
+        metadata["chronology"] = Dict{String, Any}(
+            "formulation" => "internalempire_24x365",
+            "tree_index" => full_year_tree_index,
+            "source_hour_start" => first(chunk),
+            "source_hour_end" => last(chunk),
+            "dummy_peak_results_ignored" => true,
+        )
+    end
     staged_tree == tree || (metadata["staged_from_tree"] = tree)
     YAML.write_file(metadata_file, metadata)
 
@@ -99,26 +124,90 @@ function test_oos_chronological_full_year_time_weights()
     config = Dict{String, Any}(
         "forecast_horizon_year" => 2025,
         "leap_years_investment" => 5,
-        "regular_seasons" => ["full_year"],
-        "length_of_regular_season" => 8760,
-        "n_peak_seasons" => 0,
-        "len_peak_season" => 0,
+        "regular_seasons" => ["winter"],
+        "length_of_regular_season" => 365,
+        "n_peak_seasons" => 1,
+        "len_peak_season" => 1,
         "number_of_scenarios" => 1,
         "operational_hours_per_year" => 8760,
     )
     weights = OpenEMPIRE._oos_time_weights(config)
-    @test length(weights) == 8760
-    @test weights[(1, 1, "full_year", 1)] == (
+    @test length(weights) == 366
+    @test weights[(1, 1, "winter", 1)] == (
+        conditional = 8759 / 365,
+        probability = 1.0,
+        expected = 8759 / 365,
+    )
+    @test weights[(1, 1, "winter", 365)] == (
+        conditional = 8759 / 365,
+        probability = 1.0,
+        expected = 8759 / 365,
+    )
+    @test weights[(1, 1, "peak1", 1)] == (
         conditional = 1.0,
         probability = 1.0,
         expected = 1.0,
     )
-    @test weights[(1, 1, "full_year", 8760)] == (
-        conditional = 1.0,
-        probability = 1.0,
-        expected = 1.0,
-    )
-    @test sum(weight.expected for weight in values(weights)) == 8760.0
+    @test sum(weight.expected for weight in values(weights)) ≈ 8760.0
+    @test OpenEMPIRE._internalempire_full_year_hour(1, 1) == 1
+    @test OpenEMPIRE._internalempire_full_year_hour(2, 1) == 366
+    @test OpenEMPIRE._internalempire_full_year_hour(24, 365) == 8760
+    @test_throws ArgumentError OpenEMPIRE._internalempire_full_year_hour(25, 1)
+    @test_throws ArgumentError OpenEMPIRE._internalempire_full_year_hour(1, 366)
+end
+
+function test_internalempire_full_year_aggregation()
+    mktempdir() do root
+        shed_rows = ["N1,1,1,winter,$hour,0.0" for hour in 1:365]
+        push!(shed_rows, "N1,1,1,peak1,1,999.0")
+        result_dirs = [
+            _write_oos_aggregation_fixture(
+                root,
+                "oos_tree$tree_index",
+                tree_index;
+                shed_rows,
+                full_year_tree_index = tree_index,
+            ) for tree_index in 1:24
+        ]
+
+        first_summary = OpenEMPIRE.summarize_oos_result(first(result_dirs)).summary
+        @test first_summary.FullYearFormulation == "internalempire_24x365"
+        @test first_summary.FullYearTreeIndex == 1
+        @test first_summary.DummyPeakResultsIgnored
+        @test first_summary.ExpectedAnnualENSAllPeriods_MWh == 0.0
+        @test first_summary.NodeHoursAboveThreshold == 0
+
+        aggregated = OpenEMPIRE.aggregate_oos_results(
+            reverse(result_dirs),
+            joinpath(root, "aggregated");
+            combined_files = ["loadShed.csv"],
+        )
+        @test [row.FullYearTreeIndex for row in aggregated.summaries] == collect(1:24)
+        combined = only(aggregated.combined_files)
+        @test combined.rows == 8760
+        @test combined.dummy_peak_rows_ignored == 24
+        rows = collect(CSV.File(combined.path))
+        @test propertynames(first(rows)) == [
+            :Tree,
+            :Seed,
+            :Run,
+            :ScenarioTree,
+            :HourFullYear,
+            :Node,
+            :Period,
+            :Scenario,
+            :Season,
+            :Hour,
+            :loadShed,
+        ]
+        @test [Int(row.HourFullYear) for row in rows] == collect(1:8760)
+        @test all(String(row.Season) == "winter" for row in rows)
+        @test all(String(row.Tree) == String(row.ScenarioTree) for row in rows)
+        manifest = YAML.load_file(aggregated.manifest_file)
+        @test manifest["full_year_formulation"] == "internalempire_24x365"
+        @test manifest["dummy_peak_results_ignored"] == true
+        @test only(manifest["combined_files"])["dummy_peak_rows_ignored"] == 24
+    end
 end
 
 function test_summarize_and_aggregate_oos_results()
