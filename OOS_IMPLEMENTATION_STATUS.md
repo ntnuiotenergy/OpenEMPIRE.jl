@@ -47,11 +47,31 @@ The current code has completed one representative one-tree OOS run successfully
 and now validates and aggregates completed OOS results locally. Job 6421 reached
 `OPTIMAL`, reproduced all eight fixed-capacity tables, and has been converted
 from raw load-shedding MW into correctly weighted physical ENS. Deterministic
-two-tree fixtures validate the cross-tree path. A true chronological full-year
-input path is now implemented and locally validated, including a complete 2015
-`europe_v51` tree. Controlled full-year job `6424` is currently running the
-intended 43,800-time-step model on Solstorm. The two real representative trees
-remain prepared but unsubmitted until that sole long job is terminal.
+two-tree fixtures validate the cross-tree path. The branch also contains an
+independently designed one-period 8,760-hour chronological implementation and
+job `6424` used it. That implementation is now **superseded**, not the accepted
+full-year target. The required target is InternalEMPIRE's 24 separately solved
+365-hour chunks, including its one winter season, one scenario, and dummy peak
+hour per solve. The two real representative trees remain prepared but
+unsubmitted.
+
+### Binding full-year requirement changed on 2026-07-22
+
+The user is not authorized to choose a new full-year scientific formulation.
+Julia must be functionally equivalent to checked-in InternalEMPIRE behavior:
+
+1. split one selected 8,760-hour year into 24 consecutive 365-hour OOS trees;
+2. duplicate each tree's 365-hour slice across strategic periods;
+3. solve each tree independently with one regular season named `winter`, one
+   scenario, and one one-hour dummy peak season whose results are ignored;
+4. reproduce InternalEMPIRE's operational weighting and independent storage
+   boundaries for each solve; and
+5. concatenate/aggregate the 24 real tree results with stable tree and
+   full-year-hour identifiers.
+
+The one-period 8,760-hour code, tests, input artifact, and job `6424` remain
+valuable diagnostic/comparison evidence. They must not be described as final
+full-year validation or included as the accepted full-year PR implementation.
 
 ## Branch and provenance
 
@@ -129,7 +149,7 @@ Implementation commits, oldest first:
 | 4k. Infeasibility fix | Match InternalEMPIRE by omitting investment-only constraints after capacities are fixed | Root cause demonstrated, locally regression-tested, and verified by job 6421 |
 | 4l. Fresh representative rerun | Create, stage, submit, and verify a new immutable run without touching job 6420 | Job 6421 completed `OPTIMAL`; all acceptance evidence passed |
 | 5. Aggregation | Validate, summarize, and combine results across trees | Implemented; deterministic two-tree tests and job 6421 local validation passed; real seed-201/202 input and queue prepared, solves pending |
-| 6. Full-year OOS | One ordered 8760-hour scenario with unit multiplicity and one annual storage cycle | Implemented and locally validated; real job 6424 is running the intended 43,800-time-step model on Solstorm |
+| 6. Full-year OOS | InternalEMPIRE-equivalent 24 independently solved 365-hour chunks, each with one winter scenario and one dummy peak hour | Pending; the current one-period 8,760-hour implementation and job 6424 are superseded diagnostic work |
 
 ## Completion evidence matrix
 
@@ -139,10 +159,10 @@ Treat a `pending` row as incomplete even when its code and local tests pass.
 |---|---|---|
 | 1. Export, provenance-check, compatibility-check, and apply fixed investments | Deterministic provenance/compatibility/key-set tests; job 6421 fixed all eight tables and reproduced them byte-for-byte | Proven |
 | 2. Execute and aggregate multiple representative trees | Synthetic two-tree aggregation passes; real seed-201/202 queue and stage metadata are distinct and ready, but neither solve has run | Pending runtime evidence |
-| 3. Physical ENS weighting and conditional/expected distinction | Weight-map and aggregation fixtures; job 6421 aggregation; direct 8,760-hour unit-weight test | Proven |
-| 4. True chronological full-year construction and solve | Full-year generation/chronology/model tests and real 2015 input fingerprints pass; job 6424 proves the intended 43,800-time-step build but has not completed | Pending terminal runtime evidence |
+| 3. Physical ENS weighting and conditional/expected distinction | Weight-map and aggregation fixtures plus job 6421 aggregation prove representative semantics; the 8,760-hour unit-weight test is diagnostic only after the formulation change | Proven for representative OOS; 24-tree aggregation parity pending |
+| 4. InternalEMPIRE-equivalent full-year construction and solve | Primary source proves 24 consecutive 365-hour trees, each independently solved as winter + dummy peak; Julia parity tests and runtime evidence do not yet exist | Pending replacement implementation and runtime evidence |
 | 5. Separate fixed investment and second-stage costs with documented units | Aggregation tests and job 6421 summary reconcile fixed EUR, non-investment EUR, load-shed EUR, and undiscounted physical MWh | Proven |
-| 6. Deterministic regression tests plus controlled Solstorm evidence | Full suite and job 6421 pass; completion additionally requires terminal job 6424 and both real representative trees | Pending runtime evidence |
+| 6. Deterministic regression tests plus controlled Solstorm evidence | Full suite and job 6421 pass; completion requires both real representative trees and controlled 24 × 365-hour Solstorm evidence; job 6424 cannot satisfy this gate | Pending runtime evidence |
 | 7. Living documentation and reviewable PR plan | This handoff plus the dependency-ordered employee-review sequence below | Proven as integration-branch planning |
 
 The real seed-202 staging artifact explicitly has physical staged name
@@ -223,7 +243,11 @@ identity correction, not a substitute for the two terminal solver manifests.
   `origin/rf/result_aggregates` helper was inspected but not ported: its load
   shedding calculation does not explicitly apply the required duration.
 
-### Chronological full-year evaluation
+### Superseded one-period chronological full-year evaluation
+
+Everything in this subsection describes diagnostic code from commit `3a0915a`,
+not the accepted full-year target. It is retained to explain job `6424` and to
+support comparison while the InternalEMPIRE-equivalent replacement is built.
 
 - `src/oos_full_year.jl`
   - builds one ordered 8760-hour operational scenario per selected complete
@@ -251,12 +275,13 @@ identity correction, not a substitute for the two terminal solver manifests.
   and reject a representative or 365-hour config supplied for a chronological
   full-year tree. Existing representative queue manifests without those new
   fields remain resumable and are upgraded in memory.
-- Provenance: this is new Julia code written on the workbench-based integration
+- Provenance: this is new, now-superseded Julia code written on the
+  workbench-based integration
   branch. No `rf/...` commit was merged or cherry-picked. It is informed by the
   plan, `Feedback.pdf`, the available representative OOS code, and the observed
-  InternalEMPIRE design. It deliberately does not port InternalEMPIRE's 24
-  independent 365-hour blocks because those blocks are scaled as representative
-  years and impose 24 independent storage cycles rather than one chronology.
+  InternalEMPIRE design. Its deliberate choice not to port InternalEMPIRE's 24
+  independent 365-hour blocks is no longer permitted by the binding requirement
+  above.
 
 ### Solstorm preparation
 
@@ -1132,13 +1157,12 @@ overwriting evidence from an in-progress or completed experiment.
 4. `src/oos_staging.jl` is now 837 lines and contains safety/evidence logistics
    rather than model mathematics. Review whether to split it before a PR; do
    not mix that refactor into the first representative-run debugging work.
-5. Chronological full-year generation and local small-case solving are
-   implemented, but the 419 MB `europe_v51` tree has not been built or solved.
-   Its exact fixed-capacity size is now estimated and calibrated at 57,957,825
-   variables and 82,911,765 constraints. A read-only capacity query verified
-   sufficient current host capacity and valid SGE resource names, but actual
-   build time, peak memory, solver behavior, and whether the 320 GB / 12-hour
-   envelope is sufficient remain unverified until the controlled run completes.
+5. The one-period 8,760-hour implementation is superseded by the binding
+   InternalEMPIRE-equivalent 24 x 365-hour requirement. Its controlled job
+   `6424` reached an optimal solver result but remains in expensive post-solve
+   objective diagnostics. Its model-size and resource observations are useful
+   diagnostic evidence only; neither its code nor its runtime can satisfy the
+   accepted full-year completion gate.
 6. The current continuation branch is an integration branch, not a proposed
    single employee-review PR. Prefer sequential PRs: runner workflow, core OOS,
    experiment orchestration, then optional Solstorm tooling.
@@ -1176,18 +1200,17 @@ overwriting evidence from an in-progress or completed experiment.
 
 Continue controlled Solstorm evidence without starting more than one long job:
 
-1. Preserve and monitor full-year job `6424`; do not resubmit an ambiguous
-   failure. On completion, collect scheduler accounting, the final manifest,
-   summary, fixed-capacity verification, and load-shedding evidence before
-   deciding whether large operational outputs need to be copied locally.
-2. Commit the tested logical-tree identity correction, then regenerate the
-   seed-201/202 queue and revision-pinned staging plans under new filenames.
-3. Only after job `6424` is terminal, execute the two representative jobs
-   sequentially and aggregate them. Verify distinct logical identities,
-   identical fixed-investment/config provenance, and cost/ENS reconciliation.
-4. When both runtime evidence tracks pass, audit every completion requirement
-   and curate the documented dependency-ordered employee-review PR sequence
-   without rewriting or deleting reference branches.
+1. Preserve and monitor superseded job `6424`; do not resubmit it. On
+   completion, collect scheduler accounting, final manifest, output inventory,
+   and post-solve memory/timing evidence as diagnostics only.
+2. Produce a source-backed parity map and deterministic fixtures for
+   InternalEMPIRE's 24 consecutive 365-hour chunks, winter/scenario/dummy-peak
+   structure, scaling, storage boundaries, and concatenated hour identity.
+3. Replace the superseded generator/orchestration with that formulation while
+   retaining reusable raw-timestamp validation and fixed-investment handling.
+4. After job `6424` is terminal, execute the two representative jobs
+   sequentially and aggregate them. Later submit controlled 24 x 365-hour
+   evidence only after the local parity and smoke-test gates pass.
 
 ## Solstorm capacity and resource preflight on 2026-07-22
 
@@ -1235,7 +1258,7 @@ Continue controlled Solstorm evidence without starting more than one long job:
   not be patched or submitted. A fresh revision-pinned stage is required after
   committing this fix.
 
-### Controlled chronological full-year job 6424
+### Controlled superseded one-period job 6424
 
 - The mode-preservation fix is commit `4011f4c`. A fresh immutable stage was
   prepared at
@@ -1257,12 +1280,19 @@ Continue controlled Solstorm evidence without starting more than one long job:
   - stdout: `inputs/experiment/sge_submit/logs/oos_tree1_6424.out`;
   - stderr: `inputs/experiment/sge_submit/logs/oos_tree1_6424.err`.
 - The live runner reported `evaluation_mode=chronological_full_year`, one
-  8760-hour scenario in each of five strategic periods, and 43,800 model time
+  8,760-hour scenario in each of five strategic periods, and 43,800 model time
   steps. It entered operational-variable indexing with 30,484,800 generator
-  entries. This proves the submitted job is the intended full-year build, not
-  a representative-period rerun. Solver completion remains pending.
-- No other long job is queued or running, and an ambiguous failure must not be
-  resubmitted automatically.
+  entries. This proves which superseded formulation was submitted; it does not
+  prove the accepted InternalEMPIRE-equivalent full-year formulation.
+- Gurobi reached `OPTIMAL` at objective `2.88379901e+12` after 128 barrier
+  iterations and 5,809 seconds of solver time. The runner then entered progress
+  43, `Computing objective component diagnostics`. At
+  `2026-07-22T16:41:48+02:00`, SGE still reported the job active with 177.209 GB
+  current virtual memory and 213.199 GB maximum virtual memory under its 320 GB
+  limit. The post-solve diagnostic constructs very large JuMP affine
+  expressions and is the likely cause of this long, memory-heavy phase.
+- No other long job is queued or running. Preserve this job, do not resubmit it,
+  and treat its eventual outputs as performance and regression diagnostics only.
 
 ## Current InternalEMPIRE comparison
 
@@ -1275,23 +1305,28 @@ Continue controlled Solstorm evidence without starting more than one long job:
   `if not OUT_OF_SAMPLE` block (`empire.py`, approximately lines 2691 and
   2857-2884). The Julia omission of the corresponding fixed-capacity coupling
   is therefore verified parity, resolving the earlier offshore question.
-- InternalEMPIRE's checked-in full-year runner sets `lengthRegSeason = 365`,
-  while its sampler interprets that value as a row/hour count. It consequently
-  samples 365 hours, not 365 days. The Julia implementation deliberately does
-  not reproduce that defect: it constructs 8,760 ordered one-hour operational
-  periods per strategic period, unit multiplicity/probability, and one annual
-  storage cycle.
-- InternalEMPIRE's `concat_out_of_sample_results.py` concatenates selected
-  winter rows and adds tree/full-year-hour identifiers; it does not calculate
-  physical ENS or separate constant investment cost. Julia preserves those
-  identifiers but additionally computes conditional and probability-weighted
-  expected ENS using TimeStruct multiplicity, probability, and duration. ENS
-  is not discounted.
+- InternalEMPIRE's full-year generator interprets `lengthRegSeason = 365` as
+  365 hourly rows and advances `sample_hour` by 365 for each tree. It therefore
+  creates 24 consecutive slices covering one selected 8,760-hour year, at
+  offsets 0, 365, ..., 8,395, and duplicates each slice across strategic
+  periods.
+- `run_EMPIRE.py` solves `oos_tree1` through `oos_tree24` independently. Every
+  solve has one scenario, one 365-hour regular season named `winter`, and one
+  one-hour dummy peak. In `empire.py`, winter scale is `(8760 - 1) / 365`, the
+  dummy peak scale is one, and each separate solve has independent storage
+  boundaries. These semantics are binding for the Julia replacement.
+- `concat_out_of_sample_results.py` removes non-winter rows, attaches
+  `ScenarioTree`, and computes `HourFullYear = Hour + (tree_index - 1) * 365`.
+  Julia must reproduce those identities and the resulting 1:8760 chronology.
+  Julia may additionally report correctly named physical ENS and separated
+  fixed/non-investment costs, provided the shared quantities remain comparable
+  and their weighting is explicitly proven.
 - The original fixed-investment design is functionally equivalent to the
   available `rf/oos_fixed_investments` work but was independently integrated on
   the workbench base. The investment-constraint gate, provenance checks,
-  deterministic aggregation, and chronological 8,760-hour construction are
-  subsequent Julia work and are not claimed as merged/cherry-picked rf code.
+  deterministic aggregation, and the superseded chronological 8,760-hour work
+  are subsequent Julia work and are not claimed as merged/cherry-picked rf
+  code. The accepted 24 x 365-hour replacement remains to be implemented.
 
 ## Employee-review PR sequence
 
@@ -1313,9 +1348,11 @@ port only that PR's tested functionality; exclude status-journal commits.
    correction: combined tree outputs, conditional versus expected ENS, fixed
    versus non-investment objective reporting, and correct identity across
    isolated staging.
-5. **Chronological full-year core.** Curate `3a0915a`: ordered 8,760-hour input
-   construction, annual TimeStruct semantics, local solve/regression tests, and
-   the thin preparation CLI.
+5. **InternalEMPIRE-equivalent full-year core.** Implement and curate the
+   24 independently solved 365-hour chunks, winter/scenario/dummy-peak
+   semantics, parity fixtures, and concatenation. Do not curate superseded
+   commit `3a0915a` wholesale; port only reusable raw-timestamp validation and
+   other behavior proven compatible with the required formulation.
 6. **Optional Solstorm tooling.** Only if maintainers want it in the main repo,
    curate the SGE/staging/setup/submission modules, resource requests, and the
    `4011f4c` mode-preservation fix. Keep operational evidence and recovery
