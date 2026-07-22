@@ -109,6 +109,7 @@ function _oos_time_weights(config)
     peak_count = scenario_peak_count(config)
     peak_hours = scenario_peak_hours(config)
     scenario_count = Int(config["number_of_scenarios"])
+    operational_hours_per_year = Int(get(config, "operational_hours_per_year", 8760))
     season_names = vcat(regular_seasons, ["peak$i" for i in 1:peak_count])
 
     periods = create_timestruct(
@@ -119,6 +120,8 @@ function _oos_time_weights(config)
         peak_count,
         peak_hours,
         scenario_count,
+        ;
+        operational_hours_per_year,
     )
     weights = Dict{Tuple{Int, Int, String, Int}, NamedTuple{
         (:conditional, :probability, :expected),

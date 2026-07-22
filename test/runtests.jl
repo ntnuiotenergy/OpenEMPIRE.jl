@@ -15,6 +15,7 @@ include("test_csv.jl")
 include("test_scenario_csv.jl")
 include("test_runner_staging.jl")
 include("test_out_of_sample.jl")
+include("test_oos_full_year.jl")
 include("test_oos_aggregation.jl")
 include("test_oos_sge.jl")
 include("test_oos_staging.jl")
@@ -59,6 +60,7 @@ end
     test_stage_run_inputs_copies_without_mutating_source()
     test_resolve_single_tree_oos_run_spec()
     test_reject_incomplete_oos_runner_options()
+    test_reject_mismatched_oos_tree_config()
     test_runner_solver_result_extraction()
 end
 
@@ -72,6 +74,12 @@ end
     test_oos_omits_investment_only_constraints()
     test_fix_only_investment_capacities()
     test_fixed_investment_key_validation()
+end
+
+@testset "OOS full-year" begin
+    test_full_year_oos_generation()
+    test_chronological_oos_fixture_semantics()
+    test_chronological_source_validation()
 end
 
 @testset "OOS aggregation" begin
@@ -113,6 +121,7 @@ end
 
 @testset "TimeStruct" begin
     test_timestruct()
+    test_chronological_timestruct()
     test_variables()
     test_variable_large()
     test_constraints()

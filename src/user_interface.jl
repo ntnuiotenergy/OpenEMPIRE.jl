@@ -64,6 +64,7 @@ function _prepare_model_inputs(
         end
     end
     scenarios = config["number_of_scenarios"]
+    operational_hours_per_year = Int(get(config, "operational_hours_per_year", 8760))
 
     periods = OpenEMPIRE.create_timestruct(
         strat_pers,
@@ -73,6 +74,8 @@ function _prepare_model_inputs(
         peak_count,
         hours_peak,
         scenarios,
+        ;
+        operational_hours_per_year,
     )
 
 

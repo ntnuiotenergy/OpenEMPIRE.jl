@@ -287,6 +287,29 @@ function test_prepare_oos_execution_queue()
         @test "--results=$(joinpath(results_root, "oos_tree1"))" in first_job["command"]
         @test !occursin("--result-dir=", first_job["command_display"])
 
+        legacy_queue = deepcopy(queue)
+        delete!(legacy_queue["experiment"], "evaluation_mode")
+        delete!(legacy_queue["experiment"], "sample_years")
+        for job in legacy_queue["jobs"]
+            delete!(job, "evaluation_mode")
+            delete!(job, "sample_year")
+        end
+        YAML.write_file(queue_file, legacy_queue)
+        OpenEMPIRE.prepare_oos_execution_queue(
+            experiment_dir,
+            fixed_investment_dir;
+            dataset = source_data,
+            config_file,
+            results_root,
+            input_format = :csv,
+            solver = "HiGHS",
+        )
+        queue = YAML.load_file(queue_file)
+        @test queue["experiment"]["evaluation_mode"] == "representative_period"
+        @test queue["experiment"]["sample_years"] === nothing
+        @test all(job["evaluation_mode"] == "representative_period" for job in queue["jobs"])
+        @test all(job["sample_year"] === nothing for job in queue["jobs"])
+
         operationally_different = YAML.load_file(config_file)
         operationally_different["number_of_scenarios"] += 1
         operationally_different["length_of_regular_season"] = 8760
@@ -302,9 +325,9 @@ function test_prepare_oos_execution_queue()
             structurally_different,
         )
 
-        first_job["status"] = "submitted"
-        first_job["scheduler_job_id"] = "12345"
-        first_job["submitted_at_utc"] = "2026-07-20T12:00:00Z"
+        queue["jobs"][1]["status"] = "submitted"
+        queue["jobs"][1]["scheduler_job_id"] = "12345"
+        queue["jobs"][1]["submitted_at_utc"] = "2026-07-20T12:00:00Z"
         YAML.write_file(queue_file, queue)
         resumed_file = OpenEMPIRE.prepare_oos_execution_queue(
             experiment_dir,

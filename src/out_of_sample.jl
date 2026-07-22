@@ -7,6 +7,7 @@ const _OOS_SCENARIO_FILENAMES = (
 const _OOS_TREE_FILENAMES = (_OOS_SCENARIO_FILENAMES..., "sampling_key.csv")
 const _OOS_EXPERIMENT_MANIFEST = "experiment.yaml"
 const _OOS_EXECUTION_MANIFEST = "execution.yaml"
+const _OOS_REPRESENTATIVE_MODE = "representative_period"
 
 const _OOS_FIXED_INVESTMENT_FILENAMES = (
     ("genInvCap.csv",),
@@ -27,7 +28,9 @@ const _OOS_TREE_CONFIG_KEYS = (
     "length_of_regular_season",
     "n_peak_seasons",
     "len_peak_season",
+    "operational_hours_per_year",
     "time_format",
+    "use_scenario_generation",
     "use_fixed_sample",
 )
 
@@ -49,6 +52,7 @@ const _OOS_ALLOWED_OPERATIONAL_CONFIG_DIFFERENCES = (
     "length_of_regular_season",
     "n_peak_seasons",
     "len_peak_season",
+    "operational_hours_per_year",
     "time_format",
 )
 
@@ -98,6 +102,7 @@ function _oos_tree_metadata(
     return Dict{String, Any}(
         "schema_version" => 1,
         "generator" => "OpenEMPIRE.generate_oos_scenario_tree",
+        "evaluation_mode" => _OOS_REPRESENTATIVE_MODE,
         "created_at_utc" => string(now(UTC), "Z"),
         "julia_version" => string(VERSION),
         "openempire_version" => string(pkgversion(@__MODULE__)),
@@ -276,6 +281,7 @@ function _new_oos_experiment_manifest(
     return Dict{String, Any}(
         "schema_version" => 1,
         "kind" => "oos_tree_experiment",
+        "evaluation_mode" => _OOS_REPRESENTATIVE_MODE,
         "status" => "preparing",
         "created_at_utc" => created_at,
         "updated_at_utc" => created_at,
@@ -931,6 +937,16 @@ end
 
 function _validated_oos_execution_trees(experiment_dir::AbstractString, manifest)
     input_format = Symbol(manifest["input_format"])
+    evaluation_mode = String(get(manifest, "evaluation_mode", _OOS_REPRESENTATIVE_MODE))
+    sample_years = get(manifest, "sample_years", nothing)
+    if evaluation_mode == _OOS_CHRONOLOGICAL_MODE
+        sample_years isa AbstractVector || throw(ArgumentError(
+            "Chronological OOS experiment must record sample_years",
+        ))
+        length(sample_years) == manifest["num_trees"] || throw(ArgumentError(
+            "Chronological OOS sample-year count does not match num_trees",
+        ))
+    end
     trees = Dict{String, Any}[]
     for index in 1:manifest["num_trees"]
         entry = manifest["trees"][index]
@@ -953,17 +969,41 @@ function _validated_oos_execution_trees(experiment_dir::AbstractString, manifest
         ))
 
         tree_dir = joinpath(experiment_dir, expected_name)
-        _validate_oos_experiment_tree(
+        metadata = _validate_oos_experiment_tree(
             tree_dir,
             expected_seed,
             manifest["source_data_sha256"],
             manifest["source_config_sha256"],
             input_format,
         )
+        metadata_mode = String(get(metadata, "evaluation_mode", _OOS_REPRESENTATIVE_MODE))
+        metadata_mode == evaluation_mode || throw(ArgumentError(
+            "OOS tree $expected_name evaluation mode does not match its experiment: " *
+            "$metadata_mode (expected $evaluation_mode)",
+        ))
+        sample_year = evaluation_mode == _OOS_CHRONOLOGICAL_MODE ?
+                      Int(sample_years[index]) : nothing
+        if sample_year !== nothing
+            get(entry, "sample_year", nothing) == sample_year || throw(ArgumentError(
+                "Chronological OOS tree $expected_name has an invalid sample year",
+            ))
+            _validate_chronological_oos_tree(
+                tree_dir,
+                expected_seed,
+                sample_year,
+                manifest["source_data_sha256"],
+                manifest["source_config_sha256"],
+                input_format,
+                evaluation_mode,
+                Int(manifest["operational_hours_per_year"]),
+            )
+        end
         push!(trees, Dict{String, Any}(
             "index" => index,
             "name" => expected_name,
             "seed" => expected_seed,
+            "evaluation_mode" => evaluation_mode,
+            "sample_year" => sample_year,
             "path" => tree_dir,
             "metadata_sha256" => _oos_sha256_file(joinpath(tree_dir, "metadata.yaml")),
         ))
@@ -989,6 +1029,9 @@ function _validate_oos_execution_config(config_file::AbstractString, tree_dir::A
             "$(config[key]) (expected $(tree_config[key]))",
         ))
     end
+    evaluation_mode = String(get(metadata, "evaluation_mode", _OOS_REPRESENTATIVE_MODE))
+    evaluation_mode == _OOS_CHRONOLOGICAL_MODE &&
+        _validate_chronological_oos_metadata(metadata, tree_dir)
     return config
 end
 
@@ -1023,6 +1066,8 @@ function _oos_execution_job(
         "index" => tree["index"],
         "tree" => tree["name"],
         "seed" => tree["seed"],
+        "evaluation_mode" => tree["evaluation_mode"],
+        "sample_year" => tree["sample_year"],
         "scenario_tree" => tree["path"],
         "scenario_metadata_sha256" => tree["metadata_sha256"],
         "status" => "pending",
@@ -1071,7 +1116,15 @@ function _validate_oos_execution_queue_spec(existing, expected)
         haskey(existing, key) || throw(ArgumentError(
             "Existing OOS execution queue is missing required key: $key",
         ))
-        existing[key] == expected[key] || throw(ArgumentError(
+        existing_value = existing[key]
+        if key == "experiment" && existing_value isa AbstractDict
+            existing_value = Dict{String, Any}(
+                string(name) => value for (name, value) in existing_value
+            )
+            get!(existing_value, "evaluation_mode", _OOS_REPRESENTATIVE_MODE)
+            get!(existing_value, "sample_years", nothing)
+        end
+        existing_value == expected[key] || throw(ArgumentError(
             "Existing OOS execution queue has a different $key specification",
         ))
     end
@@ -1089,6 +1142,8 @@ function _resume_oos_execution_jobs!(jobs, existing_jobs)
         "index",
         "tree",
         "seed",
+        "evaluation_mode",
+        "sample_year",
         "scenario_tree",
         "scenario_metadata_sha256",
         "result_root",
@@ -1122,7 +1177,8 @@ function _resume_oos_execution_jobs!(jobs, existing_jobs)
             "Existing OOS execution job $index must be a mapping",
         ))
         for key in immutable_keys
-            get(existing, key, nothing) == jobs[index][key] || throw(ArgumentError(
+            fallback = key in ("evaluation_mode", "sample_year") ? jobs[index][key] : nothing
+            get(existing, key, fallback) == jobs[index][key] || throw(ArgumentError(
                 "Existing OOS execution job $index has a different $key",
             ))
         end
@@ -1238,6 +1294,12 @@ function prepare_oos_execution_queue(
         "experiment" => Dict{String, Any}(
             "dir" => target_experiment,
             "manifest_file" => experiment_manifest_file,
+            "evaluation_mode" => get(
+                experiment,
+                "evaluation_mode",
+                _OOS_REPRESENTATIVE_MODE,
+            ),
+            "sample_years" => get(experiment, "sample_years", nothing),
             "source_data_sha256" => experiment["source_data_sha256"],
             "source_config_sha256" => experiment["source_config_sha256"],
             "seed_start" => experiment["seed_start"],

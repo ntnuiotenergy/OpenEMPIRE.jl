@@ -24,6 +24,39 @@ function test_timestruct()
     end
 end
 
+function test_chronological_timestruct()
+    periods = OpenEMPIRE.create_timestruct(
+        1,
+        5,
+        1,
+        24,
+        0,
+        0,
+        1;
+        operational_hours_per_year = 24,
+    )
+    strategic_period = first(strat_periods(periods))
+    representative = only(collect(repr_periods(strategic_period)))
+    scenario = only(collect(opscenarios(representative)))
+
+    @test length(scenario) == 24
+    @test all(multiple_strat(strategic_period, hour) ≈ 1.0 for hour in scenario)
+    @test sum(
+        multiple_strat(strategic_period, hour) * probability(hour) * duration(hour) for
+        hour in scenario
+    ) ≈ 24.0
+    @test_throws ArgumentError OpenEMPIRE.create_timestruct(
+        1,
+        5,
+        1,
+        24,
+        1,
+        25,
+        1;
+        operational_hours_per_year = 24,
+    )
+end
+
 function test_variables()
     periods = OpenEMPIRE.create_timestruct(3, 5, 4, 168, 3, 24, 4)
     sets = OpenEMPIRE.EmpireSets(
