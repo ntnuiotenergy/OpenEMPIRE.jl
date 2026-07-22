@@ -68,22 +68,51 @@ function _chronological_year_indices(
         ))
     end
 
-    # Raw EMPIRE inputs are not uniformly ordered. In particular, historical
-    # run-of-river files can contain a complete year grouped by day-of-month
-    # and month instead of timestamp. Build the chronology from timestamps,
-    # then prove that the sorted rows are exactly hourly and gap-free.
-    sort!(year_indices; by = index -> table.timestamps[index])
-    !require_full_year && (year_indices = year_indices[1:expected_rows])
-
     expected_start = DateTime(sample_year, 1, 1)
-    for (offset, index) in enumerate(year_indices)
-        expected_timestamp = expected_start + Hour(offset - 1)
-        table.timestamps[index] == expected_timestamp || throw(ArgumentError(
-            "$source_name is not a complete ordered hourly chronology for $sample_year: " *
-            "row $offset has $(table.timestamps[index]), expected $expected_timestamp",
+    if require_full_year
+        # InternalEMPIRE filters by year and slices the resulting dataframe by
+        # row position without sorting. Preserve that behavior even when one
+        # source (notably hydroror.csv) stores a complete year out of timestamp
+        # order. Validate completeness without changing the row order.
+        timestamps = Set(table.timestamps[year_indices])
+        length(timestamps) == expected_rows || throw(ArgumentError(
+            "$source_name contains duplicate timestamps for $sample_year",
         ))
+        for offset in 0:(expected_rows - 1)
+            expected_start + Hour(offset) in timestamps || throw(ArgumentError(
+                "$source_name is missing timestamp $(expected_start + Hour(offset))",
+            ))
+        end
+    else
+        sort!(year_indices; by = index -> table.timestamps[index])
+        year_indices = year_indices[1:expected_rows]
+        for (offset, index) in enumerate(year_indices)
+            expected_timestamp = expected_start + Hour(offset - 1)
+            table.timestamps[index] == expected_timestamp || throw(ArgumentError(
+                "$source_name is not a complete ordered hourly chronology for $sample_year: " *
+                "row $offset has $(table.timestamps[index]), expected $expected_timestamp",
+            ))
+        end
     end
     return year_indices
+end
+
+function _raw_selection_metadata(
+    path::AbstractString,
+    table::RawScenarioTable,
+    indices;
+    selection_semantics::AbstractString,
+)
+    timestamps = table.timestamps[indices]
+    return Dict{String, Any}(
+        "sha256" => _oos_sha256_file(path),
+        "selected_rows" => length(indices),
+        "first_timestamp" => string(first(timestamps)),
+        "last_timestamp" => string(last(timestamps)),
+        "timestamps_ordered" => issorted(timestamps),
+        "non_hourly_row_steps" => count(!=(Hour(1)), diff(timestamps)),
+        "selection_semantics" => String(selection_semantics),
+    )
 end
 
 function _chronological_raw_sources(
@@ -126,17 +155,39 @@ function _chronological_raw_sources(
         )
     end
 
-    reference_timestamps = load_table.timestamps[load_indices]
-    hydro_table.timestamps[hydro_indices] == reference_timestamps || throw(ArgumentError(
-        "hydroseasonal.csv timestamps do not match electricload.csv for $sample_year",
-    ))
-    for (generator, table) in generator_sources
-        table.timestamps[generator_indices[generator]] == reference_timestamps ||
-            throw(ArgumentError(
-                "$generator timestamps do not match electricload.csv for $sample_year",
-            ))
+    if !require_full_year
+        reference_timestamps = load_table.timestamps[load_indices]
+        hydro_table.timestamps[hydro_indices] == reference_timestamps || throw(ArgumentError(
+            "hydroseasonal.csv timestamps do not match electricload.csv for $sample_year",
+        ))
+        for (generator, table) in generator_sources
+            table.timestamps[generator_indices[generator]] == reference_timestamps ||
+                throw(ArgumentError(
+                    "$generator timestamps do not match electricload.csv for $sample_year",
+                ))
+        end
     end
 
+    raw_file_selections = Dict{String, Any}(
+        "electricload.csv" => (table = load_table, indices = load_indices),
+        "hydroseasonal.csv" => (table = hydro_table, indices = hydro_indices),
+    )
+    generator_filenames = Dict(
+        "Solar" => "solar.csv",
+        "Windonshore" => "windonshore.csv",
+        "Windoffshore" => "windoffshore.csv",
+        "Windoffshoregrounded" => "windoffshore.csv",
+        "Windoffshorefloating" => "windoffshore.csv",
+        "Hydrorun-of-the-river" => "hydroror.csv",
+    )
+    for (generator, table) in generator_sources
+        filename = generator_filenames[generator]
+        get!(
+            raw_file_selections,
+            filename,
+            (table = table, indices = generator_indices[generator]),
+        )
+    end
     raw_filenames = (
         "electricload.csv",
         "hydroseasonal.csv",
@@ -145,14 +196,24 @@ function _chronological_raw_sources(
         "windoffshore.csv",
         "hydroror.csv",
     )
-    raw_metadata = Dict{String, Any}(
-        filename => Dict{String, Any}(
-            "sha256" => _oos_sha256_file(joinpath(data_folder, "ScenarioData", filename)),
-            "selected_rows" => operational_hours,
-            "first_timestamp" => string(first(reference_timestamps)),
-            "last_timestamp" => string(last(reference_timestamps)),
-        ) for filename in raw_filenames
-    )
+    selection_semantics = require_full_year ?
+                          "internalempire_filtered_source_row_order" :
+                          "timestamp_sorted_fixture"
+    raw_metadata = Dict{String, Any}()
+    for filename in raw_filenames
+        path = joinpath(data_folder, "ScenarioData", filename)
+        selection = get(raw_file_selections, filename, nothing)
+        raw_metadata[filename] = selection === nothing ? Dict{String, Any}(
+            "sha256" => _oos_sha256_file(path),
+            "selected_rows" => 0,
+            "used_by_model" => false,
+        ) : _raw_selection_metadata(
+            path,
+            selection.table,
+            selection.indices;
+            selection_semantics,
+        )
+    end
 
     return (;
         load_table,
@@ -161,6 +222,7 @@ function _chronological_raw_sources(
         load_indices,
         hydro_indices,
         generator_indices,
+        raw_file_selections,
         raw_metadata,
     )
 end
@@ -176,20 +238,34 @@ function _internalempire_raw_chunk(raw, chunk_index::Int)
     generator_indices = Dict(
         generator => indices[chunk] for (generator, indices) in raw.generator_indices
     )
-    timestamps = raw.load_table.timestamps[load_indices]
+    raw_file_selections = Dict(
+        filename => (table = selection.table, indices = selection.indices[chunk]) for
+        (filename, selection) in raw.raw_file_selections
+    )
     raw_metadata = Dict{String, Any}()
     for (filename, source) in raw.raw_metadata
-        raw_metadata[filename] = merge(
-            Dict{String, Any}(source),
-            Dict{String, Any}(
-                "selected_rows" => _OOS_FULL_YEAR_CHUNK_HOURS,
-                "source_year_rows" => _OOS_FULL_YEAR_HOURS,
-                "first_timestamp" => string(first(timestamps)),
-                "last_timestamp" => string(last(timestamps)),
-            ),
-        )
+        selection = get(raw_file_selections, filename, nothing)
+        if selection === nothing
+            raw_metadata[filename] = Dict{String, Any}(source)
+        else
+            timestamps = selection.table.timestamps[selection.indices]
+            raw_metadata[filename] = merge(
+                Dict{String, Any}(source),
+                Dict{String, Any}(
+                    "selected_rows" => _OOS_FULL_YEAR_CHUNK_HOURS,
+                    "source_year_rows" => _OOS_FULL_YEAR_HOURS,
+                    "first_timestamp" => string(first(timestamps)),
+                    "last_timestamp" => string(last(timestamps)),
+                    "timestamps_ordered" => issorted(timestamps),
+                    "non_hourly_row_steps" => count(!=(Hour(1)), diff(timestamps)),
+                ),
+            )
+        end
     end
-    return merge(raw, (; load_indices, hydro_indices, generator_indices, raw_metadata))
+    return merge(
+        raw,
+        (; load_indices, hydro_indices, generator_indices, raw_file_selections, raw_metadata),
+    )
 end
 
 function _write_chronological_scenario_csvs!(
