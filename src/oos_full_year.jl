@@ -165,12 +165,43 @@ function _chronological_raw_sources(
     )
 end
 
+function _internalempire_raw_chunk(raw, chunk_index::Int)
+    chunks = _internalempire_full_year_chunks()
+    chunk_index in eachindex(chunks) || throw(ArgumentError(
+        "Full-year OOS chunk index must be between 1 and $(length(chunks)); got $chunk_index",
+    ))
+    chunk = chunks[chunk_index]
+    load_indices = raw.load_indices[chunk]
+    hydro_indices = raw.hydro_indices[chunk]
+    generator_indices = Dict(
+        generator => indices[chunk] for (generator, indices) in raw.generator_indices
+    )
+    timestamps = raw.load_table.timestamps[load_indices]
+    raw_metadata = Dict{String, Any}()
+    for (filename, source) in raw.raw_metadata
+        raw_metadata[filename] = merge(
+            Dict{String, Any}(source),
+            Dict{String, Any}(
+                "selected_rows" => _OOS_FULL_YEAR_CHUNK_HOURS,
+                "source_year_rows" => _OOS_FULL_YEAR_HOURS,
+                "first_timestamp" => string(first(timestamps)),
+                "last_timestamp" => string(last(timestamps)),
+            ),
+        )
+    end
+    return merge(raw, (; load_indices, hydro_indices, generator_indices, raw_metadata))
+end
+
 function _write_chronological_scenario_csvs!(
     scenario_dir::AbstractString,
     raw,
     sets,
     strategic_period_count::Int,
     sample_year::Int,
+    ;
+    season::AbstractString = "full_year",
+    sample_hour::Int = 0,
+    include_internalempire_dummy_peak::Bool = false,
 )
     load_columns = _node_columns(raw.load_table, sets)
     hydro_columns = _node_columns(raw.hydro_table, sets)
@@ -198,6 +229,13 @@ function _write_chronological_scenario_csvs!(
                         _normalized_scenario_value(source[index]),
                     ))
                 end
+                include_internalempire_dummy_peak && _write_csv_row(io, (
+                    node,
+                    _OOS_FULL_YEAR_CHUNK_HOURS + 1,
+                    "scenario1",
+                    strategic_index,
+                    0.0,
+                ))
             end
         end
     end
@@ -219,12 +257,20 @@ function _write_chronological_scenario_csvs!(
                     _write_csv_row(io, (
                         node,
                         strategic_index,
-                        "full_year",
+                        season,
                         hour,
                         "scenario1",
                         _normalized_scenario_value(source[index]),
                     ))
                 end
+                include_internalempire_dummy_peak && _write_csv_row(io, (
+                    node,
+                    strategic_index,
+                    "peak1",
+                    _OOS_FULL_YEAR_CHUNK_HOURS + 1,
+                    "scenario1",
+                    1.0,
+                ))
             end
         end
     end
@@ -255,6 +301,14 @@ function _write_chronological_scenario_csvs!(
                                 _normalized_scenario_value(source[index]),
                             ))
                         end
+                        include_internalempire_dummy_peak && _write_csv_row(io, (
+                            node,
+                            node_generator,
+                            _OOS_FULL_YEAR_CHUNK_HOURS + 1,
+                            "scenario1",
+                            strategic_index,
+                            0.0,
+                        ))
                     end
                 end
             end
@@ -264,10 +318,10 @@ function _write_chronological_scenario_csvs!(
         (
             Period = strategic_index,
             Scenario = 1,
-            Season = "full_year",
+            Season = String(season),
             Year = sample_year,
             Month = 1,
-            Hour = 0,
+            Hour = sample_hour,
         ) for strategic_index in 1:strategic_period_count
     ]
     _write_csv_rows(joinpath(scenario_dir, "sampling_key.csv"), sampling_rows)
@@ -288,10 +342,44 @@ function _chronological_tree_metadata(
     operational_hours::Int,
     evaluation_mode::AbstractString,
     raw_metadata,
+    ;
+    chunk_index::Union{Nothing, Int} = nothing,
 )
     config_values = Dict{String, Any}()
     for key in _OOS_TREE_CONFIG_KEYS
         haskey(execution_config, key) && (config_values[key] = execution_config[key])
+    end
+    chronology = if chunk_index === nothing
+        Dict{String, Any}(
+            "formulation" => "single_chronology",
+            "operational_hours" => operational_hours,
+            "representative_periods" => 1,
+            "operational_scenarios" => 1,
+            "expected_hour_multiplicity" => 1,
+            "dummy_peak" => false,
+            "storage_cycle_boundaries_per_strategic_period" => 1,
+        )
+    else
+        chunk = _internalempire_full_year_chunks()[chunk_index]
+        Dict{String, Any}(
+            "formulation" => "internalempire_24x365",
+            "tree_index" => chunk_index,
+            "tree_count" => _OOS_FULL_YEAR_TREE_COUNT,
+            "source_hour_start" => first(chunk),
+            "source_hour_end" => last(chunk),
+            "source_hours" => length(chunk),
+            "model_operational_hours" =>
+                _OOS_FULL_YEAR_CHUNK_HOURS + _OOS_FULL_YEAR_DUMMY_PEAK_HOURS,
+            "representative_periods" => 2,
+            "operational_scenarios" => 1,
+            "winter_hour_multiplicity" =>
+                (_OOS_FULL_YEAR_HOURS - _OOS_FULL_YEAR_DUMMY_PEAK_HOURS) /
+                _OOS_FULL_YEAR_CHUNK_HOURS,
+            "dummy_peak" => true,
+            "dummy_peak_hours" => _OOS_FULL_YEAR_DUMMY_PEAK_HOURS,
+            "dummy_peak_results_ignored" => true,
+            "storage_cycle_boundaries_per_strategic_period" => 2,
+        )
     end
     return Dict{String, Any}(
         "schema_version" => 2,
@@ -304,14 +392,7 @@ function _chronological_tree_metadata(
         "tree_dir" => tree_dir,
         "seed" => seed,
         "sample_year" => sample_year,
-        "chronology" => Dict{String, Any}(
-            "operational_hours" => operational_hours,
-            "representative_periods" => 1,
-            "operational_scenarios" => 1,
-            "expected_hour_multiplicity" => 1,
-            "dummy_peak" => false,
-            "storage_cycle_boundaries_per_strategic_period" => 1,
-        ),
+        "chronology" => chronology,
         "input_format" => string(input_format),
         "source_data_folder" => source_data,
         "source_data_sha256" => source_data_sha256,
@@ -338,6 +419,7 @@ function _generate_chronological_oos_tree(
     sample_year::Int,
     operational_hours::Int,
     require_full_year::Bool,
+    chunk_index::Union{Nothing, Int} = nothing,
 )
     ispath(target_tree) && throw(ArgumentError("OOS tree already exists: $target_tree"))
     horizon = Int(execution_config["forecast_horizon_year"])
@@ -346,7 +428,7 @@ function _generate_chronological_oos_tree(
     strategic_period_count > 0 || throw(ArgumentError(
         "Chronological OOS config must contain at least one strategic period",
     ))
-    raw = _chronological_raw_sources(
+    full_raw = _chronological_raw_sources(
         source_data,
         execution_config,
         sets,
@@ -354,6 +436,7 @@ function _generate_chronological_oos_tree(
         operational_hours;
         require_full_year,
     )
+    raw = chunk_index === nothing ? full_raw : _internalempire_raw_chunk(full_raw, chunk_index)
     evaluation_mode = require_full_year ?
                       _OOS_CHRONOLOGICAL_MODE : _OOS_CHRONOLOGICAL_FIXTURE_MODE
 
@@ -369,6 +452,12 @@ function _generate_chronological_oos_tree(
             sets,
             strategic_period_count,
             sample_year,
+            ;
+            season = chunk_index === nothing ? "full_year" : "winter",
+            sample_hour = chunk_index === nothing ? 0 : first(
+                _internalempire_full_year_chunks()[chunk_index],
+            ) - 1,
+            include_internalempire_dummy_peak = chunk_index !== nothing,
         )
         metadata = _chronological_tree_metadata(
             execution_config,
@@ -384,6 +473,8 @@ function _generate_chronological_oos_tree(
             operational_hours,
             evaluation_mode,
             raw.raw_metadata,
+            ;
+            chunk_index,
         )
         YAML.write_file(joinpath(staged_tree, "metadata.yaml"), metadata)
         mv(staged_tree, target_tree)
@@ -396,49 +487,91 @@ function _validate_chronological_oos_metadata(metadata, context::AbstractString)
     chronology isa AbstractDict || throw(ArgumentError(
         "Chronological OOS tree has no chronology metadata: $context",
     ))
-    operational_hours = get(chronology, "operational_hours", nothing)
-    operational_hours isa Integer && operational_hours > 0 || throw(ArgumentError(
-        "Chronological OOS tree has an invalid operational-hour count: $context",
-    ))
-    get(chronology, "expected_hour_multiplicity", nothing) == 1 ||
-        throw(ArgumentError(
-            "Chronological OOS tree does not declare unit hour multiplicity: $context",
-        ))
-    get(chronology, "storage_cycle_boundaries_per_strategic_period", nothing) == 1 ||
-        throw(ArgumentError(
-            "Chronological OOS tree has an unexpected storage-cycle boundary count: $context",
-        ))
-    get(chronology, "representative_periods", nothing) == 1 || throw(ArgumentError(
-        "Chronological OOS tree must contain exactly one representative period: $context",
-    ))
-    get(chronology, "operational_scenarios", nothing) == 1 || throw(ArgumentError(
-        "Chronological OOS tree must contain exactly one operational scenario: $context",
-    ))
-    get(chronology, "dummy_peak", nothing) == false || throw(ArgumentError(
-        "Chronological OOS tree must not contain a dummy peak: $context",
-    ))
-
     config = get(metadata, "config", nothing)
     config isa AbstractDict || throw(ArgumentError(
         "Chronological OOS tree has no configuration metadata: $context",
     ))
-    expected_config = Dict{String, Any}(
-        "number_of_scenarios" => 1,
-        "regular_seasons" => ["full_year"],
-        "length_of_regular_season" => operational_hours,
-        "n_peak_seasons" => 0,
-        "len_peak_season" => 0,
-        "operational_hours_per_year" => operational_hours,
-        "use_scenario_generation" => false,
-        "use_fixed_sample" => false,
-    )
+    formulation = get(chronology, "formulation", "single_chronology")
+    expected_config = if formulation == "internalempire_24x365"
+        tree_index = get(chronology, "tree_index", nothing)
+        tree_index isa Integer && tree_index in 1:_OOS_FULL_YEAR_TREE_COUNT ||
+            throw(ArgumentError("Full-year OOS tree has an invalid tree index: $context"))
+        chunk = _internalempire_full_year_chunks()[tree_index]
+        expected_chronology = Dict{String, Any}(
+            "tree_count" => _OOS_FULL_YEAR_TREE_COUNT,
+            "source_hour_start" => first(chunk),
+            "source_hour_end" => last(chunk),
+            "source_hours" => _OOS_FULL_YEAR_CHUNK_HOURS,
+            "model_operational_hours" =>
+                _OOS_FULL_YEAR_CHUNK_HOURS + _OOS_FULL_YEAR_DUMMY_PEAK_HOURS,
+            "representative_periods" => 2,
+            "operational_scenarios" => 1,
+            "winter_hour_multiplicity" =>
+                (_OOS_FULL_YEAR_HOURS - _OOS_FULL_YEAR_DUMMY_PEAK_HOURS) /
+                _OOS_FULL_YEAR_CHUNK_HOURS,
+            "dummy_peak" => true,
+            "dummy_peak_hours" => _OOS_FULL_YEAR_DUMMY_PEAK_HOURS,
+            "dummy_peak_results_ignored" => true,
+            "storage_cycle_boundaries_per_strategic_period" => 2,
+        )
+        for (key, expected) in expected_chronology
+            get(chronology, key, nothing) == expected || throw(ArgumentError(
+                "Full-year OOS tree has invalid chronology setting '$key': " *
+                "$(get(chronology, key, nothing)) (expected $expected)",
+            ))
+        end
+        Dict{String, Any}(
+            "number_of_scenarios" => 1,
+            "regular_seasons" => ["winter"],
+            "length_of_regular_season" => _OOS_FULL_YEAR_CHUNK_HOURS,
+            "n_peak_seasons" => 1,
+            "len_peak_season" => _OOS_FULL_YEAR_DUMMY_PEAK_HOURS,
+            "operational_hours_per_year" => _OOS_FULL_YEAR_HOURS,
+            "use_scenario_generation" => false,
+            "use_fixed_sample" => false,
+        )
+    elseif formulation == "single_chronology"
+        operational_hours = get(chronology, "operational_hours", nothing)
+        operational_hours isa Integer && operational_hours > 0 || throw(ArgumentError(
+            "Chronological OOS tree has an invalid operational-hour count: $context",
+        ))
+        get(chronology, "expected_hour_multiplicity", nothing) == 1 ||
+            throw(ArgumentError(
+                "Chronological OOS tree does not declare unit hour multiplicity: $context",
+            ))
+        get(chronology, "storage_cycle_boundaries_per_strategic_period", nothing) == 1 ||
+            throw(ArgumentError(
+                "Chronological OOS tree has an unexpected storage-cycle boundary count: $context",
+            ))
+        get(chronology, "representative_periods", nothing) == 1 || throw(ArgumentError(
+            "Chronological OOS tree must contain exactly one representative period: $context",
+        ))
+        get(chronology, "operational_scenarios", nothing) == 1 || throw(ArgumentError(
+            "Chronological OOS tree must contain exactly one operational scenario: $context",
+        ))
+        get(chronology, "dummy_peak", nothing) == false || throw(ArgumentError(
+            "Chronological OOS tree must not contain a dummy peak: $context",
+        ))
+        Dict{String, Any}(
+            "number_of_scenarios" => 1,
+            "regular_seasons" => ["full_year"],
+            "length_of_regular_season" => operational_hours,
+            "n_peak_seasons" => 0,
+            "len_peak_season" => 0,
+            "operational_hours_per_year" => operational_hours,
+            "use_scenario_generation" => false,
+            "use_fixed_sample" => false,
+        )
+    else
+        throw(ArgumentError("Unknown chronological OOS formulation '$formulation': $context"))
+    end
     for (key, expected) in expected_config
         get(config, key, nothing) == expected || throw(ArgumentError(
             "Chronological OOS tree has invalid config setting '$key': " *
             "$(get(config, key, nothing)) (expected $expected)",
         ))
     end
-    return Int(operational_hours)
+    return Int(expected_config["operational_hours_per_year"])
 end
 
 function _validate_chronological_oos_tree(
@@ -450,6 +583,8 @@ function _validate_chronological_oos_tree(
     input_format::Symbol,
     evaluation_mode::AbstractString,
     operational_hours::Int,
+    ;
+    expected_chunk_index::Union{Nothing, Int} = nothing,
 )
     metadata = _validate_oos_experiment_tree(
         tree_dir,
@@ -468,6 +603,15 @@ function _validate_chronological_oos_tree(
     validated_hours == operational_hours || throw(ArgumentError(
         "Chronological OOS tree has an unexpected operational-hour count: $tree_dir",
     ))
+    if expected_chunk_index !== nothing
+        chronology = metadata["chronology"]
+        get(chronology, "formulation", nothing) == "internalempire_24x365" ||
+            throw(ArgumentError("Full-year OOS tree has an unexpected formulation: $tree_dir"))
+        get(chronology, "tree_index", nothing) == expected_chunk_index ||
+            throw(ArgumentError(
+                "Full-year OOS tree chunk index does not match its experiment position: $tree_dir",
+            ))
+    end
     return metadata
 end
 
@@ -505,9 +649,15 @@ function _prepare_chronological_oos_experiment(
     target_experiment = abspath(normpath(experiment_dir))
     years = Int.(collect(sample_years))
     isempty(years) && throw(ArgumentError("sample_years must not be empty"))
-    length(unique(years)) == length(years) || throw(ArgumentError(
-        "sample_years must not contain duplicates",
-    ))
+    if require_full_year
+        length(years) == 1 || throw(ArgumentError(
+            "InternalEMPIRE full-year OOS requires exactly one sample year per experiment",
+        ))
+    else
+        length(unique(years)) == length(years) || throw(ArgumentError(
+            "sample_years must not contain duplicates",
+        ))
+    end
     require_full_year && operational_hours != _OOS_FULL_YEAR_HOURS && throw(ArgumentError(
         "Full-year OOS requires exactly $_OOS_FULL_YEAR_HOURS operational hours",
     ))
@@ -520,9 +670,12 @@ function _prepare_chronological_oos_experiment(
     ))
 
     generation_config = YAML.load_file(generation_config_file)
-    execution_config = _chronological_oos_config(generation_config, operational_hours)
+    execution_config = require_full_year ?
+                       _internalempire_full_year_config(generation_config) :
+                       _chronological_oos_config(generation_config, operational_hours)
     evaluation_mode = require_full_year ?
                       _OOS_CHRONOLOGICAL_MODE : _OOS_CHRONOLOGICAL_FIXTURE_MODE
+    tree_years = require_full_year ? fill(only(years), _OOS_FULL_YEAR_TREE_COUNT) : years
     if ispath(target_experiment)
         isdir(target_experiment) || throw(ArgumentError(
             "OOS experiment path exists but is not a directory: $experiment_dir",
@@ -543,16 +696,28 @@ function _prepare_chronological_oos_experiment(
         target_experiment,
         input_format,
         0,
-        length(years),
+        length(tree_years),
     )
     expected_manifest["evaluation_mode"] = evaluation_mode
-    expected_manifest["sample_years"] = years
+    expected_manifest["sample_years"] = tree_years
     expected_manifest["operational_hours_per_year"] = operational_hours
     expected_manifest["generation_source_config_file"] = generation_config_file
     expected_manifest["generation_source_config_sha256"] =
         _oos_sha256_file(generation_config_file)
-    for (tree, year) in zip(expected_manifest["trees"], years)
+    for (tree_index, (tree, year)) in enumerate(zip(expected_manifest["trees"], tree_years))
         tree["sample_year"] = year
+        if require_full_year
+            chunk = _internalempire_full_year_chunks()[tree_index]
+            tree["chunk_index"] = tree_index
+            tree["source_hour_start"] = first(chunk)
+            tree["source_hour_end"] = last(chunk)
+        end
+    end
+    if require_full_year
+        expected_manifest["full_year_formulation"] = "internalempire_24x365"
+        expected_manifest["full_year_sample_year"] = only(years)
+        expected_manifest["chunk_hours"] = _OOS_FULL_YEAR_CHUNK_HOURS
+        expected_manifest["dummy_peak_hours_per_tree"] = _OOS_FULL_YEAR_DUMMY_PEAK_HOURS
     end
 
     manifest_file = joinpath(target_experiment, _OOS_EXPERIMENT_MANIFEST)
@@ -565,13 +730,22 @@ function _prepare_chronological_oos_experiment(
             "Existing OOS experiment manifest must be a mapping: $manifest_file",
         ))
         _validate_oos_experiment_spec(existing, expected_manifest)
-        for key in (
+        manifest_keys = String[
             "evaluation_mode",
             "sample_years",
             "operational_hours_per_year",
             "generation_source_config_file",
             "generation_source_config_sha256",
-        )
+        ]
+        if require_full_year
+            append!(manifest_keys, [
+                "full_year_formulation",
+                "full_year_sample_year",
+                "chunk_hours",
+                "dummy_peak_hours_per_tree",
+            ])
+        end
+        for key in manifest_keys
             get(existing, key, nothing) == expected_manifest[key] || throw(ArgumentError(
                 "Existing chronological OOS experiment has a different $key",
             ))
@@ -592,7 +766,7 @@ function _prepare_chronological_oos_experiment(
     end
 
     trees = manifest["trees"]
-    for (tree, year) in zip(trees, years)
+    for (tree_index, (tree, year)) in enumerate(zip(trees, tree_years))
         tree_dir = tree["path"]
         ispath(tree_dir) || continue
         try
@@ -605,6 +779,8 @@ function _prepare_chronological_oos_experiment(
                 input_format,
                 evaluation_mode,
                 operational_hours,
+                ;
+                expected_chunk_index = require_full_year ? tree_index : nothing,
             )
             tree["status"] = "complete"
         catch error
@@ -626,16 +802,19 @@ function _prepare_chronological_oos_experiment(
     _write_oos_experiment_manifest(manifest_file, manifest)
     _report_progress(
         progress,
-        "Preparing $(length(years)) chronological OOS tree(s) in $target_experiment",
+        "Preparing $(length(tree_years)) chronological OOS tree(s) in $target_experiment",
     )
     sets, _ = read_data(source_data; format = input_format)
-    for (tree, year) in zip(trees, years)
+    for (tree_index, (tree, year)) in enumerate(zip(trees, tree_years))
         tree["status"] == "complete" && continue
         tree["status"] = "generating"
         tree["error"] = nothing
         _mark_oos_experiment_updated!(manifest, "preparing")
         _write_oos_experiment_manifest(manifest_file, manifest)
-        _report_progress(progress, "Generating $(tree["name"]) from historical year $year")
+        source_description = require_full_year ?
+                             "historical year $year, hours $(tree["source_hour_start"]):$(tree["source_hour_end"])" :
+                             "historical year $year"
+        _report_progress(progress, "Generating $(tree["name"]) from $source_description")
         try
             _generate_chronological_oos_tree(
                 execution_config,
@@ -650,6 +829,7 @@ function _prepare_chronological_oos_experiment(
                 sample_year = year,
                 operational_hours,
                 require_full_year,
+                chunk_index = require_full_year ? tree_index : nothing,
             )
             _validate_chronological_oos_tree(
                 tree["path"],
@@ -660,6 +840,8 @@ function _prepare_chronological_oos_experiment(
                 input_format,
                 evaluation_mode,
                 operational_hours,
+                ;
+                expected_chunk_index = require_full_year ? tree_index : nothing,
             )
             tree["status"] = "complete"
             _mark_oos_experiment_updated!(manifest, "preparing")
@@ -689,13 +871,14 @@ end
         progress = nothing,
     )
 
-Prepare one fixed-investment OOS tree per complete non-leap historical year.
+Prepare InternalEMPIRE-equivalent full-year OOS trees for one non-leap year.
 
-Each tree contains one 8760-hour ordered operational scenario, one regular
-representative period with unit multiplicity, no dummy peak, and one storage
-cycle boundary per strategic period. The function writes a matching
-`full_year_config.yaml` and a resumable `experiment.yaml`; it never modifies
-the source dataset or starts a solver run.
+The selected 8,760-hour year is partitioned into 24 consecutive 365-hour trees.
+Each tree is an independent solve with one `winter` scenario and one dummy peak
+hour. The winter multiplicity is `(8760 - 1) / 365`; dummy-peak results are
+excluded from full-year aggregation. The function writes a matching
+`full_year_config.yaml` and resumable `experiment.yaml`; it never modifies the
+source dataset or starts a solver run.
 """
 function prepare_full_year_oos_experiment(
     config_file::AbstractString,

@@ -59,18 +59,28 @@ function test_full_year_oos_generation()
         manifest = YAML.load_file(joinpath(prepared, "experiment.yaml"))
         @test manifest["status"] == "complete"
         @test manifest["evaluation_mode"] == "chronological_full_year"
-        @test manifest["sample_years"] == [2015]
+        @test manifest["full_year_formulation"] == "internalempire_24x365"
+        @test manifest["full_year_sample_year"] == 2015
+        @test manifest["sample_years"] == fill(2015, 24)
         @test manifest["operational_hours_per_year"] == 8760
+        @test manifest["chunk_hours"] == 365
+        @test manifest["dummy_peak_hours_per_tree"] == 1
+        @test manifest["num_trees"] == 24
         @test manifest["trees"][1]["sample_year"] == 2015
+        @test manifest["trees"][1]["source_hour_start"] == 1
+        @test manifest["trees"][1]["source_hour_end"] == 365
+        @test manifest["trees"][24]["source_hour_start"] == 8396
+        @test manifest["trees"][24]["source_hour_end"] == 8760
+        @test all(tree["status"] == "complete" for tree in manifest["trees"])
 
         execution_config_file = manifest["source_config_file"]
         execution_config = YAML.load_file(execution_config_file)
         @test execution_config["number_of_scenarios"] == 1
-        @test execution_config["regular_seasons"] == ["full_year"]
-        @test execution_config["length_of_regular_season"] == 8760
+        @test execution_config["regular_seasons"] == ["winter"]
+        @test execution_config["length_of_regular_season"] == 365
         @test execution_config["operational_hours_per_year"] == 8760
-        @test execution_config["n_peak_seasons"] == 0
-        @test execution_config["len_peak_season"] == 0
+        @test execution_config["n_peak_seasons"] == 1
+        @test execution_config["len_peak_season"] == 1
         @test execution_config["use_scenario_generation"] == false
         @test execution_config["use_fixed_sample"] == false
 
@@ -80,16 +90,23 @@ function test_full_year_oos_generation()
         @test metadata["schema_version"] == 2
         @test metadata["evaluation_mode"] == "chronological_full_year"
         @test metadata["sample_year"] == 2015
-        @test metadata["chronology"]["operational_hours"] == 8760
-        @test metadata["chronology"]["expected_hour_multiplicity"] == 1
-        @test metadata["chronology"]["dummy_peak"] == false
-        @test metadata["chronology"]["storage_cycle_boundaries_per_strategic_period"] == 1
+        @test metadata["chronology"]["formulation"] == "internalempire_24x365"
+        @test metadata["chronology"]["tree_index"] == 1
+        @test metadata["chronology"]["source_hour_start"] == 1
+        @test metadata["chronology"]["source_hour_end"] == 365
+        @test metadata["chronology"]["source_hours"] == 365
+        @test metadata["chronology"]["model_operational_hours"] == 366
+        @test metadata["chronology"]["representative_periods"] == 2
+        @test metadata["chronology"]["winter_hour_multiplicity"] ≈ 8759 / 365
+        @test metadata["chronology"]["dummy_peak"] == true
+        @test metadata["chronology"]["dummy_peak_results_ignored"] == true
+        @test metadata["chronology"]["storage_cycle_boundaries_per_strategic_period"] == 2
         @test metadata["source_config_sha256"] ==
               OpenEMPIRE._oos_sha256_file(execution_config_file)
         @test metadata["generation_source_config_sha256"] ==
               OpenEMPIRE._oos_sha256_file(config_file)
         @test all(
-            source["selected_rows"] == 8760 for
+            source["selected_rows"] == 365 && source["source_year_rows"] == 8760 for
             source in values(metadata["raw_sources"])
         )
 
@@ -101,7 +118,7 @@ function test_full_year_oos_generation()
             Int(row.Operationalhour) for row in load_rows if
             String(row.Node) == "Germany" && Int(row.Period) == 1
         ]
-        @test germany_period1 == collect(1:8760)
+        @test germany_period1 == collect(1:366)
         @test Set(String(row.Scenario) for row in load_rows) == Set(["scenario1"])
         availability_rows = CSV.File(
             joinpath(tree_dir, "ScenarioData", "genCapAvailStochRaw.csv");
@@ -111,8 +128,14 @@ function test_full_year_oos_generation()
             Float64(row.GeneratorStochasticAvailabilityRaw) for row in availability_rows if
             String(row.Node) == "Germany" &&
             String(row.IntermitentGenerators) == "Hydrorun-of-the-river" &&
-            Int(row.Period) == 1
+            Int(row.Period) == 1 && Int(row.Operationalhour) <= 365
         ]
+        dummy_ror = only([
+            Float64(row.GeneratorStochasticAvailabilityRaw) for row in availability_rows if
+            String(row.Node) == "Germany" &&
+            String(row.IntermitentGenerators) == "Hydrorun-of-the-river" &&
+            Int(row.Period) == 1 && Int(row.Operationalhour) == 366
+        ])
         raw_ror = OpenEMPIRE._read_raw_scenario_table(
             joinpath(source_data, "ScenarioData", "hydroror.csv"),
             OpenEMPIRE._python_dateformat(execution_config["time_format"]),
@@ -124,12 +147,74 @@ function test_full_year_oos_generation()
             require_full_year = true,
             source_name = "hydroror.csv",
         )
-        @test generated_ror == OpenEMPIRE._normalized_scenario_value.(
-            raw_ror.values["DE"][ror_indices],
-        )
+        @test generated_ror ==
+              OpenEMPIRE._normalized_scenario_value.(raw_ror.values["DE"][ror_indices[1:365]])
+        @test dummy_ror == 0.0
         @test raw_ror.timestamps[ror_indices] == [
             DateTime(2015, 1, 1) + Hour(offset) for offset in 0:8759
         ]
+
+        last_tree_dir = joinpath(prepared, "oos_tree24")
+        last_metadata = YAML.load_file(joinpath(last_tree_dir, "metadata.yaml"))
+        @test last_metadata["chronology"]["tree_index"] == 24
+        @test last_metadata["chronology"]["source_hour_start"] == 8396
+        @test last_metadata["chronology"]["source_hour_end"] == 8760
+        last_availability = CSV.File(
+            joinpath(last_tree_dir, "ScenarioData", "genCapAvailStochRaw.csv");
+            normalizenames = false,
+        )
+        last_generated_ror = [
+            Float64(row.GeneratorStochasticAvailabilityRaw) for row in last_availability if
+            String(row.Node) == "Germany" &&
+            String(row.IntermitentGenerators) == "Hydrorun-of-the-river" &&
+            Int(row.Period) == 1 && Int(row.Operationalhour) <= 365
+        ]
+        @test last_generated_ror == OpenEMPIRE._normalized_scenario_value.(
+            raw_ror.values["DE"][ror_indices[8396:8760]],
+        )
+        sampling_key = collect(CSV.File(
+            joinpath(last_tree_dir, "ScenarioData", "sampling_key.csv");
+            normalizenames = false,
+        ))
+        @test all(String(row.Season) == "winter" for row in sampling_key)
+        @test all(Int(row.Hour) == 8395 for row in sampling_key)
+
+        staged_data = joinpath(root, "staged-tree1")
+        cp(source_data, staged_data)
+        cp(
+            joinpath(tree_dir, "ScenarioData"),
+            joinpath(staged_data, "ScenarioData");
+            force = true,
+        )
+        _, periods, model_sets, _ = OpenEMPIRE._prepare_model_inputs(
+            execution_config_file,
+            staged_data;
+            input_format = :csv,
+        )
+        @test length(periods) == 2 * 366
+        for strategic_period in strat_periods(periods)
+            representatives = collect(repr_periods(strategic_period))
+            @test length(representatives) == 2
+            winter = only(collect(opscenarios(representatives[1])))
+            dummy_peak = only(collect(opscenarios(representatives[2])))
+            @test length(winter) == 365
+            @test length(dummy_peak) == 1
+            @test all(
+                multiple_strat(strategic_period, hour) ≈ 8759 / 365 for hour in winter
+            )
+            @test multiple_strat(strategic_period, only(dummy_peak)) ≈ 1.0
+        end
+        model, model_periods, _, _ = OpenEMPIRE.create_model(
+            execution_config_file,
+            staged_data;
+            input_format = :csv,
+            include_investment_constraints = false,
+            include_string_names = false,
+        )
+        expected_storage_cycles =
+            length(OpenEMPIRE.node_storages(model_sets)) *
+            length(strat_periods(model_periods)) * 2
+        @test length(collect(eachindex(model[:storage_cyclic]))) == expected_storage_cycles
 
         investment_run = joinpath(root, "investment-run")
         _write_investment_csvs(joinpath(investment_run, "Output"))
@@ -145,13 +230,15 @@ function test_full_year_oos_generation()
         )
         queue = YAML.load_file(queue_file)
         @test queue["experiment"]["evaluation_mode"] == "chronological_full_year"
-        @test queue["experiment"]["sample_years"] == [2015]
+        @test queue["experiment"]["sample_years"] == fill(2015, 24)
+        @test length(queue["jobs"]) == 24
         @test queue["jobs"][1]["evaluation_mode"] == "chronological_full_year"
         @test queue["jobs"][1]["sample_year"] == 2015
+        @test queue["jobs"][24]["tree"] == "oos_tree24"
         @test "--config=$execution_config_file" in queue["jobs"][1]["command"]
         mismatched_config_file = joinpath(root, "mismatched-full-year.yaml")
         mismatched_config = deepcopy(execution_config)
-        mismatched_config["length_of_regular_season"] = 365
+        mismatched_config["length_of_regular_season"] = 8760
         YAML.write_file(mismatched_config_file, mismatched_config)
         @test_throws ArgumentError OpenEMPIRE.prepare_oos_execution_queue(
             prepared,
