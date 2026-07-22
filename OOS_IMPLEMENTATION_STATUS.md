@@ -1166,3 +1166,88 @@ Prepare controlled Solstorm evidence without starting more than one long job:
 - The failed `56643a1` stage remains preserved as preflight evidence and must
   not be patched or submitted. A fresh revision-pinned stage is required after
   committing this fix.
+
+### Controlled chronological full-year job 6424
+
+- The mode-preservation fix is commit `4011f4c`. A fresh immutable stage was
+  prepared at
+  `/home/torgrif/OpenEMPIRE.jl/stages/full_year_2015_3a0915a_oos_tree1_4011f4cd35b0`.
+  Local archive checks and all six remote content fingerprints passed.
+- The first SGE script in this stage requested `mem_free=320G` in addition to
+  `h_vmem` and `h_rt`. `qsub -w v` rejected it because `mem_free` is defined as
+  a global complex but is not available on the permitted queue instances. This
+  validation did not submit a job; the apparent number `6422` was SGE's
+  validation placeholder. The rejected queue/script remain preserved.
+- A distinct `execution_submit.yaml` and `sge_submit/oos_tree1.sge.sh` were
+  generated from the same verified inputs. They request `h_vmem=320G` and
+  `h_rt=12:00:00`; SGE reported `verification: found suitable queue(s)`.
+  The immutable script SHA-256 is
+  `ee32f058334f88289f79a06b88e31cf83039540b0d6996fc83aec9acea3d942f`.
+- Exactly one job was submitted: job `6424`, initially running on
+  `all.q@compute-4-55.local`. Its authoritative queue records status `running`,
+  the scheduler ID, and these log paths:
+  - stdout: `inputs/experiment/sge_submit/logs/oos_tree1_6424.out`;
+  - stderr: `inputs/experiment/sge_submit/logs/oos_tree1_6424.err`.
+- The live runner reported `evaluation_mode=chronological_full_year`, one
+  8760-hour scenario in each of five strategic periods, and 43,800 model time
+  steps. It entered operational-variable indexing with 30,484,800 generator
+  entries. This proves the submitted job is the intended full-year build, not
+  a representative-period rerun. Solver completion remains pending.
+- No other long job is queued or running, and an ambiguous failure must not be
+  resubmitted automatically.
+
+## Current InternalEMPIRE comparison
+
+- Investment capacities are parameters in InternalEMPIRE and fixed JuMP
+  variables here. With the Julia investment-only constraint gate, these are
+  equivalent operational formulations. Both retain the fixed investment-cost
+  constant in the objective; Julia reports it separately from the varying
+  non-investment objective during aggregation.
+- InternalEMPIRE's entire `wind_farm_transmission_cap` definition is inside its
+  `if not OUT_OF_SAMPLE` block (`empire.py`, approximately lines 2691 and
+  2857-2884). The Julia omission of the corresponding fixed-capacity coupling
+  is therefore verified parity, resolving the earlier offshore question.
+- InternalEMPIRE's checked-in full-year runner sets `lengthRegSeason = 365`,
+  while its sampler interprets that value as a row/hour count. It consequently
+  samples 365 hours, not 365 days. The Julia implementation deliberately does
+  not reproduce that defect: it constructs 8,760 ordered one-hour operational
+  periods per strategic period, unit multiplicity/probability, and one annual
+  storage cycle.
+- InternalEMPIRE's `concat_out_of_sample_results.py` concatenates selected
+  winter rows and adds tree/full-year-hour identifiers; it does not calculate
+  physical ENS or separate constant investment cost. Julia preserves those
+  identifiers but additionally computes conditional and probability-weighted
+  expected ENS using TimeStruct multiplicity, probability, and duration. ENS
+  is not discounted.
+- The original fixed-investment design is functionally equivalent to the
+  available `rf/oos_fixed_investments` work but was independently integrated on
+  the workbench base. The investment-constraint gate, provenance checks,
+  deterministic aggregation, and chronological 8,760-hour construction are
+  subsequent Julia work and are not claimed as merged/cherry-picked rf code.
+
+## Employee-review PR sequence
+
+Keep `torgrim/oos-workbench-continuation` as the evidence/integration branch.
+Do not open stacked review PRs. After each PR merges, create the next
+`torgrim/...` branch from the newly updated `torgrim/workbench` and manually
+port only that PR's tested functionality; exclude status-journal commits.
+
+1. **Core fixed-investment OOS.** Curate `7d41fb7` plus the `9c54646` gating
+   fix: fixed-capacity readers/application, `include_investment_constraints`,
+   model/user-interface changes, and focused feasibility/key-set tests.
+2. **Runner mode and provenance.** Curate `f5e428f`, `887dd25`, `d1936ac`, and
+   the compatibility portion of `97972b0`: runner options/input staging,
+   manifests, no-solution handling, and structural source-run validation.
+3. **Scenario experiments and execution queue.** Curate `46a1971`, `8b67ac9`,
+   `edbe8fe`, and `d9c3bf7`: non-mutating tree generation, multi-tree manifests,
+   resumable local queues, and their deterministic tests. No HPC code.
+4. **Result aggregation.** Curate `7c98a04`: combined tree outputs, conditional
+   versus expected ENS, and fixed versus non-investment objective reporting.
+5. **Chronological full-year core.** Curate `3a0915a`: ordered 8,760-hour input
+   construction, annual TimeStruct semantics, local solve/regression tests, and
+   the thin preparation CLI.
+6. **Optional Solstorm tooling.** Only if maintainers want it in the main repo,
+   curate the SGE/staging/setup/submission modules, resource requests, and the
+   `4011f4c` mode-preservation fix. Keep operational evidence and recovery
+   journals out of the code PR; otherwise retain this as a separate tooling
+   branch.
