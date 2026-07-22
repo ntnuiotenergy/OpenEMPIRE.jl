@@ -1,7 +1,32 @@
 const _OOS_FULL_YEAR_HOURS = 8760
+const _OOS_FULL_YEAR_CHUNK_HOURS = 365
+const _OOS_FULL_YEAR_TREE_COUNT = div(_OOS_FULL_YEAR_HOURS, _OOS_FULL_YEAR_CHUNK_HOURS)
+const _OOS_FULL_YEAR_DUMMY_PEAK_HOURS = 1
 const _OOS_FULL_YEAR_CONFIG = "full_year_config.yaml"
 const _OOS_CHRONOLOGICAL_MODE = "chronological_full_year"
 const _OOS_CHRONOLOGICAL_FIXTURE_MODE = "chronological_test_fixture"
+
+function _internalempire_full_year_chunks()
+    _OOS_FULL_YEAR_TREE_COUNT * _OOS_FULL_YEAR_CHUNK_HOURS == _OOS_FULL_YEAR_HOURS ||
+        error("Full-year hours must be exactly divisible into InternalEMPIRE chunks")
+    return [
+        ((tree_index - 1) * _OOS_FULL_YEAR_CHUNK_HOURS + 1):(tree_index * _OOS_FULL_YEAR_CHUNK_HOURS) for
+        tree_index in 1:_OOS_FULL_YEAR_TREE_COUNT
+    ]
+end
+
+function _internalempire_full_year_config(source_config)
+    config = deepcopy(source_config)
+    config["number_of_scenarios"] = 1
+    config["regular_seasons"] = ["winter"]
+    config["length_of_regular_season"] = _OOS_FULL_YEAR_CHUNK_HOURS
+    config["n_peak_seasons"] = 1
+    config["len_peak_season"] = _OOS_FULL_YEAR_DUMMY_PEAK_HOURS
+    config["operational_hours_per_year"] = _OOS_FULL_YEAR_HOURS
+    config["use_scenario_generation"] = false
+    config["use_fixed_sample"] = false
+    return config
+end
 
 function _chronological_oos_config(source_config, operational_hours::Int)
     operational_hours > 0 || throw(ArgumentError("operational_hours must be positive"))

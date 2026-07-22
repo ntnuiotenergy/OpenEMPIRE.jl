@@ -1,3 +1,43 @@
+function test_internalempire_full_year_foundation()
+    chunks = OpenEMPIRE._internalempire_full_year_chunks()
+    @test length(chunks) == 24
+    @test first(chunks) == 1:365
+    @test chunks[2] == 366:730
+    @test last(chunks) == 8396:8760
+    @test [first(chunk) - 1 for chunk in chunks] == collect(0:365:8395)
+    @test reduce(vcat, chunks) == collect(1:8760)
+    @test all(length(chunk) == 365 for chunk in chunks)
+
+    source_config = YAML.load_file(joinpath(pkgdir(OpenEMPIRE), "config", "testrun.yaml"))
+    config = OpenEMPIRE._internalempire_full_year_config(source_config)
+    @test config["number_of_scenarios"] == 1
+    @test config["regular_seasons"] == ["winter"]
+    @test config["length_of_regular_season"] == 365
+    @test config["n_peak_seasons"] == 1
+    @test config["len_peak_season"] == 1
+    @test config["operational_hours_per_year"] == 8760
+    @test config["use_scenario_generation"] == false
+    @test config["use_fixed_sample"] == false
+
+    periods = OpenEMPIRE.create_timestruct(1, 5, 1, 365, 1, 1, 1)
+    strategic_period = only(collect(strat_periods(periods)))
+    representatives = collect(repr_periods(strategic_period))
+    @test length(representatives) == 2
+    winter = only(collect(opscenarios(representatives[1])))
+    dummy_peak = only(collect(opscenarios(representatives[2])))
+    @test length(winter) == 365
+    @test length(dummy_peak) == 1
+    @test all(
+        multiple_strat(strategic_period, hour) ≈ (8760 - 1) / 365 for hour in winter
+    )
+    @test multiple_strat(strategic_period, only(dummy_peak)) ≈ 1.0
+    @test all(probability(hour) ≈ 1.0 for hour in strategic_period)
+    @test sum(
+        multiple_strat(strategic_period, hour) * probability(hour) * duration(hour) for
+        hour in strategic_period
+    ) ≈ 8760.0
+end
+
 function test_full_year_oos_generation()
     mktempdir() do root
         source_data = joinpath(root, "source")
