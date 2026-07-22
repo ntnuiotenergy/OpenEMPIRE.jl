@@ -52,6 +52,20 @@ function _oos_result_output_dir(result_dir::AbstractString)
     throw(ArgumentError("OOS result has no output directory: $result_dir"))
 end
 
+function _oos_result_tree_identity(oos, scenario_metadata)
+    manifest_tree = _oos_required_string(oos, "scenario_tree", "OOS manifest")
+    staged_from_tree = get(scenario_metadata, "staged_from_tree", nothing)
+    staged_from_tree === nothing && return manifest_tree
+    staged_from_tree isa AbstractString || throw(ArgumentError(
+        "OOS scenario metadata staged_from_tree must be a string",
+    ))
+    identity = strip(staged_from_tree)
+    isempty(identity) && throw(ArgumentError(
+        "OOS scenario metadata staged_from_tree cannot be empty",
+    ))
+    return String(identity)
+end
+
 function _stream_combined_oos_csv(summaries, filename::AbstractString, output_dir::AbstractString)
     output_file = joinpath(output_dir, filename)
     mkpath(dirname(output_file))
@@ -368,7 +382,7 @@ function summarize_oos_result(
 
     output_dir = _oos_result_output_dir(normalized_result_dir)
     fixed_investments_sha256 = _oos_fixed_investments_verified(normalized_result_dir, output_dir)
-    tree = _oos_required_string(oos, "scenario_tree", "OOS manifest")
+    tree = _oos_result_tree_identity(oos, scenario_metadata)
     seed_value = get(oos, "scenario_seed", nothing)
     seed_value isa Integer || throw(ArgumentError("OOS manifest has no integer scenario seed"))
     seed = Int(seed_value)

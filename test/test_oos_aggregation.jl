@@ -1,4 +1,11 @@
-function _write_oos_aggregation_fixture(root, tree, seed; shed_rows)
+function _write_oos_aggregation_fixture(
+    root,
+    tree,
+    seed;
+    shed_rows,
+    staged_tree = tree,
+    manifest_tree = staged_tree,
+)
     result_dir = joinpath(root, tree, "run")
     input_dir = joinpath(result_dir, "Input")
     fixed_dir = joinpath(input_dir, "fixed_investments")
@@ -19,10 +26,11 @@ function _write_oos_aggregation_fixture(root, tree, seed; shed_rows)
     metadata_file = joinpath(input_dir, "oos_tree_metadata.yaml")
     YAML.write_file(config_file, config)
     metadata = Dict{String, Any}(
-        "tree" => tree,
+        "tree" => staged_tree,
         "seed" => seed,
         "staged_from_metadata_sha256" => "source-tree-metadata-$seed",
     )
+    staged_tree == tree || (metadata["staged_from_tree"] = tree)
     YAML.write_file(metadata_file, metadata)
 
     for aliases in OpenEMPIRE._OOS_FIXED_INVESTMENT_FILENAMES
@@ -48,7 +56,7 @@ function _write_oos_aggregation_fixture(root, tree, seed; shed_rows)
         "config_sha256" => OpenEMPIRE._oos_sha256_file(config_file),
         "out_of_sample" => Dict{String, Any}(
             "enabled" => true,
-            "scenario_tree" => tree,
+            "scenario_tree" => manifest_tree,
             "scenario_seed" => seed,
             "scenario_checksums_verified" => true,
             "investments_fixed" => true,
@@ -95,7 +103,14 @@ function test_summarize_and_aggregate_oos_results()
             "N1,1,2,peak1,1,4.0",
         ]
         first_run = _write_oos_aggregation_fixture(root, "oos_tree1", 101; shed_rows)
-        second_run = _write_oos_aggregation_fixture(root, "oos_tree2", 102; shed_rows)
+        second_run = _write_oos_aggregation_fixture(
+            root,
+            "oos_tree2",
+            102;
+            shed_rows,
+            staged_tree = "oos_tree1",
+            manifest_tree = "oos_tree1",
+        )
 
         result = OpenEMPIRE.summarize_oos_result(first_run)
         @test result.summary.FixedInvestmentsVerified
@@ -124,6 +139,8 @@ function test_summarize_and_aggregate_oos_results()
             combined_files = ["loadShed.csv"],
         )
         @test length(aggregated.summaries) == 2
+        @test Set(row.Tree for row in aggregated.summaries) ==
+              Set(["oos_tree1", "oos_tree2"])
         @test isfile(aggregated.summary_file)
         @test isfile(aggregated.scenario_file)
         @test isfile(aggregated.season_file)
