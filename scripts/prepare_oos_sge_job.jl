@@ -8,6 +8,9 @@ const _OOS_SGE_OPTIONS = Set([
     "output-dir",
     "job-name-prefix",
     "hosts",
+    "h-vmem",
+    "h-rt",
+    "mem-free",
 ])
 
 function _parse_oos_sge_args(args)
@@ -17,6 +20,9 @@ function _parse_oos_sge_args(args)
         "output-dir" => "",
         "job-name-prefix" => "empire_oos",
         "hosts" => OpenEMPIRE._OOS_SOLSTORM_SGE_HOSTS,
+        "h-vmem" => "",
+        "h-rt" => "",
+        "mem-free" => "",
     )
     for arg in args
         startswith(arg, "--") && occursin("=", arg) || throw(ArgumentError(
@@ -43,6 +49,15 @@ function main(args = ARGS)
     println("Job:        $(job_index === nothing ? "next pending" : job_index)")
     println("Output:     $output_dir")
     println("SGE hosts:  $(options["hosts"])")
+    println(
+        "SGE h_vmem: $(isempty(options["h-vmem"]) ? "not requested" : options["h-vmem"])",
+    )
+    println(
+        "SGE h_rt:   $(isempty(options["h-rt"]) ? "not requested" : options["h-rt"])",
+    )
+    println(
+        "SGE mem_free: $(isempty(options["mem-free"]) ? "not requested" : options["mem-free"])",
+    )
 
     plan = OpenEMPIRE.prepare_oos_sge_job(
         queue_file;
@@ -50,6 +65,9 @@ function main(args = ARGS)
         output_dir,
         job_name_prefix = options["job-name-prefix"],
         hosts = options["hosts"],
+        h_vmem = isempty(options["h-vmem"]) ? nothing : options["h-vmem"],
+        h_rt = isempty(options["h-rt"]) ? nothing : options["h-rt"],
+        mem_free = isempty(options["mem-free"]) ? nothing : options["mem-free"],
     )
     println("SGE script: $(plan["script"])")
     println("Submission command (not executed):")

@@ -11,6 +11,9 @@ const _OOS_STAGING_OPTIONS = Set([
     "remote-host",
     "remote-root",
     "revision",
+    "sge-h-vmem",
+    "sge-h-rt",
+    "sge-mem-free",
 ])
 
 function _parse_oos_staging_args(args)
@@ -22,6 +25,9 @@ function _parse_oos_staging_args(args)
         "remote-host" => OpenEMPIRE._OOS_SOLSTORM_HOST,
         "remote-root" => "",
         "revision" => "HEAD",
+        "sge-h-vmem" => "",
+        "sge-h-rt" => "",
+        "sge-mem-free" => "",
     )
     for argument in args
         startswith(argument, "--") && occursin("=", argument) || throw(ArgumentError(
@@ -49,6 +55,9 @@ function main(args = ARGS)
         job_index,
         output_dir,
         revision = options["revision"],
+        sge_h_vmem = isempty(options["sge-h-vmem"]) ? nothing : options["sge-h-vmem"],
+        sge_h_rt = isempty(options["sge-h-rt"]) ? nothing : options["sge-h-rt"],
+        sge_mem_free = isempty(options["sge-mem-free"]) ? nothing : options["sge-mem-free"],
     )
     plan = YAML.load_file(plan_file)
 
@@ -58,6 +67,7 @@ function main(args = ARGS)
     println("Source:     $(plan["source"]["selected_job"]["tree"])")
     println("Revision:   $(plan["source"]["repository"]["commit"])")
     println("Destination: $(plan["remote"]["stage_root"])")
+    println("SGE resources: $(plan["acceptance_criteria"]["sge_resources"])")
     if !isempty(plan["blockers"])
         println("Blockers:")
         for blocker in plan["blockers"]

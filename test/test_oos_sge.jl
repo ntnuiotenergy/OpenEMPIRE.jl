@@ -1,4 +1,9 @@
 function test_parse_oos_sge_output()
+    @test OpenEMPIRE._oos_sge_resource_directives(Dict(
+        "h_vmem" => nothing,
+        "h_rt" => nothing,
+        "mem_free" => nothing,
+    )) == ""
     @test OpenEMPIRE.parse_oos_sge_qsub_output(
         "Your job 12345 (\"empire_oos_1\") has been submitted\n",
     ) == "12345"
@@ -125,17 +130,41 @@ function test_prepare_and_record_oos_sge_job()
         )
 
         sge_dir = joinpath(root, "sge")
-        plan = OpenEMPIRE.prepare_oos_sge_job(queue_file; output_dir = sge_dir)
+        @test_throws ArgumentError OpenEMPIRE.prepare_oos_sge_job(
+            queue_file;
+            output_dir = sge_dir,
+            h_vmem = "0G",
+        )
+        @test_throws ArgumentError OpenEMPIRE.prepare_oos_sge_job(
+            queue_file;
+            output_dir = sge_dir,
+            h_rt = "12 hours",
+        )
+        plan = OpenEMPIRE.prepare_oos_sge_job(
+            queue_file;
+            output_dir = sge_dir,
+            h_vmem = "320G",
+            h_rt = "12:00:00",
+            mem_free = "320G",
+        )
         @test plan["kind"] == "sge"
         @test plan["cluster"] == "Solstorm"
         @test plan["status"] == "prepared"
         @test plan["submit_command"] == ["qsub", plan["script"]]
+        @test plan["resources"] == Dict(
+            "h_vmem" => "320G",
+            "h_rt" => "12:00:00",
+            "mem_free" => "320G",
+        )
         @test isfile(plan["script"])
         @test !ispath(results_root)
 
         script = read(plan["script"], String)
         @test occursin("#\$ -cwd", script)
         @test occursin("#\$ -l hostname=", script)
+        @test occursin("#\$ -l h_vmem=320G", script)
+        @test occursin("#\$ -l h_rt=12:00:00", script)
+        @test occursin("#\$ -l mem_free=320G", script)
         @test occursin("module load gurobi/13.0", script)
         @test occursin("OpenEMPIRE Solstorm Julia bootstrap", script)
         @test occursin("source /etc/profile", script)
@@ -149,7 +178,13 @@ function test_prepare_and_record_oos_sge_job()
         @test occursin("--scenario-data-root=$(joinpath(experiment_dir, "oos_tree1"))", script)
         @test !occursin(r"(?m)^qsub ", script)
 
-        repeated = OpenEMPIRE.prepare_oos_sge_job(queue_file; output_dir = sge_dir)
+        repeated = OpenEMPIRE.prepare_oos_sge_job(
+            queue_file;
+            output_dir = sge_dir,
+            h_vmem = "320G",
+            h_rt = "12:00:00",
+            mem_free = "320G",
+        )
         @test repeated == plan
         queued = YAML.load_file(queue_file)
         @test queued["jobs"][1]["status"] == "pending"

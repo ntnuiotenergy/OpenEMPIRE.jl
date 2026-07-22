@@ -193,6 +193,9 @@ end
         job_index = nothing,
         output_dir = nothing,
         revision = "HEAD",
+        sge_h_vmem = nothing,
+        sge_h_rt = nothing,
+        sge_mem_free = nothing,
     )
 
 Create a locally validated, one-tree Solstorm staging plan without executing
@@ -213,6 +216,9 @@ function prepare_oos_solstorm_staging(
     job_index = nothing,
     output_dir = nothing,
     revision::AbstractString = "HEAD",
+    sge_h_vmem = nothing,
+    sge_h_rt = nothing,
+    sge_mem_free = nothing,
 )
     target_queue, queue = _load_oos_execution_queue(queue_file)
     _validate_oos_execution_queue_inputs(queue)
@@ -227,6 +233,21 @@ function prepare_oos_solstorm_staging(
         r"^[A-Za-z0-9.-]+$",
     )
     root = _validate_oos_remote_root(remote_root)
+    sge_h_vmem = _validate_optional_oos_sge_resource(
+        sge_h_vmem,
+        "SGE h_vmem resource",
+        r"^[1-9][0-9]*(?:\.[0-9]+)?[KMGTP]?$",
+    )
+    sge_h_rt = _validate_optional_oos_sge_resource(
+        sge_h_rt,
+        "SGE h_rt resource",
+        r"^[0-9]+:[0-5][0-9]:[0-5][0-9]$",
+    )
+    sge_mem_free = _validate_optional_oos_sge_resource(
+        sge_mem_free,
+        "SGE mem_free resource",
+        r"^[1-9][0-9]*(?:\.[0-9]+)?[KMGTP]?$",
+    )
 
     job = if job_index === nothing
         pending = findfirst(candidate -> candidate["status"] == "pending", queue["jobs"])
@@ -546,6 +567,9 @@ OpenEMPIRE._oos_fixed_investment_metadata(ARGS[11])["sha256"] == ARGS[12] ||
         joinpath(remote_project, "scripts", "prepare_oos_sge_job.jl"),
         "--queue=$remote_queue",
     ]
+    sge_h_vmem === nothing || push!(sge_arguments, "--h-vmem=$(sge_h_vmem)")
+    sge_h_rt === nothing || push!(sge_arguments, "--h-rt=$(sge_h_rt)")
+    sge_mem_free === nothing || push!(sge_arguments, "--mem-free=$(sge_mem_free)")
     push!(commands, _oos_staging_command(
         "remote_configure",
         "Prepare the SGE script without submitting it",
@@ -666,6 +690,11 @@ OpenEMPIRE._oos_fixed_investment_metadata(ARGS[11])["sha256"] == ARGS[12] ||
             "fixed_investment_file_count" => length(fixed_files),
             "checksums_verified_before_queue_preparation" => true,
             "scheduler_submission_allowed" => false,
+            "sge_resources" => Dict{String, Any}(
+                "h_vmem" => sge_h_vmem,
+                "h_rt" => sge_h_rt,
+                "mem_free" => sge_mem_free,
+            ),
         ),
         "commands" => commands,
     )

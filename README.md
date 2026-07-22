@@ -225,7 +225,8 @@ queue job without submitting it:
 
 ```bash
 julia --project=. scripts/prepare_oos_sge_job.jl \
-  --queue=OutOfSample/test/experiment_seed101_3trees/execution.yaml
+  --queue=OutOfSample/test/experiment_seed101_3trees/execution.yaml \
+  --h-vmem=320G --h-rt=12:00:00 --mem-free=320G
 ```
 
 The adapter follows the existing Solstorm high-memory-host and Julia/Gurobi
@@ -233,6 +234,12 @@ module conventions. It writes an executable `sge/oos_treeN.sge.sh`, records the
 corresponding `qsub` command and log templates in `execution.yaml`, and prints
 the command as **not executed**. Repeating it is safe when the generated script
 is unchanged; a conflicting existing script is rejected.
+
+The three resource options are optional and map directly to requestable SGE
+resources. `h_vmem` bounds per-process virtual memory, `h_rt` bounds elapsed
+runtime, and `mem_free` delays dispatch until a matching host reports the
+requested free memory. Record evidence for the selected values instead of
+copying the example values to a differently sized model.
 
 Prepare the execution queue and SGE script on Solstorm after transferring the
 repository, scenario experiment, and fixed-investment outputs. Queue commands
@@ -268,7 +275,8 @@ Create a locally validated staging plan before transferring an OOS smoke test:
 julia --project=. scripts/prepare_oos_solstorm_staging.jl \
   --queue=OutOfSample/test/experiment_seed101_3trees/execution.yaml \
   --remote-user=<username> \
-  --remote-root=/absolute/solstorm/path/openempire-oos
+  --remote-root=/absolute/solstorm/path/openempire-oos \
+  --sge-h-vmem=320G --sge-h-rt=12:00:00 --sge-mem-free=320G
 ```
 
 This is a dry-run operation. It writes `staging.yaml` plus remote-adjusted tree

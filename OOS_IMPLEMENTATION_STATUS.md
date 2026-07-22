@@ -1065,8 +1065,10 @@ overwriting evidence from an in-progress or completed experiment.
 5. Chronological full-year generation and local small-case solving are
    implemented, but the 419 MB `europe_v51` tree has not been built or solved.
    Its exact fixed-capacity size is now estimated and calibrated at 57,957,825
-   variables and 82,911,765 constraints. Cluster memory, build time, solver
-   behavior, and the assumed 320 GB / 12-hour launch envelope remain unverified.
+   variables and 82,911,765 constraints. A read-only capacity query verified
+   sufficient current host capacity and valid SGE resource names, but actual
+   build time, peak memory, solver behavior, and whether the 320 GB / 12-hour
+   envelope is sufficient remain unverified until the controlled run completes.
 6. The current continuation branch is an integration branch, not a proposed
    single employee-review PR. Prefer sequential PRs: runner workflow, core OOS,
    experiment orchestration, then optional Solstorm tooling.
@@ -1104,10 +1106,10 @@ overwriting evidence from an in-progress or completed experiment.
 
 Prepare controlled Solstorm evidence without starting more than one long job:
 
-1. With explicit approval, make a read-only Solstorm capacity/queue query to
-   verify that at least 320 GB is available on a permitted high-memory host and
-   determine whether `h_vmem`/`h_rt` requests are supported or required.
-2. Execute remote commands 3-14 from the immutable full-year staging plan,
+1. Commit the tested explicit SGE-resource support and prepare a new
+   revision-pinned full-year queue/stage. Preserve the older `fb56a88` plan as
+   reference-only because it predates the resource directives.
+2. With explicit approval, transfer and validate that new immutable stage,
    recording checksum and queue/SGE preflight evidence without submitting.
 3. After remote input verification, submit exactly one full-year job and record
    its ID, command, logs, expected outputs, and acceptance criteria. Do not
@@ -1118,3 +1120,26 @@ Prepare controlled Solstorm evidence without starting more than one long job:
 5. When evidence is complete, update this file and split the integration branch
    into the documented dependency-ordered employee-review PR sequence without
    rewriting or deleting the reference branches.
+
+## Solstorm capacity and resource preflight on 2026-07-22
+
+- The user approved a read-only Solstorm connection. At
+  `2026-07-22T10:32:31Z`, `qstat -u torgrif` reported no queued or running jobs.
+- The permitted hosts `compute-4-51`, `compute-4-52`, `compute-4-55`, and
+  `compute-4-56` each reported 503.046 GiB total memory and between 496.362 and
+  496.876 GiB free. Their queue instances reported zero used/reserved slots and
+  24 available slots. This is a point-in-time capacity observation, not a
+  reservation.
+- `qconf` reported `h_vmem`, `h_rt`, and `mem_free` as requestable resources.
+  The planned full-year requests are therefore `h_vmem=320G`,
+  `h_rt=12:00:00`, and `mem_free=320G`.
+- The SGE adapter and Solstorm staging planner now accept, validate, persist,
+  and render those three optional resources. The full repository suite passed:
+  SGE 68 assertions, staging 102 assertions, core OOS 161 assertions, and all
+  other suites; the one pre-existing broken Python fixture-parity check remains
+  unchanged.
+- The connection and capacity inspection were read-only. No remote files were
+  written, no archive was transferred, and no job was submitted.
+- The previous full-year stage pinned to `fb56a887ac83` remains preserved as
+  evidence, but is superseded for execution: it does not contain the explicit
+  resource requests and its code fingerprint cannot represent the new adapter.

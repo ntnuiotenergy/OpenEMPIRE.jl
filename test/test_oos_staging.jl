@@ -35,6 +35,9 @@ function test_prepare_oos_solstorm_staging()
             remote_root = "/cluster/users/intern/oos",
             job_index = 2,
             output_dir = staging_dir,
+            sge_h_vmem = "320G",
+            sge_h_rt = "12:00:00",
+            sge_mem_free = "320G",
         )
         @test plan_file == joinpath(staging_dir, "staging.yaml")
         @test isfile(plan_file)
@@ -71,6 +74,11 @@ function test_prepare_oos_solstorm_staging()
         )
         @test plan["acceptance_criteria"]["one_tree_only"]
         @test !plan["acceptance_criteria"]["scheduler_submission_allowed"]
+        @test plan["acceptance_criteria"]["sge_resources"] == Dict(
+            "h_vmem" => "320G",
+            "h_rt" => "12:00:00",
+            "mem_free" => "320G",
+        )
 
         remote_experiment_file =
             plan["generated_files"]["remote_experiment_manifest"]["path"]
@@ -158,6 +166,9 @@ function test_prepare_oos_solstorm_staging()
                   command in commands)
         @test any(occursin("prepare_oos_sge_job.jl", command["display"]) for
                   command in commands)
+        @test occursin("--h-vmem=320G", commands[end]["display"])
+        @test occursin("--h-rt=12:00:00", commands[end]["display"])
+        @test occursin("--mem-free=320G", commands[end]["display"])
         remote_julia_commands = commands[13:15]
         @test [command["phase"] for command in remote_julia_commands] == [
             "remote_validate",

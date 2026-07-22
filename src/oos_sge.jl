@@ -18,6 +18,22 @@ function _validate_oos_sge_value(value::AbstractString, name::AbstractString, pa
     return value
 end
 
+function _validate_optional_oos_sge_resource(value, name::AbstractString, pattern)
+    value === nothing && return nothing
+    normalized = strip(string(value))
+    isempty(normalized) && throw(ArgumentError("$name cannot be empty"))
+    return _validate_oos_sge_value(normalized, name, pattern)
+end
+
+function _oos_sge_resource_directives(resources)
+    directives = String[]
+    for name in ("h_vmem", "h_rt", "mem_free")
+        value = get(resources, name, nothing)
+        value === nothing || push!(directives, "#\$ -l $name=$value")
+    end
+    return join(directives, "\n")
+end
+
 function _oos_solstorm_julia_bootstrap(julia_command::AbstractString)
     executable = _oos_shell_quote(julia_command)
     missing_message = _oos_shell_quote(
@@ -82,6 +98,7 @@ function _oos_sge_script_content(queue, job, plan)
         (_oos_shell_quote(string(argument)) for argument in job["command"]),
         " ",
     )
+    resource_directives = _oos_sge_resource_directives(plan["resources"])
     return """#!/bin/bash
 #\$ -S /bin/bash
 #\$ -cwd
@@ -90,6 +107,7 @@ function _oos_sge_script_content(queue, job, plan)
 #\$ -o $(plan["stdout_template"])
 #\$ -e $(plan["stderr_template"])
 #\$ -l hostname=\"$(plan["hosts"])\"
+$resource_directives
 
 set -euo pipefail
 
@@ -135,6 +153,9 @@ end
         output_dir = joinpath(dirname(queue_file), "sge"),
         job_name_prefix = "empire_oos",
         hosts = _OOS_SOLSTORM_SGE_HOSTS,
+        h_vmem = nothing,
+        h_rt = nothing,
+        mem_free = nothing,
     )
 
 Generate an idempotent SGE job script for one pending OOS queue job.
@@ -150,11 +171,31 @@ function prepare_oos_sge_job(
     output_dir::AbstractString = joinpath(dirname(queue_file), "sge"),
     job_name_prefix::AbstractString = "empire_oos",
     hosts::AbstractString = _OOS_SOLSTORM_SGE_HOSTS,
+    h_vmem = nothing,
+    h_rt = nothing,
+    mem_free = nothing,
 )
     target_queue, queue = _load_oos_execution_queue(queue_file)
     _validate_oos_execution_queue_inputs(queue)
     _validate_oos_sge_value(job_name_prefix, "SGE job-name prefix", r"^[A-Za-z0-9_-]+$")
     _validate_oos_sge_value(hosts, "SGE host expression", r"^[A-Za-z0-9_.|*-]+$")
+    resources = Dict{String, Any}(
+        "h_vmem" => _validate_optional_oos_sge_resource(
+            h_vmem,
+            "SGE h_vmem resource",
+            r"^[1-9][0-9]*(?:\.[0-9]+)?[KMGTP]?$",
+        ),
+        "h_rt" => _validate_optional_oos_sge_resource(
+            h_rt,
+            "SGE h_rt resource",
+            r"^[0-9]+:[0-5][0-9]:[0-5][0-9]$",
+        ),
+        "mem_free" => _validate_optional_oos_sge_resource(
+            mem_free,
+            "SGE mem_free resource",
+            r"^[1-9][0-9]*(?:\.[0-9]+)?[KMGTP]?$",
+        ),
+    )
 
     job = if job_index === nothing
         pending = findfirst(candidate -> candidate["status"] == "pending", queue["jobs"])
@@ -182,6 +223,7 @@ function prepare_oos_sge_job(
         "status" => "prepared",
         "job_name" => job_name,
         "hosts" => hosts,
+        "resources" => resources,
         "queue_file" => target_queue,
         "script" => script_path,
         "script_sha256" => nothing,
@@ -207,6 +249,7 @@ function prepare_oos_sge_job(
             "cluster",
             "job_name",
             "hosts",
+            "resources",
             "queue_file",
             "script",
             "script_sha256",
