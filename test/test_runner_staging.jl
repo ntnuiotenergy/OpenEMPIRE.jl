@@ -112,6 +112,10 @@ function test_resolve_single_tree_oos_run_spec()
 
         @test spec.out_of_sample
         @test spec.scenario_tree == "oos_tree7"
+        @test _scenario_tree_identity(
+            "/remote/stage/oos_tree1",
+            Dict("tree" => "oos_tree1", "staged_from_tree" => "oos_tree7"),
+        ) == "oos_tree7"
         @test spec.scenario_tree_metadata["seed"] == 7
         @test spec.scenario_tree_checksums_verified
         @test spec.scenario_tree_metadata_file ==

@@ -245,6 +245,17 @@ function _scenario_tree_metadata(root::AbstractString)
     )
 end
 
+function _scenario_tree_identity(root::AbstractString, metadata)
+    fallback = basename(normpath(root))
+    for key in ("staged_from_tree", "tree")
+        value = get(metadata, key, nothing)
+        if value isa AbstractString && !isempty(strip(value))
+            return String(strip(value))
+        end
+    end
+    return fallback
+end
+
 function _validate_oos_tree_execution_config(
     config_file::AbstractString,
     scenario_root::AbstractString,
@@ -595,7 +606,11 @@ function _resolve_run_spec(options)
         generate_only,
         optimize,
         out_of_sample = oos.is_out_of_sample,
-        scenario_tree = isempty(oos.scenario_data_root) ? "" : basename(normpath(oos.scenario_data_root)),
+        scenario_tree = isempty(oos.scenario_data_root) ? "" :
+                        _scenario_tree_identity(
+            oos.scenario_data_root,
+            scenario_metadata.data,
+        ),
         scenario_tree_metadata = scenario_metadata.data,
         scenario_tree_metadata_file,
         scenario_tree_checksums_verified = scenario_metadata.checksums_verified,

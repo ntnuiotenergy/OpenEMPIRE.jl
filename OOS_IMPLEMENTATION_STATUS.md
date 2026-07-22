@@ -693,6 +693,10 @@ overwrite any earlier evidence.
 
 - Aggregation output:
   `results/julia_oos_aggregations/job6421_seed101`.
+- A second lightweight validation using `--files=none` was written to
+  `results/julia_oos_runs/experiment_seed101_1tree_oosfix_8a3dc07/aggregated_summary_9551a16`.
+  It reproduced the same objective, cost split, ENS, and material-event
+  statistics without duplicating the large operational CSV files.
 - The validator reproduced the fixed-investment fingerprint
   `9321df4c69cf2664ade384e5c2f9d59f7455a527725fcf813dd49a1b25fd9274`
   and verified all eight fixed-capacity outputs byte-for-byte.
@@ -850,6 +854,36 @@ match the fixed inputs; two distinct tree identifiers appear in the combined
 outputs; and expected/conditional ENS plus fixed/non-investment costs reconcile
 with the per-tree summaries.
 
+### Logical tree identity preserved across isolated Solstorm stages
+
+The representative staging review found a defect before either seed-201/202
+job was submitted. Each isolated Solstorm stage intentionally exposes its one
+selected tree as `oos_tree1`. The runner and aggregator had treated that staging
+directory name as the scientific tree identifier, so two separately staged
+trees would both have appeared as `oos_tree1` and aggregation would have
+rejected them as duplicates.
+
+- Staged metadata already preserves the source identity in
+  `staged_from_tree`; no scenario data needs to be regenerated.
+- `scripts/run_julia_empire.jl` now records `staged_from_tree` as the logical
+  tree identity, falling back to metadata `tree` and then the directory name
+  for unstaged and legacy inputs.
+- `src/oos_aggregation.jl` applies the same rule. This also repairs identity
+  when aggregating a result written by an older staged runner whose manifest
+  says `oos_tree1`, provided its copied scenario metadata contains
+  `staged_from_tree`.
+- Deterministic runner and aggregation tests reproduce the exact collision:
+  the second logical tree is physically staged and manifested as `oos_tree1`
+  but aggregates as `oos_tree2`.
+- Focused checks pass (runner 35/35 and aggregation identity 23/23), and the
+  complete repository suite exits successfully. Relevant full-suite totals
+  are runner staging 84/84, core OOS 161/161, full-year OOS 64/64, and
+  aggregation 30/30; the existing broken Python fixture-parity check remains
+  unchanged.
+- The previously prepared seed-201/202 queues and revision-pinned staging
+  plans predate this correction. They remain preserved as evidence but must be
+  regenerated under new filenames after the correction is committed.
+
 ### Regeneration commands
 
 Run from the repository root at revision `8a3dc07` to reproduce the fresh
@@ -902,10 +936,11 @@ overwriting evidence from an in-progress or completed experiment.
 - The full-year `europe_v51` input and queue audit passed locally: experiment
   `complete`, queue `ready`, job `pending`, fixed investments `compatible`, and
   exactly 8760.0 probability-weighted hours in each strategic period.
-- OOS aggregation focused tests pass 29/29. They cover exact time weights,
+- OOS aggregation focused tests pass 30/30. They cover exact time weights,
   conditional versus expected ENS, fixed/non-investment cost separation,
   two-tree discovery and aggregation, streaming combined CSV identifiers,
-  output overwrite protection, and changed-capacity rejection.
+  staged logical-tree identity, output overwrite protection, and
+  changed-capacity rejection.
 - The full repository suite passed after the provenance/compatibility increment:
   Excel 66, CSV 63, CSV scenarios 164 with one known broken Python fixture
   check, runner 80, core OOS 157, aggregation 29, all Solstorm workflow suites,
@@ -1104,22 +1139,20 @@ overwriting evidence from an in-progress or completed experiment.
 
 ## Next recommended task
 
-Prepare controlled Solstorm evidence without starting more than one long job:
+Continue controlled Solstorm evidence without starting more than one long job:
 
-1. Commit the tested explicit SGE-resource support and prepare a new
-   revision-pinned full-year queue/stage. Preserve the older `fb56a88` plan as
-   reference-only because it predates the resource directives.
-2. With explicit approval, transfer and validate that new immutable stage,
-   recording checksum and queue/SGE preflight evidence without submitting.
-3. After remote input verification, submit exactly one full-year job and record
-   its ID, command, logs, expected outputs, and acceptance criteria. Do not
-   automatically resubmit an ambiguous failure.
-4. The real seed-201/202 representative experiment and its aggregation checks
-   are prepared. After the full-year job finishes, stage and execute its two
-   jobs sequentially, never overlapping long jobs.
-5. When evidence is complete, update this file and split the integration branch
-   into the documented dependency-ordered employee-review PR sequence without
-   rewriting or deleting the reference branches.
+1. Preserve and monitor full-year job `6424`; do not resubmit an ambiguous
+   failure. On completion, collect scheduler accounting, the final manifest,
+   summary, fixed-capacity verification, and load-shedding evidence before
+   deciding whether large operational outputs need to be copied locally.
+2. Commit the tested logical-tree identity correction, then regenerate the
+   seed-201/202 queue and revision-pinned staging plans under new filenames.
+3. Only after job `6424` is terminal, execute the two representative jobs
+   sequentially and aggregate them. Verify distinct logical identities,
+   identical fixed-investment/config provenance, and cost/ENS reconciliation.
+4. When both runtime evidence tracks pass, audit every completion requirement
+   and curate the documented dependency-ordered employee-review PR sequence
+   without rewriting or deleting reference branches.
 
 ## Solstorm capacity and resource preflight on 2026-07-22
 
@@ -1241,8 +1274,10 @@ port only that PR's tested functionality; exclude status-journal commits.
 3. **Scenario experiments and execution queue.** Curate `46a1971`, `8b67ac9`,
    `edbe8fe`, and `d9c3bf7`: non-mutating tree generation, multi-tree manifests,
    resumable local queues, and their deterministic tests. No HPC code.
-4. **Result aggregation.** Curate `7c98a04`: combined tree outputs, conditional
-   versus expected ENS, and fixed versus non-investment objective reporting.
+4. **Result aggregation.** Curate `7c98a04` plus the logical-tree identity
+   correction: combined tree outputs, conditional versus expected ENS, fixed
+   versus non-investment objective reporting, and correct identity across
+   isolated staging.
 5. **Chronological full-year core.** Curate `3a0915a`: ordered 8,760-hour input
    construction, annual TimeStruct semantics, local solve/regression tests, and
    the thin preparation CLI.
