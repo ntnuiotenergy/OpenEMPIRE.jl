@@ -47,8 +47,10 @@ The current code has completed one representative one-tree OOS run successfully
 and now validates and aggregates completed OOS results locally. Job 6421 reached
 `OPTIMAL`, reproduced all eight fixed-capacity tables, and has been converted
 from raw load-shedding MW into correctly weighted physical ENS. Deterministic
-two-tree fixtures validate the cross-tree path. Multiple real trees have not
-yet been run, and chronological full-year OOS is still pending.
+two-tree fixtures validate the cross-tree path. A true chronological full-year
+input path is now implemented and locally validated, including a complete 2015
+`europe_v51` tree and ready execution queue. Multiple real representative trees
+and the full-year Solstorm solve have not yet been run.
 
 ## Branch and provenance
 
@@ -97,6 +99,9 @@ Implementation commits, oldest first:
 | `c0b0916` | Record the fresh rerun preflight checkpoint |
 | `e0d736c` | Record the validated fresh Solstorm stage |
 | `ab38075` | Record successful representative OOS job 6421 |
+| `7c98a04` | Add validated OOS result aggregation |
+| `97972b0` | Validate OOS investment provenance |
+| `3a0915a` | Add chronological full-year OOS foundation |
 
 ## Functional progress
 
@@ -118,7 +123,7 @@ Implementation commits, oldest first:
 | 4k. Infeasibility fix | Match InternalEMPIRE by omitting investment-only constraints after capacities are fixed | Root cause demonstrated, locally regression-tested, and verified by job 6421 |
 | 4l. Fresh representative rerun | Create, stage, submit, and verify a new immutable run without touching job 6420 | Job 6421 completed `OPTIMAL`; all acceptance evidence passed |
 | 5. Aggregation | Validate, summarize, and combine results across trees | Implemented; deterministic two-tree tests and job 6421 local validation passed |
-| 6. Full-year OOS | Full-year evaluation described in the original plan | Not completed |
+| 6. Full-year OOS | One ordered 8760-hour scenario with unit multiplicity and one annual storage cycle | Implemented and locally validated; real `europe_v51` inputs and queue prepared, Solstorm solve pending |
 
 ## Main code and data flow
 
@@ -192,6 +197,41 @@ Implementation commits, oldest first:
   was not used because the workbench runner now has stronger manifests. The
   `origin/rf/result_aggregates` helper was inspected but not ported: its load
   shedding calculation does not explicitly apply the required duration.
+
+### Chronological full-year evaluation
+
+- `src/oos_full_year.jl`
+  - builds one ordered 8760-hour operational scenario per selected complete
+    non-leap historical year;
+  - sorts every raw input by parsed timestamp, then rejects duplicates, gaps,
+    incomplete years, leap years, and timestamp disagreement across sources;
+  - streams generated CSV rows instead of retaining millions of duplicate rows
+    in memory;
+  - repeats the selected historical profile for each strategic period, matching
+    the intended OOS experiment design;
+  - writes checksummed raw-source, chronology, sample-year, config, and tree
+    provenance;
+  - validates that full-year metadata declares one representative period, one
+    scenario, no dummy peak, unit multiplicity, and one storage cycle boundary.
+- `src/model_definition.jl` and `src/user_interface.jl`
+  - add `operational_hours_per_year`, defaulting to 8760;
+  - preserve the existing representative-period behavior by default;
+  - give a one-season 8760-hour run multiplicity one for every hour;
+  - permit short deterministic chronological fixtures without silently scaling
+    them to 8760 hours.
+- `scripts/prepare_full_year_oos_experiment.jl`
+  - prepares full-year trees, `full_year_config.yaml`, and a resumable
+    `experiment.yaml` without building or solving the model.
+- Queue and runner validation now record `evaluation_mode` and `sample_year`
+  and reject a representative or 365-hour config supplied for a chronological
+  full-year tree. Existing representative queue manifests without those new
+  fields remain resumable and are upgraded in memory.
+- Provenance: this is new Julia code written on the workbench-based integration
+  branch. No `rf/...` commit was merged or cherry-picked. It is informed by the
+  plan, `Feedback.pdf`, the available representative OOS code, and the observed
+  InternalEMPIRE design. It deliberately does not port InternalEMPIRE's 24
+  independent 365-hour blocks because those blocks are scaled as representative
+  years and impose 24 independent storage cycles rather than one chronology.
 
 ### Solstorm preparation
 
@@ -672,6 +712,55 @@ overwrite any earlier evidence.
   validation because their source files are already preserved in the 1.4 GB
   result.
 
+### Chronological 2015 experiment prepared locally on 2026-07-22
+
+These ignored artifacts were generated from commit `3a0915a`; no model was
+built, no solver was started, and Solstorm was not contacted.
+
+- Experiment:
+  `OutOfSample/europe_v51/full_year_2015_3a0915a`
+- Source config:
+  `/Users/torgrim/Documents/NTNU/iot/empire/OpenEMPIRE.jl/results/julia_runs/20260630_124809_europe_v51/fixed_sample_config.yaml`
+- Generated execution config:
+  `OutOfSample/europe_v51/full_year_2015_3a0915a/full_year_config.yaml`
+- Dataset: `data/europe_v51`
+- Historical sample year: `2015`
+- Experiment status: `complete`
+- Execution queue status: `ready`; its single Gurobi job remains `pending`
+- Evaluation mode: `chronological_full_year`
+- Fixed-investment compatibility: `compatible`
+- Fixed-investment SHA-256:
+  `9321df4c69cf2664ade384e5c2f9d59f7455a527725fcf813dd49a1b25fd9274`
+- Tree SHA-256:
+  `7f2c186cb160555fc9ef723470406c254f3e3bbe40f1270e3744a64bdeccd898`
+- Artifact size: approximately 419 MB
+- Generated data rows excluding headers: 1,533,000 load rows, 1,095,000
+  seasonal-hydro rows, 6,920,400 stochastic-availability rows, and 5 sampling
+  rows.
+- The computed TimeStruct weight map has 43,800 operational entries: 8,760
+  hours in each of five strategic periods. Probability-weighted physical hours
+  sum to exactly `8760.0` in every period.
+- The local queue uses the generated full-year config, records sample year 2015,
+  and passed tree checksums plus investment-provenance compatibility checks.
+
+Regeneration commands, from repository revision `3a0915a`:
+
+```bash
+julia --project=. scripts/prepare_full_year_oos_experiment.jl europe_v51 \
+  --config=/Users/torgrim/Documents/NTNU/iot/empire/OpenEMPIRE.jl/results/julia_runs/20260630_124809_europe_v51/fixed_sample_config.yaml \
+  --sample-years=2015 --format=csv \
+  --output=OutOfSample/europe_v51/full_year_2015_3a0915a --resume=true
+
+julia --project=. scripts/prepare_oos_execution_queue.jl europe_v51 \
+  --config=OutOfSample/europe_v51/full_year_2015_3a0915a/full_year_config.yaml \
+  --format=csv --solver=Gurobi \
+  --experiment=OutOfSample/europe_v51/full_year_2015_3a0915a \
+  --fixed-investment-dir=/Users/torgrim/Documents/NTNU/iot/empire/OpenEMPIRE.jl/results/julia_runs/20260630_124809_europe_v51 \
+  --results=results/julia_oos_runs/full_year_2015_3a0915a \
+  --queue-file=OutOfSample/europe_v51/full_year_2015_3a0915a/execution.yaml \
+  --julia-command=julia --resume=true
+```
+
 ### Regeneration commands
 
 Run from the repository root at revision `8a3dc07` to reproduce the fresh
@@ -711,6 +800,19 @@ overwriting evidence from an in-progress or completed experiment.
 
 ## Verification completed
 
+- Chronological full-year tests pass 64/64. They cover a complete 8760-hour
+  2015 tree, raw-source timestamp sorting, exact source values, checksums,
+  resume behavior, config/mode mismatch rejection, a 24-hour unit-multiplicity
+  fixture, one storage cycle per strategic period, and an end-to-end HiGHS
+  investment solve followed by a fixed-investment OOS solve; both solves are
+  `OPTIMAL`.
+- The full repository suite passed after commit `3a0915a`: Excel 66, CSV 63,
+  CSV scenarios 164 with one known broken Python fixture check, runner 83, core
+  OOS 161, full-year OOS 64, aggregation 29, SGE 62, staging 98, cleanup 45,
+  remote setup 25, submission 26, validation 16, TimeStruct 21, and solve 3.
+- The full-year `europe_v51` input and queue audit passed locally: experiment
+  `complete`, queue `ready`, job `pending`, fixed investments `compatible`, and
+  exactly 8760.0 probability-weighted hours in each strategic period.
 - OOS aggregation focused tests pass 29/29. They cover exact time weights,
   conditional versus expected ENS, fixed/non-investment cost separation,
   two-tree discovery and aggregation, streaming combined CSV identifiers,
@@ -863,14 +965,19 @@ overwriting evidence from an in-progress or completed experiment.
    It is deliberately labelled `reconstructed_legacy_run`, not
    manifest-verified. The job 6421 execution config passes the seven-field
    compatibility check.
-3. The `rf/...` OOS branches and open PRs have not yet been reconciled against
-   this implementation. No historical branch should be discarded without that
-   comparison and coordination with its author/reviewer.
+3. The available `rf/...` branches and `origin/pr/14` were inspected and remain
+   reference-only. The reported `rf/full_year_oos` ref is not present in the
+   locally fetched refs, and remote enumeration could not be completed, so its
+   exact code is still unavailable for line-by-line comparison. No historical
+   branch should be discarded without coordination with its author/reviewer.
 4. `src/oos_staging.jl` is now 837 lines and contains safety/evidence logistics
    rather than model mathematics. Review whether to split it before a PR; do
    not mix that refactor into the first representative-run debugging work.
-5. Representative-period aggregation is implemented and validated locally.
-   Chronological full-year OOS remains unimplemented.
+5. Chronological full-year generation and local small-case solving are
+   implemented, but the 419 MB `europe_v51` tree has not been built or solved.
+   Its operational dimension is substantially larger than the successful
+   representative run, so cluster memory/build time and solver behavior remain
+   unverified.
 6. The current continuation branch is an integration branch, not a proposed
    single employee-review PR. Prefer sequential PRs: runner workflow, core OOS,
    experiment orchestration, then optional Solstorm tooling.
@@ -906,20 +1013,19 @@ overwriting evidence from an in-progress or completed experiment.
 
 ## Next recommended task
 
-Implement Plan step 6 with a deterministic chronological fixture before any
-full Solstorm run:
+Prepare controlled Solstorm evidence without starting more than one long job:
 
-1. Reconcile the full-year design in `Feedback.pdf`, InternalEMPIRE's
-   `create_scenario_tree_full_year.py`, and any available historical PR ref.
-2. Represent one 8760-hour chronological operational period without applying a
-   representative-season multiplier, while retaining the dummy peak structure
-   only if the existing model indexing requires it.
-3. Generate a tiny chronological fixture first (for example 24 or 48 hours)
-   with known load, availability, and hydro rows and prove ordering, weights,
-   cyclic storage behavior, and scenario dimensions locally.
-4. Add full-year tree metadata that distinguishes chronological from
-   representative trees and make queue/runner validation reject accidental
-   cross-mode assumptions.
-5. Run the tiny fixed-investment OOS model locally. Only after that passes,
-   prepare a revision-pinned full-year Solstorm experiment; do not submit it
-   automatically after an ambiguous failure.
+1. Estimate and record the full-year `europe_v51` model dimensions relative to
+   job 6421, then choose an evidence-backed memory/time request.
+2. Create a new revision-pinned Solstorm staging plan from
+   `OutOfSample/europe_v51/full_year_2015_3a0915a/execution.yaml`; run only the
+   local archive preflight first and preserve all earlier stages unchanged.
+3. After remote input verification, submit exactly one full-year job and record
+   its ID, command, logs, expected outputs, and acceptance criteria. Do not
+   automatically resubmit an ambiguous failure.
+4. While that job runs, prepare a separate real multi-tree representative
+   experiment and its aggregation acceptance checks, but do not submit a second
+   long job concurrently.
+5. When evidence is complete, update this file and split the integration branch
+   into the documented dependency-ordered employee-review PR sequence without
+   rewriting or deleting the reference branches.
