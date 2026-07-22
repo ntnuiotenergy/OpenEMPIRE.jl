@@ -150,9 +150,16 @@ function test_full_year_oos_generation()
         @test generated_ror ==
               OpenEMPIRE._normalized_scenario_value.(raw_ror.values["DE"][ror_indices[1:365]])
         @test dummy_ror == 0.0
-        @test raw_ror.timestamps[ror_indices] == [
+        @test ror_indices == OpenEMPIRE._year_indices(raw_ror, 2015)
+        @test !issorted(raw_ror.timestamps[ror_indices])
+        @test Set(raw_ror.timestamps[ror_indices]) == Set(
             DateTime(2015, 1, 1) + Hour(offset) for offset in 0:8759
-        ]
+        )
+        @test metadata["raw_sources"]["hydroror.csv"]["selection_semantics"] ==
+              "internalempire_filtered_source_row_order"
+        @test !metadata["raw_sources"]["hydroror.csv"]["timestamps_ordered"]
+        @test metadata["raw_sources"]["hydroror.csv"]["non_hourly_row_steps"] > 0
+        @test metadata["raw_sources"]["electricload.csv"]["timestamps_ordered"]
 
         last_tree_dir = joinpath(prepared, "oos_tree24")
         last_metadata = YAML.load_file(joinpath(last_tree_dir, "metadata.yaml"))
