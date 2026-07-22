@@ -331,10 +331,14 @@ support comparison while the InternalEMPIRE-equivalent replacement is built.
   solves the 365+1 OOS model to `OPTIMAL` with investment-only constraints
   omitted.
 - A direct comparison executed the checked-in InternalEMPIRE Python generator
-  and compared all 24 trees with Julia. Within absolute tolerance `1e-12`, all
-  52,560 load rows, 35,040 seasonal-hydro rows, and 210,240 stochastic-
-  availability rows matched. Julia's explicit dummy defaults and all 24
-  zero-based sampling offsets also matched the intended Python semantics.
+  against the repository test dataset and compared all 24 trees with Julia.
+  The Python process used a test-only datetime-parsing shim because that fixture
+  contains mixed day/month formatting; the generator's selection and writing
+  logic was unchanged. Within absolute tolerance `1e-12`, all 52,560 load rows,
+  35,040 seasonal-hydro rows, and 210,240 stochastic-availability rows matched.
+  Julia's explicit dummy defaults and all 24 zero-based sampling offsets also
+  matched the intended Python semantics. This proves generator parity on the
+  fixture, not an end-to-end Europe v5.1 model run.
 - Provenance: commits `cc59b61`, `5d3e0c7`, `6d15ede`, and `0f29831` are new Julia work
   based directly on checked-in InternalEMPIRE source. No `rf/...` branch was
   merged or cherry-picked. Reusable timestamp validation came from the
