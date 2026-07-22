@@ -122,7 +122,7 @@ Implementation commits, oldest first:
 | 4j. No-solution reporting | Preserve solver status and terminal manifest evidence without reading a missing objective | Implemented and tested; the corrected runner was included in successful job 6421 |
 | 4k. Infeasibility fix | Match InternalEMPIRE by omitting investment-only constraints after capacities are fixed | Root cause demonstrated, locally regression-tested, and verified by job 6421 |
 | 4l. Fresh representative rerun | Create, stage, submit, and verify a new immutable run without touching job 6420 | Job 6421 completed `OPTIMAL`; all acceptance evidence passed |
-| 5. Aggregation | Validate, summarize, and combine results across trees | Implemented; deterministic two-tree tests and job 6421 local validation passed |
+| 5. Aggregation | Validate, summarize, and combine results across trees | Implemented; deterministic two-tree tests and job 6421 local validation passed; real seed-201/202 input and queue prepared, solves pending |
 | 6. Full-year OOS | One ordered 8760-hour scenario with unit multiplicity and one annual storage cycle | Implemented and locally validated; real `europe_v51` inputs and queue prepared, Solstorm solve pending |
 
 ## Main code and data flow
@@ -812,6 +812,44 @@ The revision-pinned staging plan is:
   files were present and no Git metadata, results, OOS artifacts, or private
   key files were found.
 
+### Representative two-tree experiment prepared locally on 2026-07-22
+
+This real-data package is ready for later controlled Solstorm execution. It was
+prepared while the chronological run remained behind its explicit remote
+approval gate. No model, solver, SSH, SCP, or scheduler command was started.
+
+- Experiment:
+  `OutOfSample/europe_v51/experiment_seed201_2trees_2e76193`
+- Experiment status: `complete`; evaluation mode: `representative_period`.
+- Queue: `OutOfSample/europe_v51/experiment_seed201_2trees_2e76193/execution.yaml`.
+- Queue status: `ready`, with two pending Gurobi jobs and no scheduler IDs:
+  `oos_tree1` seed 201 and `oos_tree2` seed 202.
+- Tree SHA-256 values are distinct:
+  `401283018e08590d3eec81304b1bc0f8b1a887f8c20ac6ce331d3852affd9de9`
+  and
+  `6c369564dda7070d02d262fc6ea111c19cc6a04d57ea79c6b9b54f481835dc19`.
+- Dataset SHA-256:
+  `1e015ec90929a41d1a543760a54f5298250718f09f34c21fdf9b7eadc58ac5d0`.
+- OOS code SHA-256:
+  `c63a03cd2f786f19be9047adb8c6886987c7e98c25a95eacfe3b3dbf4a42a180`.
+- Fixed-investment SHA-256:
+  `9321df4c69cf2664ade384e5c2f9d59f7455a527725fcf813dd49a1b25fd9274`;
+  the structural compatibility check is `compatible`.
+- Ignored experiment size: approximately 196 MB.
+- After both jobs complete, aggregate their common result root with:
+
+```bash
+julia --project=. scripts/aggregate_out_of_sample_results.jl \
+  results/julia_oos_runs/experiment_seed201_2trees_2e76193 \
+  --output=results/julia_oos_aggregations/experiment_seed201_2trees_2e76193
+```
+
+The aggregation acceptance checks are: both manifests complete and feasible;
+scenario metadata and fixed capacities validate; all eight capacity outputs
+match the fixed inputs; two distinct tree identifiers appear in the combined
+outputs; and expected/conditional ENS plus fixed/non-investment costs reconcile
+with the per-tree summaries.
+
 ### Regeneration commands
 
 Run from the repository root at revision `8a3dc07` to reproduce the fresh
@@ -1074,9 +1112,9 @@ Prepare controlled Solstorm evidence without starting more than one long job:
 3. After remote input verification, submit exactly one full-year job and record
    its ID, command, logs, expected outputs, and acceptance criteria. Do not
    automatically resubmit an ambiguous failure.
-4. While that job runs, prepare a separate real multi-tree representative
-   experiment and its aggregation acceptance checks, but do not submit a second
-   long job concurrently.
+4. The real seed-201/202 representative experiment and its aggregation checks
+   are prepared. After the full-year job finishes, stage and execute its two
+   jobs sequentially, never overlapping long jobs.
 5. When evidence is complete, update this file and split the integration branch
    into the documented dependency-ordered employee-review PR sequence without
    rewriting or deleting the reference branches.
