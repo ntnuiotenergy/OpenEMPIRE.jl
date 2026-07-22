@@ -880,9 +880,18 @@ rejected them as duplicates.
   are runner staging 84/84, core OOS 161/161, full-year OOS 64/64, and
   aggregation 30/30; the existing broken Python fixture-parity check remains
   unchanged.
-- The previously prepared seed-201/202 queues and revision-pinned staging
-  plans predate this correction. They remain preserved as evidence but must be
-  regenerated under new filenames after the correction is committed.
+- The earlier seed-201/202 queues and revision-pinned staging plans remain
+  preserved as superseded evidence. A fresh queue is ready at
+  `OutOfSample/europe_v51/experiment_seed201_2trees_2e76193/execution_9c861a5.yaml`;
+  it records code SHA-256
+  `29893dda5b1fa002bc1d313f0ad298b0d971ea64bbdb5b0b9b83af0e89c7dab8`
+  and pending logical trees `oos_tree1`/seed 201 and `oos_tree2`/seed 202.
+- Fresh dry-run staging plans pinned to commit
+  `9c861a5aca5095f39d74a31895d942c4120b1164` are `ready` at
+  `.../solstorm_staging/experiment_seed201_2trees_2e76193_oos_tree1_9c861a5aca50/staging.yaml`
+  and the corresponding `oos_tree2` path. They request 96 GB / 4 hours without
+  `mem_free`; `commands_executed: 0` proves no archive, transfer, remote stage,
+  queue, or job was created by this preparation.
 
 ### Regeneration commands
 
