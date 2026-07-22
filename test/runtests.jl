@@ -77,6 +77,7 @@ end
 end
 
 @testset "OOS full-year" begin
+    test_internalempire_full_year_foundation()
     test_full_year_oos_generation()
     test_chronological_oos_fixture_semantics()
     test_chronological_source_validation()
