@@ -996,6 +996,12 @@ function _validated_oos_execution_trees(experiment_dir::AbstractString, manifest
                 input_format,
                 evaluation_mode,
                 Int(manifest["operational_hours_per_year"]),
+                ;
+                expected_chunk_index = get(
+                    manifest,
+                    "full_year_formulation",
+                    nothing,
+                ) == "internalempire_24x365" ? index : nothing,
             )
         end
         push!(trees, Dict{String, Any}(
