@@ -67,6 +67,7 @@ end
     test_prepare_oos_experiment()
     test_prepare_oos_execution_queue()
     test_manage_oos_execution_queue()
+    test_fixed_investment_provenance_and_compatibility()
     test_fix_investments_from_results()
     test_oos_omits_investment_only_constraints()
     test_fix_only_investment_capacities()

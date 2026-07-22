@@ -85,7 +85,17 @@ function test_resolve_single_tree_oos_run_spec()
         _write_runner_fixed_investment_files(joinpath(fixed_result, "output"))
 
         config_file = joinpath(root, "run.yaml")
-        write(config_file, "use_scenario_generation: true\nuse_fixed_sample: true\n")
+        config = YAML.load_file(joinpath(pkgdir(OpenEMPIRE), "config", "testrun.yaml"))
+        config["use_scenario_generation"] = true
+        config["use_fixed_sample"] = true
+        YAML.write_file(config_file, config)
+        input_dir = joinpath(fixed_result, "Input")
+        mkpath(input_dir)
+        cp(config_file, joinpath(input_dir, "config.yaml"))
+        write(
+            joinpath(fixed_result, "summary.txt"),
+            "OpenEMPIRE.jl run summary\noptimize=true\ntermination_status=OPTIMAL\n",
+        )
         results_root = joinpath(root, "results")
         options = _parse_args([
             source,
@@ -111,7 +121,14 @@ function test_resolve_single_tree_oos_run_spec()
         @test spec.original_fixed_investment_dir == fixed_result
         @test spec.fixed_investment_dir == joinpath(spec.result_dir, "Input", "fixed_investments")
         @test isdir(spec.fixed_investment_dir)
-        @test length(readdir(spec.fixed_investment_dir)) == 8
+        @test length(readdir(spec.fixed_investment_dir)) == 10
+        @test isfile(joinpath(spec.fixed_investment_dir, "fixed_investment_provenance.yaml"))
+        @test isfile(joinpath(spec.fixed_investment_dir, "source_config.yaml"))
+        manifest = _initial_manifest(spec)
+        @test manifest["out_of_sample"]["fixed_investment_compatibility"]["status"] ==
+              "compatible"
+        @test manifest["out_of_sample"]["fixed_investment_metadata"]["provenance"]["kind"] ==
+              "reconstructed_legacy_run"
 
         staged_scenario_dir = joinpath(spec.data_folder, "ScenarioData")
         for filename in _OOS_SCENARIO_FILENAMES

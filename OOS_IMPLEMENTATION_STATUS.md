@@ -102,7 +102,7 @@ Implementation commits, oldest first:
 
 | Plan item | What it means | Status |
 |---|---|---|
-| 1. Fixed investments | Read and fix generation, transmission, and storage capacities | Implemented and locally tested |
+| 1. Fixed investments | Read, provenance-check, compatibility-check, and fix generation, transmission, and storage capacities | Implemented and locally tested; legacy job 6421 base provenance reconstructed explicitly |
 | 2. Scenario generation | Generate trees without mutating the base dataset | Implemented and locally tested |
 | 3. Single-tree runner | Stage one tree and one fixed investment set | Implemented and locally tested |
 | 4a. Experiment preparation | Reproducible tree list, seeds, metadata, and checksums | Implemented |
@@ -126,6 +126,12 @@ Implementation commits, oldest first:
 
 - `src/out_of_sample.jl`
   - validates the eight fixed capacity tables;
+  - fingerprints the eight tables and records whether source provenance comes
+    from a current run manifest or was reconstructed from a legacy summary;
+  - normalizes strategic/policy configuration and rejects incompatible OOS
+    execution settings before model construction;
+  - permits documented operational differences needed for new scenario trees
+    and chronological full-year evaluation;
   - generates OOS trees and metadata;
   - prepares resumable experiments and execution queues;
   - checks input fingerprints;
@@ -153,6 +159,11 @@ Implementation commits, oldest first:
     fixed capacities, while ordinary investment runs retain them by default;
   - records whether investment constraints were included in the manifest and
     summary.
+  - stages `fixed_investment_provenance.yaml` and `source_config.yaml` with the
+    fixed tables, and records the table fingerprint, provenance class, and
+    compatibility report in the run manifest;
+  - records `investment_context` and the emitted eight-table fingerprint in new
+    successful investment run manifests.
 
 ### Result validation and aggregation
 
@@ -704,10 +715,16 @@ overwriting evidence from an in-progress or completed experiment.
   conditional versus expected ENS, fixed/non-investment cost separation,
   two-tree discovery and aggregation, streaming combined CSV identifiers,
   output overwrite protection, and changed-capacity rejection.
-- The full repository suite passed after aggregation: Excel 66, CSV 63, CSV
-  scenarios 164 with one known broken Python fixture check, runner 76, core OOS
-  142, aggregation 29, all Solstorm workflow suites, validation 16, TimeStruct
-  17, and solve 3.
+- The full repository suite passed after the provenance/compatibility increment:
+  Excel 66, CSV 63, CSV scenarios 164 with one known broken Python fixture
+  check, runner 80, core OOS 157, aggregation 29, all Solstorm workflow suites,
+  validation 16, TimeStruct 17, and solve 3.
+- Focused provenance tests verify legacy-summary reconstruction, current-manifest
+  verification, sidecar staging, missing-evidence rejection, allowed operational
+  differences, structural mismatch rejection, and unchanged Solstorm command
+  safety. The real legacy investment run passes with the fingerprints recorded
+  above; `config/run_2045_3sce.yaml` is correctly rejected because its
+  `north_sea: false` differs from the base run's `north_sea: true`.
 - The job 6421 aggregation completed in about nine seconds when validating ENS
   and streaming all 529,200 load-shedding rows.
 
@@ -837,12 +854,15 @@ overwriting evidence from an in-progress or completed experiment.
    that constraint class in OOS, and fresh job 6421 is the representative
    verification: it completed `OPTIMAL` with those constraints omitted.
 2. The fixed investment run comes from the older sibling checkout and lacks the
-   current `run_manifest.yaml`. Its eight capacity tables loaded and were fixed
-   in the current model. Job 6420 does not establish operational infeasibility
-   under tree 101 because redundant fixed investment equalities already made
-   the full model infeasible. Job 6421 is the successful corrected run, but the
-   legacy base run still lacks explicit configuration provenance and
-   compatibility evidence.
+   current `run_manifest.yaml`. The new provenance validator reconstructs its
+   evidence from the preserved staged config and summary, verifies
+   `optimize=true`, `OPTIMAL`, config SHA-256
+   `1ef31a0529a0335cbedc109e4c0418710aecd8bb902b786b4ca834b5e1ba73d0`,
+   and fixed-table SHA-256
+   `9321df4c69cf2664ade384e5c2f9d59f7455a527725fcf813dd49a1b25fd9274`.
+   It is deliberately labelled `reconstructed_legacy_run`, not
+   manifest-verified. The job 6421 execution config passes the seven-field
+   compatibility check.
 3. The `rf/...` OOS branches and open PRs have not yet been reconciled against
    this implementation. No historical branch should be discarded without that
    comparison and coordination with its author/reviewer.
@@ -886,18 +906,20 @@ overwriting evidence from an in-progress or completed experiment.
 
 ## Next recommended task
 
-Close the base-investment provenance and compatibility gap before full-year
-work:
+Implement Plan step 6 with a deterministic chronological fixture before any
+full Solstorm run:
 
-1. Define which investment-run configuration fields must match an OOS run and
-   which fields may intentionally differ (scenario seed/tree generation and the
-   full-year operational structure).
-2. Record a normalized structural-configuration summary and the eight-table
-   fingerprint in new investment run manifests.
-3. Validate available legacy investment runs from their staged config and
-   capacity tables, recording that the provenance was reconstructed rather than
-   claiming a manifest existed.
-4. Make OOS queue/runner preparation fail clearly on incompatible structural
-   settings while permitting documented full-year differences.
-5. Add deterministic compatibility tests. Then proceed to Plan step 6 with a
-   small chronological fixture before any full Solstorm run.
+1. Reconcile the full-year design in `Feedback.pdf`, InternalEMPIRE's
+   `create_scenario_tree_full_year.py`, and any available historical PR ref.
+2. Represent one 8760-hour chronological operational period without applying a
+   representative-season multiplier, while retaining the dummy peak structure
+   only if the existing model indexing requires it.
+3. Generate a tiny chronological fixture first (for example 24 or 48 hours)
+   with known load, availability, and hydro rows and prove ordering, weights,
+   cyclic storage behavior, and scenario dimensions locally.
+4. Add full-year tree metadata that distinguishes chronological from
+   representative trees and make queue/runner validation reject accidental
+   cross-mode assumptions.
+5. Run the tiny fixed-investment OOS model locally. Only after that passes,
+   prepare a revision-pinned full-year Solstorm experiment; do not submit it
+   automatically after an ambiguous failure.

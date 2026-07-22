@@ -112,6 +112,7 @@ function test_prepare_and_record_oos_sge_job()
         )
         fixed_investment_dir = joinpath(root, "investment_run")
         _write_investment_csvs(joinpath(fixed_investment_dir, "Output"))
+        _write_test_investment_run_evidence(fixed_investment_dir, config_file)
         results_root = joinpath(root, "results")
         queue_file = OpenEMPIRE.prepare_oos_execution_queue(
             experiment_dir,

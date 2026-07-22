@@ -283,6 +283,11 @@ function prepare_oos_solstorm_staging(
                     joinpath(dirname(target_queue), "solstorm_staging", plan_component) :
                     abspath(normpath(string(output_dir)))
     mkpath(target_output)
+    fixed_provenance_dir = joinpath(target_output, "fixed_investment_provenance")
+    fixed_provenance_files = _write_oos_fixed_investment_provenance_files(
+        queue["fixed_investments"]["run_dir"],
+        fixed_provenance_dir,
+    )
 
     stage_root = joinpath(root, "stages", plan_component)
     remote_project = joinpath(stage_root, "project")
@@ -442,6 +447,8 @@ function prepare_oos_solstorm_staging(
             "-o",
             "BatchMode=yes",
             (entry["path"] for entry in fixed_files)...,
+            fixed_provenance_files.provenance_file,
+            fixed_provenance_files.source_config_file,
             "$remote_target:$remote_fixed_output/",
         ],
     ))
@@ -615,6 +622,16 @@ OpenEMPIRE._oos_fixed_investment_metadata(ARGS[11])["sha256"] == ARGS[12] ||
         "generated_files" => Dict{String, Any}(
             "remote_tree_metadata" => adjusted_tree_file,
             "remote_experiment_manifest" => adjusted_experiment_metadata,
+            "fixed_investment_provenance" => Dict{String, Any}(
+                "provenance" => _oos_staging_file_metadata(
+                    fixed_provenance_files.provenance_file;
+                    relative_to = target_output,
+                ),
+                "source_config" => _oos_staging_file_metadata(
+                    fixed_provenance_files.source_config_file;
+                    relative_to = target_output,
+                ),
+            ),
             "repository_archive" => Dict{String, Any}(
                 "path" => local_repository_archive,
                 "exists" => isfile(local_repository_archive),

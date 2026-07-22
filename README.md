@@ -314,6 +314,24 @@ tree, and investment result are not modified. When the tree contains
 and records the tree seed, full provenance, and base investment run in
 `run_manifest.yaml`.
 
+Before an OOS queue or run is accepted, the source investment run must also
+provide provenance. New Julia run manifests record a normalized investment
+context and a checksum over the eight capacity tables. Older runs can be used
+only when a preserved config plus `summary.txt` prove `optimize=true` and
+`OPTIMAL`; these are explicitly labelled `reconstructed_legacy_run` rather
+than being presented as manifest-verified. The runner stages this evidence as
+`fixed_investment_provenance.yaml` and `source_config.yaml` beside its private
+fixed-capacity inputs.
+
+The following settings must match the investment run: forecast horizon,
+investment-period length, North Sea mode, emission-cap mode, discount rate,
+WACC, and load-change mode. Scenario generation/fixed-sample flags, scenario
+count, representative seasons and peaks, operational period lengths, and time
+format may differ intentionally for OOS—including chronological full-year
+evaluation. Both the equality rules and the accepted differences are recorded
+in the queue and run manifests. An incompatible setting fails before model
+construction.
+
 ### Aggregating out-of-sample results
 
 Aggregate one or more completed OOS run directories without rebuilding or

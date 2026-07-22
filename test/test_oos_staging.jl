@@ -15,6 +15,7 @@ function test_prepare_oos_solstorm_staging()
         write(execution_config, read(config_file, String) * "\n# execution-only copy\n")
         fixed_investment_dir = joinpath(root, "investment_run")
         _write_investment_csvs(joinpath(fixed_investment_dir, "Output"))
+        _write_test_investment_run_evidence(fixed_investment_dir, execution_config)
         results_root = joinpath(root, "results")
         queue_file = OpenEMPIRE.prepare_oos_execution_queue(
             experiment_dir,
@@ -50,6 +51,12 @@ function test_prepare_oos_solstorm_staging()
         @test plan["source"]["selected_job"]["tree"] == "oos_tree2"
         @test plan["source"]["selected_job"]["seed"] == 211
         @test length(plan["source"]["fixed_investments"]["files"]) == 8
+        provenance_files = plan["generated_files"]["fixed_investment_provenance"]
+        @test isfile(provenance_files["provenance"]["path"])
+        @test isfile(provenance_files["source_config"]["path"])
+        @test YAML.load_file(provenance_files["provenance"]["path"])[
+            "fixed_investments_sha256"
+        ] == plan["source"]["fixed_investments"]["sha256"]
         @test length(plan["source"]["repository"]["commit"]) == 40
         @test plan["source"]["repository"]["commit"] ==
               plan["source"]["repository"]["head_commit"]

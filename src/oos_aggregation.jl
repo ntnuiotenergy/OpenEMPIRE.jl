@@ -176,7 +176,7 @@ end
 
 function _oos_fixed_investments_verified(result_dir::AbstractString, output_dir::AbstractString)
     input_dir = joinpath(result_dir, "Input", "fixed_investments")
-    input_metadata = _oos_fixed_investment_metadata(input_dir)
+    input_metadata = _oos_fixed_capacity_metadata(input_dir)
     for aliases in _OOS_FIXED_INVESTMENT_FILENAMES
         input_name = findfirst(name -> isfile(joinpath(input_dir, name)), aliases)
         output_name = findfirst(name -> isfile(joinpath(output_dir, name)), aliases)
