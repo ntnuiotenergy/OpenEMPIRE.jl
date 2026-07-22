@@ -131,6 +131,25 @@ Implementation commits, oldest first:
 | 5. Aggregation | Validate, summarize, and combine results across trees | Implemented; deterministic two-tree tests and job 6421 local validation passed; real seed-201/202 input and queue prepared, solves pending |
 | 6. Full-year OOS | One ordered 8760-hour scenario with unit multiplicity and one annual storage cycle | Implemented and locally validated; real job 6424 is running the intended 43,800-time-step model on Solstorm |
 
+## Completion evidence matrix
+
+Treat a `pending` row as incomplete even when its code and local tests pass.
+
+| Goal gate | Authoritative evidence | State |
+|---|---|---|
+| 1. Export, provenance-check, compatibility-check, and apply fixed investments | Deterministic provenance/compatibility/key-set tests; job 6421 fixed all eight tables and reproduced them byte-for-byte | Proven |
+| 2. Execute and aggregate multiple representative trees | Synthetic two-tree aggregation passes; real seed-201/202 queue and stage metadata are distinct and ready, but neither solve has run | Pending runtime evidence |
+| 3. Physical ENS weighting and conditional/expected distinction | Weight-map and aggregation fixtures; job 6421 aggregation; direct 8,760-hour unit-weight test | Proven |
+| 4. True chronological full-year construction and solve | Full-year generation/chronology/model tests and real 2015 input fingerprints pass; job 6424 proves the intended 43,800-time-step build but has not completed | Pending terminal runtime evidence |
+| 5. Separate fixed investment and second-stage costs with documented units | Aggregation tests and job 6421 summary reconcile fixed EUR, non-investment EUR, load-shed EUR, and undiscounted physical MWh | Proven |
+| 6. Deterministic regression tests plus controlled Solstorm evidence | Full suite and job 6421 pass; completion additionally requires terminal job 6424 and both real representative trees | Pending runtime evidence |
+| 7. Living documentation and reviewable PR plan | This handoff plus the dependency-ordered employee-review sequence below | Proven as integration-branch planning |
+
+The real seed-202 staging artifact explicitly has physical staged name
+`oos_tree1` and `staged_from_tree: oos_tree2`; seed 201 preserves
+`staged_from_tree: oos_tree1`. This is concrete input evidence for the logical
+identity correction, not a substitute for the two terminal solver manifests.
+
 ## Main code and data flow
 
 ### Fixed investments and experiments
