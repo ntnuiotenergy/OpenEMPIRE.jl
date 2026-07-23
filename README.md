@@ -324,7 +324,8 @@ and records the tree seed, full provenance, and base investment run in
 
 ### Preparing chronological full-year OOS
 
-Prepare one OOS tree for each selected complete non-leap historical year:
+Prepare the InternalEMPIRE-equivalent full-year experiment for one selected
+complete non-leap historical year:
 
 ```bash
 julia --project=. scripts/prepare_full_year_oos_experiment.jl europe_v51 \
@@ -335,25 +336,30 @@ julia --project=. scripts/prepare_full_year_oos_experiment.jl europe_v51 \
 ```
 
 The command only prepares inputs; it does not build or solve EMPIRE. It writes
-`full_year_config.yaml`, `experiment.yaml`, and one checksummed `oos_treeN` per
-sample year. Supply the generated `full_year_config.yaml`—not the original
-representative-period config—to `prepare_oos_execution_queue.jl` and the Julia
-runner.
+`full_year_config.yaml`, `experiment.yaml`, and 24 checksummed trees named
+`oos_tree1` through `oos_tree24`. Supply the generated
+`full_year_config.yaml`—not the original representative-period config—to
+`prepare_oos_execution_queue.jl` and the Julia runner.
 
-Each strategic period receives the same selected historical profile as one
-ordered 8760-hour operational scenario. The time structure contains one
-regular period, one scenario, no dummy peak, and one storage cycle boundary at
-the end of the year. `operational_hours_per_year: 8760` makes every modeled
-hour's representative multiplicity exactly one. All required raw files must
-contain exactly the same gap-free hourly non-leap year; source rows are sorted
-by parsed timestamp before output because some historical files are stored in
-a non-chronological row order.
+The selected 8,760-hour year is divided into consecutive 365-row slices at
+zero-based offsets 0, 365, ..., 8,395. Each slice is duplicated across the
+strategic periods and solved independently as one scenario with a 365-hour
+regular season named `winter` and one dummy peak hour. Winter hours have
+multiplicity `(8760 - 1) / 365`; the dummy peak has multiplicity one and is
+excluded from aggregated results. Each independent tree therefore has the same
+storage-cycle boundaries as InternalEMPIRE.
 
-This intentionally differs from InternalEMPIRE's current 24 independent
-365-hour runs. In Julia, placing a 365-hour block inside
-`RepresentativePeriods(8760, ...)` scales that block to a representative year,
-and independent blocks also reset cyclic storage 24 times. Those semantics are
-not a continuous chronological full-year evaluation.
+Full-year slicing matches InternalEMPIRE's dataframe behavior by preserving
+the filtered source-file row order rather than sorting by timestamp. Julia
+still requires every source to contain the complete, duplicate-free 8,760-hour
+timestamp set and records timestamp disorder in tree metadata. The Julia CSVs
+also materialize InternalEMPIRE's implicit dummy-peak parameter defaults:
+zero load, zero stochastic availability, and seasonal-hydro raw value one.
+
+After all 24 independent jobs complete, aggregation removes dummy-peak rows,
+retains `ScenarioTree`, and constructs `HourFullYear` as 1 through 8,760. The
+older single-8,760-hour Julia formulation is retained only as diagnostic and
+historical compatibility code; it is not the accepted full-year OOS method.
 
 Before an OOS queue or run is accepted, the source investment run must also
 provide provenance. New Julia run manifests record a normalized investment

@@ -243,6 +243,7 @@ function test_full_year_oos_generation()
             investment_sets,
             investment_periods,
         )
+        _write_test_investment_run_evidence(investment_run, config_file)
 
         oos_model, oos_periods, oos_sets, _ = OpenEMPIRE.create_model(
             execution_config_file,
@@ -267,6 +268,54 @@ function test_full_year_oos_generation()
             (node, generator) in OpenEMPIRE.node_generators(oos_sets),
             strategic_period in strat_periods(oos_periods)
         )
+
+        runner_results = joinpath(root, "runner-results")
+        runner_status = main([
+            source_data,
+            "--config=$execution_config_file",
+            "--solver=HiGHS",
+            "--seed=1",
+            "--out-of-sample=true",
+            "--fixed-investment-dir=$investment_run",
+            "--scenario-data-root=$tree_dir",
+            "--results=$runner_results",
+        ])
+        @test runner_status == JuMP.MOI.OPTIMAL
+        runner_result = only(readdir(runner_results; join = true))
+        runner_manifest = YAML.load_file(joinpath(runner_result, "run_manifest.yaml"))
+        @test runner_manifest["status"] == "complete"
+        @test runner_manifest["out_of_sample"]["enabled"]
+        @test runner_manifest["out_of_sample"]["scenario_tree"] == "oos_tree1"
+        @test runner_manifest["out_of_sample"]["scenario_checksums_verified"]
+        @test runner_manifest["out_of_sample"]["investments_fixed"]
+        @test runner_manifest["out_of_sample"]["scenario_metadata"]["chronology"]["formulation"] ==
+              "internalempire_24x365"
+        @test !runner_manifest["model"]["investment_constraints_included"]
+        @test runner_manifest["solution"]["termination_status"] == "OPTIMAL"
+        @test runner_manifest["solution"]["is_solved_and_feasible"]
+        components = runner_manifest["solution"]["objective_components"]
+        @test sum(values(components)) ≈ runner_manifest["solution"]["objective_value"]
+        @test runner_manifest["investment_result"]["fixed_investments_sha256"] ==
+              runner_manifest["out_of_sample"]["fixed_investment_metadata"]["sha256"]
+
+        validated = OpenEMPIRE.summarize_oos_result(runner_result)
+        @test validated.summary.EvaluationMode == "chronological_full_year"
+        @test validated.summary.FullYearFormulation == "internalempire_24x365"
+        @test validated.summary.FullYearTreeIndex == 1
+        @test validated.summary.DummyPeakResultsIgnored
+        @test validated.summary.FixedInvestmentsVerified
+        @test validated.summary.TerminationStatus == "OPTIMAL"
+        @test all(
+            row.Season == "winter" for row in validated.ens_by_period_scenario_season
+        )
+        load_shed_rows = collect(CSV.File(
+            joinpath(runner_result, "output", "loadShed.csv");
+            normalizenames = false,
+        ))
+        @test Set(String(row.Season) for row in load_shed_rows) ==
+              Set(["winter", "peak1"])
+        @test count(row -> String(row.Season) == "winter", load_shed_rows) == 2 * 3 * 365
+        @test count(row -> String(row.Season) == "peak1", load_shed_rows) == 2 * 3
 
         queue_investment_run = joinpath(root, "investment-run")
         _write_investment_csvs(joinpath(queue_investment_run, "Output"))
