@@ -345,6 +345,12 @@ support comparison while the InternalEMPIRE-equivalent replacement is built.
   focused runner staging passes 85/85. After adding model-level dummy-default
   and strategic-period duplication assertions, focused full-year OOS passes
   168/168.
+- The complete Julia suite was run at revision `d57d168` after those additions:
+  1,075 assertions passed, zero failed or errored, and the one already-known
+  Python scenario-reference check remained broken because its temporary
+  reference dataset lacks `Sets/Generator.csv`. The test run rewrote
+  `data/test_excel/ScenarioData/sampling_key.csv`; that generated change was
+  restored exactly, leaving only the user's unrelated launch-profile change.
 - A direct comparison executed the checked-in InternalEMPIRE Python generator
   against the repository test dataset and compared all 24 trees with Julia.
   The Python process used a test-only datetime-parsing shim because that fixture
