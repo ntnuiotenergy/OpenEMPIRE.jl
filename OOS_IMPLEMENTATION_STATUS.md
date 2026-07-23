@@ -1354,9 +1354,44 @@ Ask the user to approve remote staging and exactly one accepted 365+1 job:
   therefore produced a doubled `stages/stages` destination. It was never
   executed and is preserved only as local diagnostic evidence. Use only the
   `_rootfix` plan.
-- No remote directory was created, no file was transferred, no remote command
-  was executed for this accepted experiment, and no scheduler or solver action
-  occurred. Remote staging and submission require the user's explicit approval.
+- At the end of local preflight, no remote directory had been created, no file
+  had been transferred, and no scheduler or solver action had occurred. The
+  controlled submission recorded below supersedes that pre-submission state.
+
+## Controlled accepted 365+1 tree-1 job 6426
+
+- The user explicitly approved remote staging, validation, and submission of
+  exactly one accepted tree, while prohibiting submission of the remaining 23.
+- The isolated stage is
+  `/home/torgrif/OpenEMPIRE.jl/stages/full_year_2015_internal_24x365_b0bbb80_oos_tree1_a36e77f61f02`.
+  Its repository archive is pinned to commit
+  `a36e77f61f0271bd7dbe16dc002063919bd2e68f`.
+- Commands 3 through 14 of the inert staging plan completed in order. The
+  repository, dataset, execution and generation configuration, adjusted tree,
+  and fixed-investment fingerprints all passed before queue generation.
+- The remote execution queue contains exactly one pending logical job,
+  `oos_tree1`, using Gurobi and the accepted
+  `chronological_full_year`/`internalempire_24x365` metadata. The generated SGE
+  script SHA-256 is
+  `92db477061f216a84daf1f39c892bcd0d49b03243a04c4741452582fa3baf150`.
+  It requests `h_vmem=96G` and `h_rt=04:00:00`, with no `mem_free`.
+- `qsub -w v` reported `verification: found suitable queue(s)`. Exactly one
+  real submission followed: job `6426` (`empire_oos_1`). The remote queue then
+  recorded `oos_tree1: submitted`, scheduler ID `6426`, state `qsub accepted`,
+  and no next pending job.
+- SGE confirmed job 6426 running on `all.q@compute-4-51.local`. Its logs are:
+  - stdout:
+    `inputs/experiment/sge/logs/oos_tree1_6426.out`;
+  - stderr:
+    `inputs/experiment/sge/logs/oos_tree1_6426.err`.
+- The runner result directory is
+  `results/oos_tree1/20260723_121736_dataset` inside the isolated stage. Early
+  build evidence reports 49 nodes, 28 generators, 2 storages, 1,830 total model
+  time steps (five strategic periods times 365 winter hours plus one dummy
+  peak), and 1,273,680 generator operational entries. Progress 22 explicitly
+  reports `Omitting investment-only constraints`.
+- No other OOS tree was submitted. Job 6426 must be monitored and validated
+  without automatic resubmission before deciding whether to run trees 2–24.
 
 ## Solstorm capacity and resource preflight on 2026-07-22
 
