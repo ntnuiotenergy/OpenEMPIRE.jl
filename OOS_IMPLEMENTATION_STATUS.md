@@ -1289,20 +1289,60 @@ overwriting evidence from an in-progress or completed experiment.
 
 ## Next recommended task
 
-Prepare the first accepted 365+1 Solstorm execution without submitting it:
+Ask the user to approve remote staging and exactly one accepted 365+1 job:
 
-1. Generate the 24-tree Europe v5.1 experiment from the preserved 2015 source
-   year and the compatible 2045 investment run.
-2. Prepare and validate one revision-pinned `oos_tree1` stage with bounded
-   resources informed by job 6424. Do not submit until the user explicitly
-   approves the prepared command and exact target.
-3. Compare remaining model-level weights/defaults and concatenated result
-   identities directly where Python reference outputs are practical; the raw
-   generated scenario tables already match for all 24 trees.
-4. After the first accepted tree completes and validates, execute the remaining
-   23 trees one at a time or with an explicitly approved bounded scheduler
-   policy, then aggregate all 24. The two prepared representative jobs remain a
-   separate evidence gate and should not be mixed into the full-year queue.
+1. Execute the corrected plan's remote preparation, transfer, unpack,
+   validation, queue, and SGE-generation commands for `oos_tree1`.
+2. Require all six remote fingerprints and `qsub -w v` to pass before
+   submission. Submit exactly one job requesting `h_vmem=96G` and
+   `h_rt=04:00:00`; do not request `mem_free`.
+3. Record the immutable script checksum and scheduler ID, then monitor without
+   automatic resubmission. While it runs, compare remaining model-level
+   weights/defaults and concatenated result identities.
+4. Validate and aggregate the first result before deciding how to schedule the
+   remaining 23 trees. The two prepared representative jobs remain a separate
+   evidence gate and must not be mixed into the full-year queue.
+
+## Accepted Europe v5.1 24 x 365 preflight on 2026-07-23
+
+- The accepted experiment is
+  `OutOfSample/europe_v51/full_year_2015_internal_24x365_b0bbb80`.
+  It uses the preserved 2015 source year, reports
+  `full_year_formulation: internalempire_24x365`, and contains 24 complete trees
+  spanning source rows 1:365 through 8396:8760.
+- Its execution queue is `ready` with exactly 24 pending Gurobi jobs. The fixed
+  investment fingerprint is
+  `9321df4c69cf2664ade384e5c2f9d59f7455a527725fcf813dd49a1b25fd9274`.
+  No runner or solver was started.
+- The complete ignored experiment occupies approximately 533 MB including the
+  two local staging archives. Tree 1 contains 64,050 load rows, 45,750
+  seasonal-hydro rows, 289,140 stochastic-availability rows, and five sampling
+  rows, excluding headers. Its metadata declares winter 365 + dummy peak 1,
+  winter multiplicity `8759/365`, two storage-cycle boundaries per strategic
+  period, and InternalEMPIRE source-row selection. Its run-of-river slice is
+  explicitly recorded as timestamp-disordered.
+- Revision `b0bbb80f708d1cc66147a9479367c5275a7112db` is pinned in the corrected
+  dry-run staging plan:
+  `OutOfSample/europe_v51/full_year_2015_internal_24x365_b0bbb80/solstorm_staging/full_year_2015_internal_24x365_b0bbb80_oos_tree1_b0bbb80f708d_rootfix/staging.yaml`.
+  The plan status is `ready`; the exact remote target is
+  `/home/torgrif/OpenEMPIRE.jl/stages/full_year_2015_internal_24x365_b0bbb80_oos_tree1_b0bbb80f708d`.
+- The plan requests `h_vmem=96G` and `h_rt=04:00:00`, with no `mem_free`
+  request. This is deliberately bounded above the expected 365+1 requirement
+  while remaining far below superseded job 6424's 320 GB request.
+- Local archive preflight is recorded beside the plan. The revision archive is
+  83,873,225 bytes with SHA-256
+  `f52651abec2ed20fa6f6ba90e6c54c881b196f87dabf23900c9652fe26dc664b`;
+  the dataset archive is 55,390,875 bytes with SHA-256
+  `e9601d096fafff65fae5c78e004f48f9b93c29f0a8ac70b49aaa56a84b724131`.
+  Both archives contain zero AppleDouble sidecars and zero Git metadata.
+- An earlier inert dry-run plan in the sibling directory without `_rootfix`
+  accidentally received remote root `/home/torgrif/OpenEMPIRE.jl/stages` and
+  therefore produced a doubled `stages/stages` destination. It was never
+  executed and is preserved only as local diagnostic evidence. Use only the
+  `_rootfix` plan.
+- No remote directory was created, no file was transferred, no remote command
+  was executed for this accepted experiment, and no scheduler or solver action
+  occurred. Remote staging and submission require the user's explicit approval.
 
 ## Solstorm capacity and resource preflight on 2026-07-22
 
