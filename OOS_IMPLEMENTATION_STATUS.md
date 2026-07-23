@@ -1,6 +1,6 @@
 # OOS implementation status and handoff
 
-Last updated: 2026-07-22
+Last updated: 2026-07-23
 
 This is the living handoff document for out-of-sample (OOS) work in the Julia
 version of EMPIRE. Update it whenever OOS behavior, workflow, concrete
@@ -135,6 +135,7 @@ Implementation commits, oldest first:
 | `9e8fcbc` | Record local 24 x 365 full-year construction evidence |
 | `72135e8` | Solve one generated 365+1 tree with fixed investments locally |
 | `0f29831` | Match InternalEMPIRE's filtered source-row slicing exactly |
+| `fb8344e` | Test the accepted full-year tree through the actual Julia runner |
 
 ## Functional progress
 
@@ -156,7 +157,7 @@ Implementation commits, oldest first:
 | 4k. Infeasibility fix | Match InternalEMPIRE by omitting investment-only constraints after capacities are fixed | Root cause demonstrated, locally regression-tested, and verified by job 6421 |
 | 4l. Fresh representative rerun | Create, stage, submit, and verify a new immutable run without touching job 6420 | Job 6421 completed `OPTIMAL`; all acceptance evidence passed |
 | 5. Aggregation | Validate, summarize, and combine results across trees | Implemented; deterministic two-tree tests and job 6421 local validation passed; real seed-201/202 input and queue prepared, solves pending |
-| 6. Full-year OOS | InternalEMPIRE-equivalent 24 independently solved 365-hour chunks, each with one winter scenario and one dummy peak hour | Implemented, deterministically tested, directly matched to all 24 Python-generated trees, and one generated tree solved locally with fixed investments; actual-runner and controlled Solstorm evidence remain pending |
+| 6. Full-year OOS | InternalEMPIRE-equivalent 24 independently solved 365-hour chunks, each with one winter scenario and one dummy peak hour | Implemented, deterministically tested, directly matched to all 24 Python-generated trees, and one generated tree validated end-to-end through the actual Julia runner; controlled Solstorm evidence remains pending |
 
 ## Completion evidence matrix
 
@@ -167,7 +168,7 @@ Treat a `pending` row as incomplete even when its code and local tests pass.
 | 1. Export, provenance-check, compatibility-check, and apply fixed investments | Deterministic provenance/compatibility/key-set tests; job 6421 fixed all eight tables and reproduced them byte-for-byte | Proven |
 | 2. Execute and aggregate multiple representative trees | Synthetic two-tree aggregation passes; real seed-201/202 queue and stage metadata are distinct and ready, but neither solve has run | Pending runtime evidence |
 | 3. Physical ENS weighting and conditional/expected distinction | Representative fixtures and job 6421 prove representative semantics; full-year tests prove winter `(8760-1)/365`, unit dummy-peak weight, dummy exclusion, and ordered 24-tree aggregation | Proven locally; controlled full-year result evidence pending |
-| 4. InternalEMPIRE-equivalent full-year construction and solve | Julia generates exact chunks 1:365 through 8396:8760, builds winter 365 + dummy peak 1, creates 24 jobs, solves a generated test tree with exported/fixed investments, and concatenates winter results to HourFullYear 1:8760 | Local implementation, direct Python output parity, and smoke solve proven; actual-runner and controlled Solstorm runs pending |
+| 4. InternalEMPIRE-equivalent full-year construction and solve | Julia generates exact chunks 1:365 through 8396:8760, builds winter 365 + dummy peak 1, creates 24 jobs, solves a generated test tree with exported/fixed investments, and concatenates winter results to HourFullYear 1:8760 | Local implementation, direct Python output parity, smoke solve, actual-runner manifest, and production result validation proven; controlled Solstorm runs pending |
 | 5. Separate fixed investment and second-stage costs with documented units | Aggregation tests and job 6421 summary reconcile fixed EUR, non-investment EUR, load-shed EUR, and undiscounted physical MWh | Proven |
 | 6. Deterministic regression tests plus controlled Solstorm evidence | Full suite and job 6421 pass; completion requires both real representative trees and controlled 24 × 365-hour Solstorm evidence; job 6424 cannot satisfy this gate | Pending runtime evidence |
 | 7. Living documentation and reviewable PR plan | This handoff plus the dependency-ordered employee-review sequence below | Proven as integration-branch planning |
@@ -330,6 +331,14 @@ support comparison while the InternalEMPIRE-equivalent replacement is built.
   `oos_tree1`, fixes every generator investment variable from those tables, and
   solves the 365+1 OOS model to `OPTIMAL` with investment-only constraints
   omitted.
+- The actual `scripts/run_julia_empire.jl` path has also been exercised locally
+  for generated `oos_tree1`. It staged and checksum-verified the tree and
+  manifest-backed fixed investments, built 732 model time steps, fixed the
+  capacities, omitted investment-only constraints, solved `OPTIMAL`, wrote all
+  result tables, and passed `summarize_oos_result`. Raw `loadShed.csv` contains
+  both `winter` and `peak1`; the production summary contains only `winter`, as
+  required. This is now deterministic regression coverage in `fb8344e`;
+  focused runner staging passes 85/85 and full-year OOS passes 156/156.
 - A direct comparison executed the checked-in InternalEMPIRE Python generator
   against the repository test dataset and compared all 24 trees with Julia.
   The Python process used a test-only datetime-parsing shim because that fixture
@@ -1240,10 +1249,11 @@ overwriting evidence from an in-progress or completed experiment.
    rather than model mathematics. Review whether to split it before a PR; do
    not mix that refactor into the first representative-run debugging work.
 5. The accepted 24 x 365-hour generator, model configuration, queue,
-   aggregation, direct all-tree Python comparison, and one-tree local
-   fixed-investment solve now pass. Missing evidence is an actual Julia runner
-   execution and controlled runtime evidence for all 24 chunks. The superseded
-   one-period job `6424` remains diagnostic-only and cannot satisfy those gates.
+   aggregation, direct all-tree Python comparison, one-tree fixed-investment
+   solve, actual Julia runner, and production result validator now pass.
+   Missing evidence is controlled runtime and final aggregation for all 24
+   chunks. The superseded one-period job `6424` is complete but diagnostic-only
+   and cannot satisfy those gates.
 6. The current continuation branch is an integration branch, not a proposed
    single employee-review PR. Prefer sequential PRs: runner workflow, core OOS,
    experiment orchestration, then optional Solstorm tooling.
@@ -1279,20 +1289,20 @@ overwriting evidence from an in-progress or completed experiment.
 
 ## Next recommended task
 
-Continue locally before any new controlled Solstorm evidence:
+Prepare the first accepted 365+1 Solstorm execution without submitting it:
 
-1. Preserve and monitor superseded job `6424`; do not resubmit it. On
-   completion, collect scheduler accounting, final manifest, output inventory,
-   and post-solve memory/timing evidence as diagnostics only.
-2. Exercise one generated 365+1 tree through the actual Julia runner so its
-   manifest, objective components, fixed-capacity outputs, and ENS summary are
-   validated together without Solstorm.
+1. Generate the 24-tree Europe v5.1 experiment from the preserved 2015 source
+   year and the compatible 2045 investment run.
+2. Prepare and validate one revision-pinned `oos_tree1` stage with bounded
+   resources informed by job 6424. Do not submit until the user explicitly
+   approves the prepared command and exact target.
 3. Compare remaining model-level weights/defaults and concatenated result
    identities directly where Python reference outputs are practical; the raw
    generated scenario tables already match for all 24 trees.
-4. After job `6424` is terminal, execute the two representative jobs
-   sequentially and aggregate them. Later submit controlled 24 x 365-hour
-   evidence only after the local parity and smoke-test gates pass.
+4. After the first accepted tree completes and validates, execute the remaining
+   23 trees one at a time or with an explicitly approved bounded scheduler
+   policy, then aggregate all 24. The two prepared representative jobs remain a
+   separate evidence gate and should not be mixed into the full-year queue.
 
 ## Solstorm capacity and resource preflight on 2026-07-22
 
@@ -1376,8 +1386,22 @@ Continue locally before any new controlled Solstorm evidence:
 - At `2026-07-22T16:56:12+02:00`, it was still at progress 43; SGE reported
   170.933 GB current virtual memory and the same 213.199 GB maximum. Memory was
   below the request and decreasing, so the job was left untouched.
-- No other long job is queued or running. Preserve this job, do not resubmit it,
-  and treat its eventual outputs as performance and regression diagnostics only.
+- Job 6424 finished on 2026-07-22 at 19:24:18 with scheduler `failed=0`,
+  `exit_status=0`, wall time 22,624 seconds, and `maxvmem=240.130GB`. The runner
+  manifest is `complete`, reports `OPTIMAL`, and reproduces the fixed-capacity
+  fingerprint `9321df4c69cf2664ade384e5c2f9d59f7455a527725fcf813dd49a1b25fd9274`.
+- Model build took 4,237.72 seconds and optimization took 5,833.46 seconds.
+  Objective-component diagnostics then consumed about 10,270 seconds, followed
+  by about 1,829 seconds of CSV writing. This confirms the long progress-43
+  phase was post-solve diagnostic construction rather than a solver stall.
+- The final objective is `2.8837990080886045e12`; the manifest records all five
+  objective components and a feasible primal and dual point. The result
+  directory is 6.1 GB and contains the expected operational and fixed-capacity
+  tables.
+- `qstat -u torgrif` was empty when completion evidence was collected. Preserve
+  job 6424 and its result directory; do not resubmit it. These results remain
+  performance and regression diagnostics for the superseded one-8,760-hour
+  formulation only.
 
 ## Current InternalEMPIRE comparison
 
@@ -1414,9 +1438,9 @@ Continue locally before any new controlled Solstorm evidence:
   deterministic aggregation, and the superseded chronological 8,760-hour work
   are subsequent Julia work and are not claimed as merged/cherry-picked rf
   code. The accepted 24 x 365-hour replacement is new work in `cc59b61`,
-  `5d3e0c7`, `6d15ede`, and `0f29831`. Local fixed-investment runtime and direct
-  all-tree Python scenario-table parity now pass; actual-runner and controlled
-  Solstorm evidence remain pending.
+  `5d3e0c7`, `6d15ede`, and `0f29831`. Local fixed-investment runtime, direct
+  all-tree Python scenario-table parity, and the actual Julia runner/result
+  validator now pass; controlled 24-tree Solstorm evidence remains pending.
 
 ## Employee-review PR sequence
 
