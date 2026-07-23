@@ -1301,22 +1301,25 @@ overwriting evidence from an in-progress or completed experiment.
 
 ## Next recommended task
 
-Tree 1 has passed the controlled runtime gate documented below. The next
-remote action requires fresh user approval because the preceding authorization
-explicitly prohibited submitting trees 2–24:
+Tree 1 has passed the controlled runtime gate. The first sequential-controller
+attempt for trees 2–24 stopped before starting the runner or solver because of
+the orchestration-only `Cmd` construction error documented below. The local
+controller is fixed and its process-construction test passes, but the
+fail-closed instruction prohibits automatic resubmission:
 
-1. Preserve job `6426` and its isolated stage as immutable tree-one evidence.
-2. Prepare a revision-pinned 24-tree stage that reuses the exact accepted
-   configuration, fixed-investment fingerprint, and generated scenario trees.
-3. Validate all inputs and generated SGE scripts, but keep at most one solver
-   job submitted or running at a time. Start with `oos_tree2`; accept and
-   reconcile each result before submitting the next tree, and stop rather than
-   automatically resubmitting any failed or ambiguous result.
-4. After all 24 trees are independently accepted, run the production
+1. With explicit user approval, preserve failed job `6428`, transfer the fixed
+   controller as a new attempt artifact, move only queue job 2 from `failed`
+   back to `pending`, and generate a new immutable SGE script with the new
+   controller and queue hashes.
+2. Revalidate the complete 24-tree inputs, accepted tree 1, pending trees
+   2–24, and `qsub -w v`; then make exactly one retry submission. The controller
+   must keep one solver process at a time, validate each result before
+   advancing, and stop on the first model/result anomaly.
+3. After all 24 trees are independently accepted, run the production
    aggregation, verify tree indices 1:24, removal of all dummy-peak rows,
    `HourFullYear=1:8760`, common config/fixed-investment fingerprints, and
    combined-file row counts and hashes.
-5. Compare the aggregated Julia artifacts with the checked-in InternalEMPIRE
+4. Compare the aggregated Julia artifacts with the checked-in InternalEMPIRE
    generation and concatenation behavior, then record the final scientific and
    runtime evidence. The two representative OOS jobs remain separate evidence
    and must not be mixed into the full-year aggregation.
@@ -1424,6 +1427,47 @@ explicitly prohibited submitting trees 2–24:
   No other OOS tree was submitted. A controlled 24-tree evaluation and
   8,760-hour aggregation remain required before full-year runtime validation
   is complete.
+
+## Sequential trees 2–24 controller attempt 6428
+
+- The user authorized execution of trees 2–24 while retaining the one-solver
+  limit and fail-closed result validation. To reduce interactive monitoring
+  overhead, an isolated sequential-controller stage was prepared at
+  `/home/torgrif/OpenEMPIRE.jl/stages/full_year_2015_internal_24x365_b0bbb80_oos_trees2_24_a36e77f61f02`.
+  It reuses the exact read-only project, dataset, full-year configuration, and
+  fixed-investment inputs accepted by job `6426`; it does not modify the
+  tree-one stage.
+- The transferred 24-tree experiment archive has SHA-256
+  `e90880a850a4cfa94c91403b5400bfd33465c07f28b4bfec80e3439181dc3fdb`,
+  170 entries, no AppleDouble or Git metadata, and validated all 24 distinct
+  tree identities, indices 1:24, and source ranges 1:365 through 8396:8760.
+  Its tree-one metadata SHA-256 is
+  `df184b584f4eda91f5f3757178c41447d70b757a3862dcdf7e2b13a61e53f301`,
+  exactly matching accepted job `6426`.
+- The new queue reconciled the existing tree-one result as `complete` and
+  recorded trees 2–24 as `pending`. Before submission its SHA-256 was
+  `b7bb4a8817555d4245bc0b76653eddb7f8dc8e55d5aba428c03641c000826dca`.
+  Remote input validation and `qsub -w v` both passed. The immutable first
+  controller script SHA-256 was
+  `8fcf54921b7f978223a157b09d2c9a1852067a53224fbad1268a2c684d6cba04`.
+- Exactly one controller allocation was submitted as job `6428`
+  (`empire_oos_2_24`) with 96 GB `h_vmem` and a four-hour limit. It stopped
+  fail-closed on tree 2 before `run_julia_empire.jl`, model construction, or
+  Gurobi started: Julia 1.9.3 rejected `Cmd(::Vector{String}; dir=...)`.
+  No tree-two result directory or run manifest exists, and trees 3–24 remain
+  pending.
+- SGE accounting reports scheduler `failed=0`, script `exit_status=1`, 68
+  seconds wall time, and 1.306 GB maximum virtual memory. This is an
+  orchestration-only failure and provides no negative evidence about the
+  tree-two OOS model.
+- The ignored local controller now wraps the vector command in a `Cmd` before
+  applying its working directory and moves execution into function scope,
+  removing the accompanying soft-scope warning. Parsing and an actual
+  child-process working-directory test pass. The corrected controller
+  SHA-256 is
+  `d38fda16dd6d9b1b6a3271c830bc8f89722a486560e4b7a972ea9fdc2465852f`.
+  It has not been transferred or submitted; retry requires an explicit user
+  decision.
 
 ## Solstorm capacity and resource preflight on 2026-07-22
 
