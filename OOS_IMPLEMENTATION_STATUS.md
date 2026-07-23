@@ -1301,19 +1301,25 @@ overwriting evidence from an in-progress or completed experiment.
 
 ## Next recommended task
 
-Ask the user to approve remote staging and exactly one accepted 365+1 job:
+Tree 1 has passed the controlled runtime gate documented below. The next
+remote action requires fresh user approval because the preceding authorization
+explicitly prohibited submitting trees 2–24:
 
-1. Execute the corrected plan's remote preparation, transfer, unpack,
-   validation, queue, and SGE-generation commands for `oos_tree1`.
-2. Require all six remote fingerprints and `qsub -w v` to pass before
-   submission. Submit exactly one job requesting `h_vmem=96G` and
-   `h_rt=04:00:00`; do not request `mem_free`.
-3. Record the immutable script checksum and scheduler ID, then monitor without
-   automatic resubmission. While it runs, compare remaining model-level
-   weights/defaults and concatenated result identities.
-4. Validate and aggregate the first result before deciding how to schedule the
-   remaining 23 trees. The two prepared representative jobs remain a separate
-   evidence gate and must not be mixed into the full-year queue.
+1. Preserve job `6426` and its isolated stage as immutable tree-one evidence.
+2. Prepare a revision-pinned 24-tree stage that reuses the exact accepted
+   configuration, fixed-investment fingerprint, and generated scenario trees.
+3. Validate all inputs and generated SGE scripts, but keep at most one solver
+   job submitted or running at a time. Start with `oos_tree2`; accept and
+   reconcile each result before submitting the next tree, and stop rather than
+   automatically resubmitting any failed or ambiguous result.
+4. After all 24 trees are independently accepted, run the production
+   aggregation, verify tree indices 1:24, removal of all dummy-peak rows,
+   `HourFullYear=1:8760`, common config/fixed-investment fingerprints, and
+   combined-file row counts and hashes.
+5. Compare the aggregated Julia artifacts with the checked-in InternalEMPIRE
+   generation and concatenation behavior, then record the final scientific and
+   runtime evidence. The two representative OOS jobs remain separate evidence
+   and must not be mixed into the full-year aggregation.
 
 ## Accepted Europe v5.1 24 x 365 preflight on 2026-07-23
 
