@@ -343,7 +343,8 @@ support comparison while the InternalEMPIRE-equivalent replacement is built.
   both `winter` and `peak1`; the production summary contains only `winter`, as
   required. This is now deterministic regression coverage in `fb8344e`;
   focused runner staging passes 85/85. After adding model-level dummy-default
-  assertions, focused full-year OOS passes 164/164.
+  and strategic-period duplication assertions, focused full-year OOS passes
+  168/168.
 - A direct comparison executed the checked-in InternalEMPIRE Python generator
   against the repository test dataset and compared all 24 trees with Julia.
   The Python process used a test-only datetime-parsing shim because that fixture
@@ -1449,6 +1450,21 @@ Ask the user to approve remote staging and exactly one accepted 365+1 job:
   formulation only.
 
 ## Current InternalEMPIRE comparison
+
+### Required-behavior traceability
+
+| Required behavior | Checked-in InternalEMPIRE source | Julia implementation | Deterministic evidence | State |
+|---|---|---|---|---|
+| Split one non-leap year into 24 consecutive 365-row slices | `create_scenario_tree_full_year.py`: `gather_regular_sample`, `sample_hour += lengthRegSeason`, and `n_trees = 8760 / lengthRegSeason` | `src/oos_full_year.jl`: `_internalempire_full_year_chunks`, `_chronological_year_indices`, and `prepare_full_year_oos_experiment` | `test_internalempire_full_year_foundation` proves offsets, lengths, and exact coverage 1:8760; `test_full_year_oos_generation` proves first/last tree metadata and data | Proven locally |
+| Preserve filtered source-row order while validating a complete unique year | `create_scenario_tree_full_year.py`: year filter followed by dataframe `iloc` slicing | `src/oos_full_year.jl`: `_chronological_year_indices` and raw-source metadata | `test_full_year_oos_generation` uses the deliberately disordered run-of-river fixture and checks exact first/last slices, completeness, disorder flags, and selection semantics | Proven locally; all 24 generated tables also matched Python directly |
+| Duplicate each slice across strategic periods | `create_scenario_tree_full_year.py`: sampling calls inside its period loop | `src/oos_full_year.jl`: `_write_chronological_scenario_csvs!` loops over `strategic_period_count` | `test_full_year_oos_generation` parses the model inputs and compares the complete winter load, hydro, and availability vectors across both fixture periods | Proven locally |
+| Use one scenario, one 365-hour `winter`, and one one-hour dummy peak | `run_EMPIRE.py`: OOS settings and `HoursOfSeason` construction | `_internalempire_full_year_config` and `create_timestruct` | `test_internalempire_full_year_foundation` and `test_full_year_oos_generation` check the generated config and every parsed strategic-period structure | Proven locally |
+| Use probability one, winter scale `(8760-1)/365`, and dummy scale one | `empire.py`: scenario-probability and `prepSeasScale` build actions | `create_timestruct`; `_oos_time_weights` for result interpretation | `test_internalempire_full_year_foundation` and `test_oos_chronological_full_year_time_weights` prove per-hour weights and an annual total of 8760 | Proven locally |
+| Match omitted dummy-row defaults: load 0, availability 0, hydro raw 1 | `empire.py`: `sloadRaw`, `genCapAvailStochRaw`, and `maxRegHydroGenRaw` parameter defaults | `_write_chronological_scenario_csvs!`, generated-profile readers, and `preprocess_hydro_gen` | `test_full_year_oos_generation` checks parsed defaults in every period and the preprocessed hydro value consumed by constraints | Proven locally |
+| Give `winter` and the dummy peak separate storage cycles in every solve | `empire.py`: season-end and season-start storage indexing | `create_storage_constraints` over operational scenarios | `test_full_year_oos_generation` checks exactly two `storage_cyclic` constraints per node-storage and strategic period | Proven locally |
+| Create 24 independent jobs, each with one tree | `run_EMPIRE.py`: loop over `oos_tree1` through `oos_tree24`, invoking `run_empire` separately | `prepare_oos_execution_queue` and the one-tree Julia runner | `test_full_year_oos_generation` proves the ordered 24-job queue and locally runs one generated tree through the actual runner | Queue/runner construction proven; controlled 24-job runtime pending |
+| Reuse the investment solution and omit constraints absent from InternalEMPIRE OOS | `empire.py`: OOS parameter loading and `if not OUT_OF_SAMPLE` constraint gates | fixed-investment readers/application plus `include_investment_constraints = false` | Full-year HiGHS smoke and runner tests verify all fixed tables/fingerprint, fixed JuMP variables, omitted investment constraints, feasibility, and objective reconciliation | Proven locally; representative job 6421 is remote evidence |
+| Remove dummy rows, retain tree identity, and map to `HourFullYear = 1:8760` | `concat_out_of_sample_results.py`: `winter` filter, `ScenarioTree`, and hour offset | `src/oos_aggregation.jl`: `_oos_full_year_info`, `_internalempire_full_year_hour`, streaming aggregation | `test_internalempire_full_year_aggregation` reverses 24 inputs, restores tree order, removes 24 dummy rows, and proves exactly 8760 ordered rows | Proven deterministically; real 24-result aggregation pending |
 
 - Investment capacities are parameters in InternalEMPIRE and fixed JuMP
   variables here. With the Julia investment-only constraint gate, these are

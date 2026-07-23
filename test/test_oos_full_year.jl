@@ -199,6 +199,9 @@ function test_full_year_oos_generation()
             input_format = :csv,
         )
         @test length(periods) == 2 * 366
+        winter_load_by_period = Vector{Vector{Float64}}()
+        winter_hydro_by_period = Vector{Vector{Float64}}()
+        winter_availability_by_period = Vector{Vector{Float64}}()
         for strategic_period in strat_periods(periods)
             representatives = collect(repr_periods(strategic_period))
             @test length(representatives) == 2
@@ -216,7 +219,29 @@ function test_full_year_oos_generation()
             @test loaded_params.genCapAvail[
                 ("Germany", "Hydrorun-of-the-river")
             ][dummy_hour] == 0.0
+            push!(
+                winter_load_by_period,
+                [loaded_params.sloadRaw["Germany"][hour] for hour in winter],
+            )
+            push!(
+                winter_hydro_by_period,
+                [loaded_params.maxRegHydroGenRaw["Germany"][hour] for hour in winter],
+            )
+            push!(
+                winter_availability_by_period,
+                [
+                    loaded_params.genCapAvail[
+                        ("Germany", "Hydrorun-of-the-river")
+                    ][hour] for hour in winter
+                ],
+            )
         end
+        @test all(profile == first(winter_load_by_period) for profile in winter_load_by_period)
+        @test all(profile == first(winter_hydro_by_period) for profile in winter_hydro_by_period)
+        @test all(
+            profile == first(winter_availability_by_period) for
+            profile in winter_availability_by_period
+        )
         model, model_periods, _, model_params = OpenEMPIRE.create_model(
             execution_config_file,
             staged_data;
@@ -344,6 +369,8 @@ function test_full_year_oos_generation()
         @test queue["experiment"]["evaluation_mode"] == "chronological_full_year"
         @test queue["experiment"]["sample_years"] == fill(2015, 24)
         @test length(queue["jobs"]) == 24
+        @test [job["tree"] for job in queue["jobs"]] ==
+              ["oos_tree$index" for index in 1:24]
         @test queue["jobs"][1]["evaluation_mode"] == "chronological_full_year"
         @test queue["jobs"][1]["sample_year"] == 2015
         @test queue["jobs"][24]["tree"] == "oos_tree24"
