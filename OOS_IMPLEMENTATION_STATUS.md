@@ -1390,8 +1390,34 @@ Ask the user to approve remote staging and exactly one accepted 365+1 job:
   time steps (five strategic periods times 365 winter hours plus one dummy
   peak), and 1,273,680 generator operational entries. Progress 22 explicitly
   reports `Omitting investment-only constraints`.
-- No other OOS tree was submitted. Job 6426 must be monitored and validated
-  without automatic resubmission before deciding whether to run trees 2–24.
+- Job `6426` completed at `2026-07-23T12:22:42+02:00`. SGE accounting reports
+  `failed=0`, `exit_status=0`, 358 seconds wall time, 903.256 CPU seconds, and
+  11.507 GB maximum virtual memory. The captured accounting record has SHA-256
+  `8a8e1a745873d59c97b64797a689591a3f531b4e1be980899e6940f63b5055a0`.
+- Gurobi solved the 3,460,495-constraint, 2,431,515-variable model to
+  `OPTIMAL`/`FEASIBLE_POINT` in 62.15 seconds. The objective is
+  `2.568338236610774e12` EUR, comprising
+  `2.1165135004239844e12` EUR discounted fixed-investment cost and
+  `4.5182473618678955e11` EUR discounted non-investment cost.
+- The finalized run manifest is `complete`, confirms fixed investments and
+  scenario checksums, and has SHA-256
+  `ad8ff500a5dd140febd713d595155cbd990bec8ec822876ca7227853b9555f95`.
+  The production `summarize_oos_result` validator passed and independently
+  identified `oos_tree1`, seed 0, `chronological_full_year`,
+  `internalempire_24x365`, full-year tree index 1, and ignored dummy-peak
+  results. The verified fixed-investment fingerprint remains
+  `9321df4c69cf2664ade384e5c2f9d59f7455a527725fcf813dd49a1b25fd9274`.
+- The validated tree reports 305,143.183 MWh expected annual ENS across all
+  five strategic periods, six node-hours above the threshold, and maximum
+  load shedding of 5,725.340 MW at Italy, period 3, winter hour 161. These are
+  tree-one diagnostics, not an aggregated full-year result.
+- After importing the clean accounting record, manifest reconciliation marked
+  the isolated one-job queue and `oos_tree1` as `complete`; its final queue
+  SHA-256 is
+  `bb413938a04431a398b98ae91252dbcccc36102a90d21370c80b22c0995420e3`.
+  No other OOS tree was submitted. A controlled 24-tree evaluation and
+  8,760-hour aggregation remain required before full-year runtime validation
+  is complete.
 
 ## Solstorm capacity and resource preflight on 2026-07-22
 
