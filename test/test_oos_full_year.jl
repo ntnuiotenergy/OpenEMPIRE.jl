@@ -193,7 +193,7 @@ function test_full_year_oos_generation()
             joinpath(staged_data, "ScenarioData");
             force = true,
         )
-        _, periods, model_sets, _ = OpenEMPIRE._prepare_model_inputs(
+        _, periods, model_sets, loaded_params = OpenEMPIRE._prepare_model_inputs(
             execution_config_file,
             staged_data;
             input_format = :csv,
@@ -209,9 +209,15 @@ function test_full_year_oos_generation()
             @test all(
                 multiple_strat(strategic_period, hour) ≈ 8759 / 365 for hour in winter
             )
-            @test multiple_strat(strategic_period, only(dummy_peak)) ≈ 1.0
+            dummy_hour = only(dummy_peak)
+            @test multiple_strat(strategic_period, dummy_hour) ≈ 1.0
+            @test loaded_params.sloadRaw["Germany"][dummy_hour] == 0.0
+            @test loaded_params.maxRegHydroGenRaw["Germany"][dummy_hour] == 1.0
+            @test loaded_params.genCapAvail[
+                ("Germany", "Hydrorun-of-the-river")
+            ][dummy_hour] == 0.0
         end
-        model, model_periods, _, _ = OpenEMPIRE.create_model(
+        model, model_periods, _, model_params = OpenEMPIRE.create_model(
             execution_config_file,
             staged_data;
             input_format = :csv,
@@ -222,6 +228,11 @@ function test_full_year_oos_generation()
             length(OpenEMPIRE.node_storages(model_sets)) *
             length(strat_periods(model_periods)) * 2
         @test length(collect(eachindex(model[:storage_cyclic]))) == expected_storage_cycles
+        for strategic_period in strat_periods(model_periods)
+            dummy_peak = only(collect(opscenarios(collect(repr_periods(strategic_period))[2])))
+            dummy_hour = only(dummy_peak)
+            @test model_params.maxRegHydroGen["Germany"][dummy_hour] == 1.0
+        end
 
         investment_data = joinpath(root, "investment-data")
         cp(source_data, investment_data)

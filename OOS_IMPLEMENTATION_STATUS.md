@@ -318,6 +318,10 @@ support comparison while the InternalEMPIRE-equivalent replacement is built.
   hydro raw value one. Julia's profile reader requires complete vectors, so the
   generator explicitly writes those same defaults at operational hour 366.
   This is an implementation-level difference with equivalent parameter values.
+  The deterministic full-year model test now verifies those three values after
+  Julia parses the generated CSVs in every strategic period, and verifies that
+  hydro preprocessing preserves the dummy value of one used by the constraint
+  layer.
 - `src/oos_aggregation.jl` recognizes the formulation from staged metadata,
   requires all tree indices 1:24, sorts them numerically, excludes all
   non-`winter` result rows, adds `ScenarioTree`, and computes
@@ -338,7 +342,8 @@ support comparison while the InternalEMPIRE-equivalent replacement is built.
   result tables, and passed `summarize_oos_result`. Raw `loadShed.csv` contains
   both `winter` and `peak1`; the production summary contains only `winter`, as
   required. This is now deterministic regression coverage in `fb8344e`;
-  focused runner staging passes 85/85 and full-year OOS passes 156/156.
+  focused runner staging passes 85/85. After adding model-level dummy-default
+  assertions, focused full-year OOS passes 164/164.
 - A direct comparison executed the checked-in InternalEMPIRE Python generator
   against the repository test dataset and compared all 24 trees with Julia.
   The Python process used a test-only datetime-parsing shim because that fixture
@@ -1466,6 +1471,12 @@ Ask the user to approve remote staging and exactly one accepted 365+1 job:
   one-hour dummy peak. In `empire.py`, winter scale is `(8760 - 1) / 365`, the
   dummy peak scale is one, and each separate solve has independent storage
   boundaries. These semantics are binding for the Julia replacement.
+- Julia's loaded model inputs now have deterministic parity checks for
+  InternalEMPIRE's Pyomo defaults at the dummy hour: zero load, zero stochastic
+  availability, and one raw seasonal-hydro value. The preprocessed
+  seasonal-hydro profile is also checked to remain one. The
+  `create_timestruct` documentation now describes the accepted 365+1
+  formulation instead of the superseded direct 8,760-hour formulation.
 - `concat_out_of_sample_results.py` removes non-winter rows, attaches
   `ScenarioTree`, and computes `HourFullYear = Hour + (tree_index - 1) * 365`.
   Julia must reproduce those identities and the resulting 1:8760 chronology.

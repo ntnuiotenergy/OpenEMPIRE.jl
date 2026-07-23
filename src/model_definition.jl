@@ -14,9 +14,11 @@ Create EMPIRE's strategic and operational time structure.
 
 `operational_hours_per_year` is the physical duration represented by each
 strategic year. It defaults to 8760 for the existing representative-period
-formulation. A chronological fixture can set it to the fixture length; a
-full-year chronological run uses one regular season of length 8760 and keeps
-the default, which gives every modeled hour a multiplicity of one.
+formulation. The InternalEMPIRE-equivalent full-year OOS formulation keeps the
+default while solving each 365-hour chunk with one regular season and one
+one-hour dummy peak. This gives each regular hour multiplicity
+`(8760 - 1) / 365` and the dummy peak multiplicity one. A chronological fixture
+can instead set the physical duration to the fixture length.
 """
 function create_timestruct(
     npers,
