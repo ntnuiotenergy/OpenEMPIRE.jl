@@ -1466,8 +1466,16 @@ fail-closed instruction prohibits automatic resubmission:
   child-process working-directory test pass. The corrected controller
   SHA-256 is
   `d38fda16dd6d9b1b6a3271c830bc8f89722a486560e4b7a972ea9fdc2465852f`.
-  It has not been transferred or submitted; retry requires an explicit user
-  decision.
+  The user subsequently authorized the retry. The corrected controller was
+  transferred as a new attempt artifact; only tree 2 was moved from `failed`
+  back to `pending`. The resulting ready queue SHA-256 was
+  `c3e9eddc5ba657fadcf5934253adabba1c4662cc6df6e136daf5f69e43172c99`.
+- The immutable attempt-two SGE script SHA-256 is
+  `8272c0219fb71281050f0ec9dc8ac2b6a7eab7ee4ad0176cf158e1996b1b0d79`.
+  Remote input validation and `qsub -w v` passed, after which exactly one retry
+  was submitted as job `6430` (`empire_oos_2_24_a2`). SGE confirmed it running
+  on `all.q@compute-4-55.local` with 96 GB `h_vmem` and a four-hour limit.
+  Monitoring is intentionally paused to conserve the user's remaining usage.
 
 ## Solstorm capacity and resource preflight on 2026-07-22
 
