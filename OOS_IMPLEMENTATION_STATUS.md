@@ -1327,20 +1327,22 @@ Ask the user to approve remote staging and exactly one accepted 365+1 job:
   winter multiplicity `8759/365`, two storage-cycle boundaries per strategic
   period, and InternalEMPIRE source-row selection. Its run-of-river slice is
   explicitly recorded as timestamp-disordered.
-- Revision `b0bbb80f708d1cc66147a9479367c5275a7112db` is pinned in the corrected
-  dry-run staging plan:
-  `OutOfSample/europe_v51/full_year_2015_internal_24x365_b0bbb80/solstorm_staging/full_year_2015_internal_24x365_b0bbb80_oos_tree1_b0bbb80f708d_rootfix/staging.yaml`.
-  The plan status is `ready`; the exact remote target is
-  `/home/torgrif/OpenEMPIRE.jl/stages/full_year_2015_internal_24x365_b0bbb80_oos_tree1_b0bbb80f708d`.
+- The original corrected dry-run plan pinned to `b0bbb80` remains preserved as
+  preflight evidence but is superseded. The authoritative pre-submission queue
+  and plan use stable local paths
+  `execution_current.yaml` and
+  `solstorm_staging/accepted_tree1_current/staging.yaml` inside the experiment.
+  They must be regenerated after the final tracked commit so the plan's
+  recorded revision equals the integration branch `HEAD`; use the exact remote
+  target embedded in that plan.
 - The plan requests `h_vmem=96G` and `h_rt=04:00:00`, with no `mem_free`
   request. This is deliberately bounded above the expected 365+1 requirement
   while remaining far below superseded job 6424's 320 GB request.
-- Local archive preflight is recorded beside the plan. The revision archive is
-  83,873,225 bytes with SHA-256
-  `f52651abec2ed20fa6f6ba90e6c54c881b196f87dabf23900c9652fe26dc664b`;
-  the dataset archive is 55,390,875 bytes with SHA-256
-  `e9601d096fafff65fae5c78e004f48f9b93c29f0a8ac70b49aaa56a84b724131`.
-  Both archives contain zero AppleDouble sidecars and zero Git metadata.
+- Local archive preflight is recorded as `archive_preflight.yaml` beside the
+  authoritative plan. It records the revision, byte counts, SHA-256 hashes,
+  archive-entry counts, and proves zero AppleDouble sidecars and zero Git
+  metadata. Treat hashes from earlier revision-named directories as historical,
+  not as authorization to transfer them.
 - An earlier inert dry-run plan in the sibling directory without `_rootfix`
   accidentally received remote root `/home/torgrif/OpenEMPIRE.jl/stages` and
   therefore produced a doubled `stages/stages` destination. It was never
