@@ -1509,6 +1509,44 @@ fail-closed instruction prohibits automatic resubmission:
   `results/julia_oos_runs/full_year_2015_internal_24x365_b0bbb80/` for
   validated aggregation. Remote stages remain preserved and unmodified.
 
+## Real 24-tree aggregation into the auditable 8,760-hour result
+
+- `scripts/aggregate_out_of_sample_results.jl` ran on the complete local copy
+  and wrote
+  `results/julia_oos_runs/full_year_2015_internal_24x365_b0bbb80_aggregated/`
+  containing `oos_tree_summary.csv`, both ENS tables,
+  `aggregation_manifest.yaml`, and the five combined chronology CSVs
+  (`genOperational` 30,484,800 rows; `transmissionOperational` 16,644,000;
+  `storCharge`/`storDischarge` 2,890,800 each; `loadShed` 2,146,200).
+- The production validator accepted all 24 results with one staged-config
+  SHA-256, one fixed-investment fingerprint
+  (`9321df4c69cf2664ade384e5c2f9d59f7455a527725fcf813dd49a1b25fd9274`),
+  tree indices exactly 1:24, and `OPTIMAL` termination everywhere. Spot checks
+  confirmed the summary reproduces controller-logged objectives and ENS values
+  bit-for-bit (trees 2, 10, 15, 19, 24).
+- Independent structural verification of `combined/loadShed.csv`: exactly
+  49 nodes x 8,760 hours x 5 strategic periods rows; only `winter` rows
+  (all dummy-peak rows removed); zero violations of
+  `HourFullYear = Hour + (tree - 1) * 365`; every tree spans exactly
+  `(tree-1)*365+1 : tree*365`. This reproduces the
+  `concat_out_of_sample_results.py` identities on real solver output.
+- Physical (undiscounted, unit-weight) chronological-year ENS by strategic
+  period: period 1: 5,231.9 MWh over 11 shed node-hours; period 2:
+  14,813.5 MWh over 21; period 3: 98,532.0 MWh over 50 (max 10,944.4 MW);
+  period 4: 12,217,057.8 MWh over 12,820 (max 78,245.4 MW); period 5: 0.
+  The shortage is therefore concentrated almost entirely in strategic
+  period 4, and period 5 serves all load.
+- Cross-consistency: the controller-logged per-tree expected annual ENS values
+  divided by the winter annualization scale sum to about 12.3e6 MWh, matching
+  the independent chronological total. The two computations use different
+  weighting paths and agree.
+- This completes the previously pending "controlled 24-job runtime" and
+  "real 24-result aggregation" traceability rows. Remaining for the goal:
+  final documentation/PR curation; a direct numeric Python run on europe_v51
+  remains impossible because of the documented InternalEMPIRE input-schema
+  divergence, so InternalEMPIRE comparison rests on the deterministic
+  source-level parity evidence plus these reproduced aggregation identities.
+
 ## Solstorm capacity and resource preflight on 2026-07-22
 
 - The user approved a read-only Solstorm connection. At
@@ -1621,9 +1659,9 @@ fail-closed instruction prohibits automatic resubmission:
 | Use probability one, winter scale `(8760-1)/365`, and dummy scale one | `empire.py`: scenario-probability and `prepSeasScale` build actions | `create_timestruct`; `_oos_time_weights` for result interpretation | `test_internalempire_full_year_foundation` and `test_oos_chronological_full_year_time_weights` prove per-hour weights and an annual total of 8760 | Proven locally |
 | Match omitted dummy-row defaults: load 0, availability 0, hydro raw 1 | `empire.py`: `sloadRaw`, `genCapAvailStochRaw`, and `maxRegHydroGenRaw` parameter defaults | `_write_chronological_scenario_csvs!`, generated-profile readers, and `preprocess_hydro_gen` | `test_full_year_oos_generation` checks parsed defaults in every period and the preprocessed hydro value consumed by constraints | Proven locally |
 | Give `winter` and the dummy peak separate storage cycles in every solve | `empire.py`: season-end and season-start storage indexing | `create_storage_constraints` over operational scenarios | `test_full_year_oos_generation` checks exactly two `storage_cyclic` constraints per node-storage and strategic period | Proven locally |
-| Create 24 independent jobs, each with one tree | `run_EMPIRE.py`: loop over `oos_tree1` through `oos_tree24`, invoking `run_empire` separately | `prepare_oos_execution_queue` and the one-tree Julia runner | `test_full_year_oos_generation` proves the ordered 24-job queue and locally runs one generated tree through the actual runner | Queue/runner construction proven; controlled 24-job runtime pending |
+| Create 24 independent jobs, each with one tree | `run_EMPIRE.py`: loop over `oos_tree1` through `oos_tree24`, invoking `run_empire` separately | `prepare_oos_execution_queue` and the one-tree Julia runner | `test_full_year_oos_generation` proves the ordered 24-job queue and locally runs one generated tree through the actual runner; Solstorm jobs `6426` (tree 1) and `6430` (trees 2–24) solved all 24 trees `OPTIMAL` with per-tree fail-closed acceptance | Proven, including controlled 24-job runtime |
 | Reuse the investment solution and omit constraints absent from InternalEMPIRE OOS | `empire.py`: OOS parameter loading and `if not OUT_OF_SAMPLE` constraint gates | fixed-investment readers/application plus `include_investment_constraints = false` | Full-year HiGHS smoke and runner tests verify all fixed tables/fingerprint, fixed JuMP variables, omitted investment constraints, feasibility, and objective reconciliation | Proven locally; representative job 6421 is remote evidence |
-| Remove dummy rows, retain tree identity, and map to `HourFullYear = 1:8760` | `concat_out_of_sample_results.py`: `winter` filter, `ScenarioTree`, and hour offset | `src/oos_aggregation.jl`: `_oos_full_year_info`, `_internalempire_full_year_hour`, streaming aggregation | `test_internalempire_full_year_aggregation` reverses 24 inputs, restores tree order, removes 24 dummy rows, and proves exactly 8760 ordered rows | Proven deterministically; real 24-result aggregation pending |
+| Remove dummy rows, retain tree identity, and map to `HourFullYear = 1:8760` | `concat_out_of_sample_results.py`: `winter` filter, `ScenarioTree`, and hour offset | `src/oos_aggregation.jl`: `_oos_full_year_info`, `_internalempire_full_year_hour`, streaming aggregation | `test_internalempire_full_year_aggregation` reverses 24 inputs, restores tree order, removes 24 dummy rows, and proves exactly 8760 ordered rows; the real 24-result aggregation reproduced the full 1:8760 chronology with zero identity violations | Proven deterministically and on the real 24-tree result |
 
 - Investment capacities are parameters in InternalEMPIRE and fixed JuMP
   variables here. With the Julia investment-only constraint gate, these are
