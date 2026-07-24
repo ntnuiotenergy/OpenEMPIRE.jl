@@ -1477,6 +1477,38 @@ fail-closed instruction prohibits automatic resubmission:
   on `all.q@compute-4-55.local` with 96 GB `h_vmem` and a four-hour limit.
   Monitoring is intentionally paused to conserve the user's remaining usage.
 
+## Controlled trees 2–24 completion, job 6430
+
+- Job `6430` completed on 2026-07-23 at `15:03:34+02:00`. The controller log
+  ends with `CONTROLLER_ACCEPT tree=oos_tree24 index=24` followed by
+  `CONTROLLER_COMPLETE accepted_trees=24`; every tree passed the fail-closed
+  per-tree acceptance validation, and no tree was skipped or resubmitted.
+- SGE accounting reports `failed=0`, `exit_status=0`, wall time 8,060 seconds
+  (about 2.2 hours of the four-hour limit), and `maxvmem=12.478GB` of the
+  96 GB request.
+- A read-only verification sweep on 2026-07-24 confirmed all 23 run manifests
+  under the controller stage report `status: complete`,
+  `termination_status: OPTIMAL`, and `investments_fixed: true`. Combined with
+  accepted tree-one job `6426`, all 24 trees of the InternalEMPIRE-equivalent
+  24 x 365-hour formulation are complete. The 23-tree result set is 6.3 GB.
+- Controller-logged per-tree diagnostics split into two regimes. Sixteen trees
+  report numerically zero expected annual ENS (about 0.0006 to 0.014 MWh).
+  Eight trees report material shortages: tree 1 (305,143 MWh, from job 6426),
+  tree 10 (372,200 MWh), tree 15 (5.75e7 MWh), tree 19 (1.92e8 MWh), tree 20
+  (4.28e7 MWh), tree 21 (530,851 MWh), tree 23 (229,826 MWh), and tree 24
+  (1.81e6 MWh). The objective outliers correspond exactly to the ENS outliers
+  (for example tree 19 at `1.2700770575356473e13` EUR versus the typical
+  `2.6e12`-`3.1e12` EUR), consistent with load-shedding cost dominating. Each
+  value annualizes one 365-hour slice by the winter scale, so these are
+  per-slice diagnostics, not the aggregated chronological year.
+- At verification time, `qstat` also showed unrelated user jobs `6431` and
+  `6432` (`run_empire`, compute-6-24/25) that are not part of this OOS work
+  and were left untouched.
+- All 24 result directories (tree 1 from the job-6426 stage, trees 2–24 from
+  the controller stage) were copied read-only to the local evidence root
+  `results/julia_oos_runs/full_year_2015_internal_24x365_b0bbb80/` for
+  validated aggregation. Remote stages remain preserved and unmodified.
+
 ## Solstorm capacity and resource preflight on 2026-07-22
 
 - The user approved a read-only Solstorm connection. At
