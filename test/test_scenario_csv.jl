@@ -1669,6 +1669,33 @@ function test_emission_constraints_match_python_formulation()
     @test JuMP.normalized_rhs(emission_cap_1) ≈ 1000.0
 end
 
+function test_objective_matches_component_sum()
+    sets = OpenEMPIRE.EmpireSets(
+        Generator = ["gas"],
+        Storage = ["Battery"],
+        DependentStorage = ["Battery"],
+        Node = ["A", "B"],
+        GeneratorsOfNode = [("A", "gas")],
+        StoragesOfNode = [("A", "Battery")],
+        DirectionalLink = [("A", "B")],
+    )
+    periods = OpenEMPIRE.create_timestruct(1, 5, 1, 2, 0, 0, 1)
+    discounter = Discounter(0.05, 1, periods)
+    params = OpenEMPIRE.EmpireParams()
+
+    emp = JuMP.Model()
+    OpenEMPIRE.create_variables(emp, sets, periods)
+    objective = OpenEMPIRE.create_objective(emp, sets, params, periods, discounter)
+
+    components = OpenEMPIRE.objective_component_expressions(emp, sets, params, periods, discounter)
+
+    # Regression guard: the objective must be exactly the sum of the reported
+    # components, so a future edit can't add a cost term to one without the
+    # other and silently reintroduce the duplication this refactor removed.
+    @test JuMP.isequal_canonical(objective, sum(values(components)))
+    @test JuMP.isequal_canonical(JuMP.objective_function(emp), sum(values(components)))
+end
+
 function test_native_dual_weight_normalization()
     periods = OpenEMPIRE.create_timestruct(2, 5, 1, 2, 0, 0, 2)
     sp = collect(strat_periods(periods))[2]
