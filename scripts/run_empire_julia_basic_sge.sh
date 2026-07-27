@@ -4,7 +4,7 @@
 #$ -V
 #$ -o logs/julia_empire_$JOB_ID.out
 #$ -e logs/julia_empire_$JOB_ID.err
-#$ -l hostname="compute-4-51|compute-4-52|compute-4-53|compute-4-55|compute-4-56"
+#$ -l hostname="compute-6-24|compute-6-25|compute-6-26|compute-6-27|compute-6-28|compute-6-29|compute-6-30|compute-6-31|compute-6-32|compute-6-33|compute-6-34|compute-6-35|compute-6-36|compute-6-37|compute-6-38|compute-6-39|compute-6-40|compute-6-41|compute-6-42|compute-6-43|compute-6-44|compute-6-45|compute-6-46|compute-6-47|compute-6-48|compute-6-49"
 
 # Basic SGE script for running OpenEMPIRE.jl on Solstorm.
 #
@@ -25,7 +25,7 @@
 #   JULIA_FIXED_SAMPLE  true/false, default: false. If true, pass
 #                       --fixed-sample and require ScenarioData/sampling_key.csv.
 #   JULIA_SGE_HOSTS Host expression for SGE, default:
-#                   compute-4-51|compute-4-52|compute-4-53|compute-4-55|compute-4-56
+#                   compute-6-24|compute-6-25|compute-6-26|compute-6-27|compute-6-28|compute-6-29|compute-6-30|compute-6-31|compute-6-32|compute-6-33|compute-6-34|compute-6-35|compute-6-36|compute-6-37|compute-6-38|compute-6-39|compute-6-40|compute-6-41|compute-6-42|compute-6-43|compute-6-44|compute-6-45|compute-6-46|compute-6-47|compute-6-48|compute-6-49
 
 DATASET=${1:-test}
 CONFIG_FILE=${2:-config/testrun.yaml}
@@ -35,7 +35,7 @@ JULIA_SOLVER=${JULIA_SOLVER:-HiGHS}
 JULIA_SEED=${JULIA_SEED:-1}
 JULIA_OPTIMIZE=${JULIA_OPTIMIZE:-true}
 JULIA_FIXED_SAMPLE=${JULIA_FIXED_SAMPLE:-false}
-JULIA_SGE_HOSTS=${JULIA_SGE_HOSTS:-compute-4-51|compute-4-52|compute-4-53|compute-4-55|compute-4-56}
+JULIA_SGE_HOSTS=${JULIA_SGE_HOSTS:-compute-6-24|compute-6-25|compute-6-26|compute-6-27|compute-6-28|compute-6-29|compute-6-30|compute-6-31|compute-6-32|compute-6-33|compute-6-34|compute-6-35|compute-6-36|compute-6-37|compute-6-38|compute-6-39|compute-6-40|compute-6-41|compute-6-42|compute-6-43|compute-6-44|compute-6-45|compute-6-46|compute-6-47|compute-6-48|compute-6-49}
 
 function split_sge_hosts() {
 	local host_expr="$1"
