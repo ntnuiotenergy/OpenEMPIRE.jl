@@ -1706,12 +1706,63 @@ fail-closed instruction prohibits automatic resubmission:
   all-tree Python scenario-table parity, and the actual Julia runner/result
   validator now pass; controlled 24-tree Solstorm evidence remains pending.
 
+## Infrastructure PR chain that must merge before the OOS PRs
+
+The OOS work sits on `torgrim/workbench`, which is an integration branch over a
+partially stacked set of `torgrim/...` branches. Verified ancestry
+(`git merge-base --is-ancestor`) gives this dependency order:
+
+1. `torgrim/scenario-csv-generation` (PR #10 open) — everything blocks on it.
+   Note for reviewers: this branch is not cosmetic. It contains the objective
+   correctness fix `arcs(sets)` -> `bidir_arcs(sets)` for transmission
+   investment cost (commit `be31c55`), which previously double-counted each
+   corridor, plus native CSV scenario generation.
+2. `torgrim/performance-analysis`.
+3. `torgrim/north-sea`, `torgrim/scheduler-cleanup`, `torgrim/run-manifest`
+   (siblings, any order). `north-sea` adds the `wind_farm_transmission_cap`
+   constraint family, so it is also a model change, not tooling.
+4. `torgrim/stage-run-inputs` (after `run-manifest`).
+5. `torgrim/runner-config-cleanup` (after `stage-run-inputs`) — introduces
+   `JuliaRunSpec`, which the OOS runner mode depends on.
+6. `torgrim/compare-runner` (after `runner-config-cleanup`).
+7. HPC launch profiles (see the dependency note below).
+
+### Workbench-only commits and their two-branch dependency
+
+Three commits exist on `torgrim/workbench` and in no other `torgrim/...`
+branch: `9c81ad3` (add run profile HPC launcher), `bd12b6c` (rename run
+profiles to launch profiles), and `5942845` (harden HPC comparison launches).
+Commit `28db760` (target compute-6 hosts for Julia SGE runs) was added on top
+of them and belongs with the same set. `config/launch_profiles/*.yaml` exists
+only on `torgrim/workbench`.
+
+These four commits cannot be ported onto `torgrim/compare-runner` alone. A
+cherry-pick of `9c81ad3` onto `compare-runner` was attempted in an isolated
+worktree and conflicted in `scripts/copy_and_run_julia_on_hpc.sh`; the
+cherry-pick was aborted and `compare-runner` remains unmodified at `4b0fef9`.
+The cause is a symbol-level dependency on two sibling branches at once:
+
+- `5942845` patches `scripts/run_python_julia_comparison.sh`, which exists
+  only on `torgrim/compare-runner`;
+- `9c81ad3` and `28db760` require `JULIA_SGE_HOSTS`, which was verified to
+  exist only on `torgrim/scheduler-cleanup`.
+
+Neither branch alone provides both, so forcing the resolution would produce a
+launcher script referencing an undefined variable. These commits are therefore
+genuinely integration-level and must become the final infrastructure PR, cut
+from `main` only after both `compare-runner` and `scheduler-cleanup` have
+merged. Splitting them across the two sibling branches is possible but would
+create artificial half-commits and a non-functional launcher on each branch;
+it is not recommended.
+
 ## Employee-review PR sequence
 
 Keep `torgrim/oos-workbench-continuation` as the evidence/integration branch.
 Do not open stacked review PRs. After each PR merges, create the next
 `torgrim/...` branch from the newly updated `torgrim/workbench` and manually
 port only that PR's tested functionality; exclude status-journal commits.
+The infrastructure chain above must merge first; in particular PR 2 below
+depends on `JuliaRunSpec` from `torgrim/runner-config-cleanup`.
 
 1. **Core fixed-investment OOS.** Curate `7d41fb7` plus the `9c54646` gating
    fix: fixed-capacity readers/application, `include_investment_constraints`,
