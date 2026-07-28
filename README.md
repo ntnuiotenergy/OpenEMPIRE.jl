@@ -119,6 +119,32 @@ The output is **not** only `sampling_key.csv`: the key records which weather
 files are the derived stochastic inputs the model actually consumes. Both the
 key and the derived files are written deterministically from `(raw inputs, key)`.
 
+### Generating out-of-sample scenario trees
+
+Use `scripts/create_out_of_sample_tree.jl` to generate one or more scenario trees
+without building or solving a model:
+
+```bash
+julia --project=. scripts/create_out_of_sample_tree.jl test \
+  --config=config/testrun.yaml \
+  --num-trees=3 \
+  --seed=1
+```
+
+This writes generated OOS scenario inputs under:
+
+```text
+OutOfSample/<dataset>/oos_tree1/ScenarioData/
+OutOfSample/<dataset>/oos_tree2/ScenarioData/
+OutOfSample/<dataset>/oos_tree3/ScenarioData/
+```
+
+Each tree folder also gets a `metadata.yaml` file with the dataset, seed, config,
+and scenario settings used to generate it. Internally, the script reuses
+`OpenEMPIRE.generate_scenarios`, so the generated files are first written to
+`data/<dataset>/ScenarioData` and then copied into the corresponding
+`OutOfSample/<dataset>/oos_treeN/ScenarioData` folder.
+
 ### Comparable multi-seed Julia/Python parity runs
 
 Scenario draws are **not** cross-language reproducible (Julia's RNG differs from
