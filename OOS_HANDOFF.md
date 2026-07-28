@@ -118,37 +118,55 @@ real aggregation identities.
 - Do not push, open PRs, merge, rebase, reset, delete, or rewrite branches
   without explicit user approval.
 
-## Future heat and hydrogen work
+## Governing roadmap after OOS
 
-Neither module has been implemented in this Julia OOS branch. The detailed
-workspace plans are analysis documents written before OOS completion, so their
-OOS status sections are historical; use this handoff for current OOS facts.
+The workspace [`plan.md`](../plan.md) governs future functionality work. Do not
+use the older heat/hydrogen analysis documents to choose the next module. The
+current dependency-ordered roadmap is:
 
-- [Heat module and earlier OOS review](../oos_review_and_heatmodule_port_plan.md):
-  proposed config-and-data-gated heat sets, parameters, thermal flow balance,
-  converters, heat storage, results, OOS converter capacity fixing, branch
-  slicing, and validation. The reference heat path has unresolved defects and
-  missing data sources, so verify author decisions before treating every
-  Python behavior as binding.
-- [Hydrogen module port plan](../hydrogen_module_port_plan.md): hydrogen does
-  not technically depend on heat. The recommended first increment is green
-  hydrogen plus imports, pipelines, storage, transport demand, H2-fired
-  generation, and the CO2 network. Natural gas, reformers, and pipeline
-  repurposing are a separate Phase B required for full-case objective parity.
+1. **Check the InternalEMPIRE build matrix.** Build the 16 combinations of
+   North Sea, Industry, Hydrogen, and Flex-IND. Flex-IND depends on Industry;
+   verify that `industry=false, flexind=true` produces the expected error
+   rather than treating that combination as a successful build.
+2. **Port scenario-generation techniques piecewise.** First identify the
+   boundaries and ownership of `filter_make`, `filter_use`,
+   `copula_clusters_make`, `copula_clusters_use`, `copulas_to_use`,
+   `n_cluster`, `moment_matching`, and `n_tree_compare`. Port and verify one
+   coherent method at a time, beginning with filtering and then copulas.
+   Compare Julia and Python `filter_result.csv` and `copula_clusters.csv`
+   outputs for identical inputs.
+3. **Inventory OpenEMPIRE/InternalEMPIRE model differences and modularize
+   natural gas.** Compare sets, parameters, and variables. Add a Julia
+   `natural_gas`-style gate for the InternalEMPIRE gas functionality currently
+   identified by `# GD` comments rather than a dedicated module switch.
+4. **Port Industry.**
+5. **Port Hydrogen.** Industry is expected to be somewhat smaller, but steps 4
+   and 5 may be reordered if dependencies or reviewer availability justify it.
+6. **Run the Julia build/comparison matrix.** After gas, Industry, and Hydrogen
+   are present, check the 16 combinations using gas in place of Flex-IND.
+   Compare corresponding Python and Julia runs, especially single-module
+   configurations, with the same sample key.
 
-Both modules touch the electric flow balance; land one before starting the
-other. Hydrogen-first is technically defensible because its reference path is
-actively exercised, although the original organizational plan listed heat
-first. Whichever module lands second needs a combined heat–hydrogen test.
+These are requested future tasks, not claims that the relevant Julia or Python
+paths have already been validated. Each step needs a bounded implementation
+and verification plan before code changes begin.
 
-Each module must extend OOS as part of its own reviewable increment:
+**HeatModule is explicitly deferred and must not be ported as part of this
+roadmap.** The [older heat/OOS
+review](../oos_review_and_heatmodule_port_plan.md) is retained only as
+historical analysis; it is not an active implementation plan. The
+[hydrogen detail document](../hydrogen_module_port_plan.md) may be consulted
+when roadmap step 5 begins, but `plan.md` controls scope and priority.
 
-1. export every new strategic investment and installed-capacity table;
-2. validate provenance and compatibility;
-3. fix those variables and omit their investment-only constraints in OOS;
-4. add deterministic investment-to-OOS round-trip tests;
-5. add relevant operational outputs to aggregation without weakening the
-   existing 24 × 365 contract.
+When a future module introduces strategic decisions, extend OOS in the same
+reviewable increment:
+
+1. export its new investment and installed-capacity tables;
+2. validate their provenance and structural compatibility;
+3. fix them in OOS and omit the corresponding investment-only constraints;
+4. add deterministic investment-to-OOS round-trip tests; and
+5. aggregate relevant operational outputs without weakening the accepted
+   24 × 365 full-year contract.
 
 ## What a new agent should do
 
@@ -162,6 +180,8 @@ Each module must extend OOS as part of its own reviewable increment:
    topic instead of reading all of it.
 5. The next OOS action is PR coordination. Check which infrastructure PRs have
    merged, then prepare only the first curated OOS scope when authorized.
+6. For new functionality beyond OOS, follow `plan.md` in the order summarized
+   above. Do not begin HeatModule unless the user explicitly changes the plan.
 
 Suggested resume prompt:
 
@@ -169,4 +189,6 @@ Suggested resume prompt:
 > and Git status. Do not rerun completed OOS jobs or aggregation. Use
 > `OOS_IMPLEMENTATION_STATUS.md` only for specific historical evidence. Report
 > whether the infrastructure prerequisites permit preparing the first compact
-> OOS PR; do not push or open a PR without approval.
+> OOS PR; do not push or open a PR without approval. If the task concerns
+> post-OOS functionality, follow the roadmap copied from `plan.md`; HeatModule
+> is deferred.
