@@ -34,13 +34,3 @@ solver_method: 2                                       # 2 = barrier (interior p
 solver_crossover: 0                                    # 0 = skip crossover; matches Python EMPIRE's large-run default
 solver_presolve: 2                                     # 2 = aggressive presolve
 # solver_threads: 8                                    # Set to physical core count on the machine if needed
-
-# Deterministic operational parity. The economic LP is solved first; investments are
-# then fixed and a strictly convex operational tie-break selects one solution.
-deterministic_operational_tiebreak: true
-deterministic_tiebreak_cost_absolute_tolerance: 1.0
-deterministic_tiebreak_cost_relative_tolerance: 1.0e-10
-deterministic_tiebreak_marginal_weight: 1.0
-deterministic_tiebreak_power_scale_mw: 1.0e6
-deterministic_tiebreak_energy_scale_mwh: 1.0e7
-deterministic_tiebreak_investment_round_digits: 6

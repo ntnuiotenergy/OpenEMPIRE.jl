@@ -197,7 +197,6 @@ function main(args = ARGS)
     end
     run_config = YAML.load_file(config_file)
     optimizer_attributes = _optimizer_attributes(solver_name, run_config, options)
-    deterministic_tiebreak = _config_bool(run_config, "deterministic_operational_tiebreak", false)
 
     println("================================================")
     println("OpenEMPIRE.jl run")
@@ -212,7 +211,6 @@ function main(args = ARGS)
     println("Fixed sample: $fixed_sample_option")
     println("Generate only: $generate_only")
     println("Optimize:     $optimize_model")
-    println("Tie-break:    $deterministic_tiebreak")
     println("Result dir:   $result_dir")
     println("Start time:   $(now())")
     println("================================================")
@@ -314,7 +312,6 @@ function main(args = ARGS)
     termination = nothing
     objective = nothing
     objective_components = nothing
-    tiebreak_diagnostics = nothing
     solve_seconds = 0.0
     if optimize_model
         solve_start = time()
@@ -332,37 +329,12 @@ function main(args = ARGS)
             periods,
             Discounter(OpenEMPIRE.discount_rate(params), 1, periods),
         )
-        if deterministic_tiebreak && JuMP.is_solved_and_feasible(emp)
-            progress("Starting deterministic fixed-investment operational tie-break")
-            tiebreak_diagnostics = OpenEMPIRE.deterministic_operational_tiebreak!(
-                emp,
-                sets,
-                params,
-                periods,
-                Discounter(OpenEMPIRE.discount_rate(params), 1, periods);
-                cost_absolute_tolerance = Float64(get(run_config, "deterministic_tiebreak_cost_absolute_tolerance", 1.0)),
-                cost_relative_tolerance = Float64(get(run_config, "deterministic_tiebreak_cost_relative_tolerance", 1.0e-10)),
-                marginal_weight = Float64(get(run_config, "deterministic_tiebreak_marginal_weight", 1.0)),
-                power_scale = Float64(get(run_config, "deterministic_tiebreak_power_scale_mw", 1.0e6)),
-                energy_scale = Float64(get(run_config, "deterministic_tiebreak_energy_scale_mwh", 1.0e7)),
-                investment_round_digits = Int(get(run_config, "deterministic_tiebreak_investment_round_digits", 6)),
-            )
-            termination = JuMP.termination_status(emp)
-            solve_seconds = time() - solve_start
-            progress("Deterministic operational tie-break finished")
-        end
         println("Solve seconds: $(round(solve_seconds; digits = 2))")
         println("Termination status: $termination")
         println("Objective value: $objective")
         println("Objective components:")
         for (name, value) in pairs(objective_components)
             println("  $name: $value")
-        end
-        if tiebreak_diagnostics !== nothing
-            println("Deterministic tie-break diagnostics:")
-            for (name, value) in pairs(tiebreak_diagnostics)
-                println("  $name: $value")
-            end
         end
         flush(stdout)
         if JuMP.is_solved_and_feasible(emp)
@@ -388,15 +360,6 @@ function main(args = ARGS)
     else
         ["objective_component_$name=$value" for (name, value) in pairs(objective_components)]
     end
-    tiebreak_lines = if tiebreak_diagnostics === nothing
-        ["deterministic_operational_tiebreak=$deterministic_tiebreak"]
-    else
-        vcat(
-            ["deterministic_operational_tiebreak=true"],
-            ["deterministic_tiebreak_$name=$value" for (name, value) in pairs(tiebreak_diagnostics)],
-        )
-    end
-
     progress("Writing run summary")
     summary_path = _write_summary(
         joinpath(result_dir, "summary.txt"),
@@ -420,7 +383,7 @@ function main(args = ARGS)
             "termination_status=$(termination === nothing ? "not_optimized" : string(termination))",
             "objective_value=$(objective === nothing ? "not_optimized" : string(objective))",
             "end_time=$(now())",
-        ], component_lines, tiebreak_lines),
+        ], component_lines),
     )
     println("Summary written to: $summary_path")
     println("End time: $(now())")

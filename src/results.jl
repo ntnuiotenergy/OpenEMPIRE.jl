@@ -128,9 +128,6 @@ function _value_or_zero(container, args...)
 end
 
 function _objective_value_or_nan(emp::JuMP.Model)
-    if haskey(emp.ext, :reported_objective_value)
-        return Float64(emp.ext[:reported_objective_value])
-    end
     try
         return Float64(JuMP.objective_value(emp))
     catch
