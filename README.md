@@ -92,6 +92,50 @@ The Julia version can generate stochastic scenario CSV files directly from raw
 `sampling_key.csv`; otherwise it writes a new key alongside the generated
 scenario CSVs.
 
+### Generating scenarios without building the model
+
+Scenario generation is independent of model construction. To produce the
+scenario CSVs (and a fresh `sampling_key.csv`) for a dataset and then exit before
+any JuMP model is built, pass `--generate-only`:
+
+```bash
+julia --project=. scripts/run_julia_empire.jl \
+  --dataset=test \
+  --config=config/testrun.yaml \
+  --format=csv \
+  --seed=1 \
+  --generate-only
+```
+
+This runs only build stages 1–6 (config, time structure, dataset, scenario
+sampling), writes the four files above into `data/<dataset>/ScenarioData`, and
+archives the sampling key plus run metadata under
+`results/julia_runs/<timestamp>_<dataset>/Input/`. The same step is available as a
+library call, `OpenEMPIRE.generate_scenarios(config_file, data_folder; seed=...)`,
+which returns `(periods, sets, params)` without constructing a model.
+
+The output is **not** only `sampling_key.csv`: the key records which weather
+`(Year, Hour)` each `(Period, Scenario, Season)` drew, while the three `*Raw.csv`
+files are the derived stochastic inputs the model actually consumes. Both the
+key and the derived files are written deterministically from `(raw inputs, key)`.
+
+### Comparable multi-seed Julia/Python parity runs
+
+Scenario draws are **not** cross-language reproducible (Julia's RNG differs from
+Python's `numpy`), so a shared `sampling_key.csv` is the unit of comparison. To
+run both implementations on identical scenarios:
+
+1. Generate a key once with one implementation, e.g. Julia
+   `--generate-only --seed=<n>` (or Python `scripts/generate_scenarios.py`).
+2. Copy the resulting `sampling_key.csv` into both repos' dataset
+   `ScenarioData/` folders (verify with `md5`).
+3. Run both with fixed sampling (`use_fixed_sample: true`, Julia
+   `--fixed-sample`); each re-derives byte-identical `*Raw.csv` from the shared
+   key.
+
+Repeat with different seeds to build confidence that the two implementations stay
+equivalent beyond a single sampled tree.
+
 ## Running on Solstorm
 
 The repository includes a small Julia runner and a Solstorm SGE wrapper for a

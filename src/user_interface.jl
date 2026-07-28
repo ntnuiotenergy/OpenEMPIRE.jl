@@ -17,17 +17,22 @@ function _config_bool(config, key::AbstractString, default::Bool)
     return Bool(value)
 end
 
-function create_model(
+"""
+    _prepare_model_inputs(config_file, data_folder; input_format, scenario_rng, progress)
+
+Run the data-preparation stages shared by `create_model` and `generate_scenarios`
+(Build 1-6): read the config, build the time structure, load the dataset, and read
+or generate the stochastic scenario data. No JuMP model is constructed here.
+
+Returns `(config, periods, sets, params)`.
+"""
+function _prepare_model_inputs(
     config_file,
     data_folder;
-    optimizer = nothing,
-    optimizer_attributes = (),
-    include_string_names = true,
     input_format = :auto,
     scenario_rng = Random.default_rng(),
     progress = nothing,
 )
-
     _report_progress(progress, "Build 1/12: reading configuration from $config_file")
     config = YAML.load_file(config_file)
 
@@ -96,6 +101,59 @@ function create_model(
         rng = scenario_rng,
     )
     _report_progress(progress, "Build 6/12: stochastic scenario data ready")
+
+    return config, periods, sets, params
+end
+
+"""
+    generate_scenarios(config_file, data_folder; input_format, scenario_rng, progress)
+
+Generate (or load) the stochastic scenario data for `data_folder` **without
+building the JuMP model**, then return `(periods, sets, params)`.
+
+This runs the same input-preparation path as [`create_model`] up to and
+including the scenario step, so its side effects are identical: when
+`use_scenario_generation` is true the raw `ScenarioData/*.csv` files are sampled
+and the generated `sloadRaw.csv`, `maxRegHydroGenRaw.csv`,
+`genCapAvailStochRaw.csv` (and, unless `use_fixed_sample` is true, a fresh
+`sampling_key.csv`) are written into `<data_folder>/ScenarioData`. Use it to
+prepare comparable scenario inputs for multi-seed parity runs before paying the
+cost of model construction and optimization.
+"""
+function generate_scenarios(
+    config_file,
+    data_folder;
+    input_format = :auto,
+    scenario_rng = Random.default_rng(),
+    progress = nothing,
+)
+    _, periods, sets, params = _prepare_model_inputs(
+        config_file,
+        data_folder;
+        input_format,
+        scenario_rng,
+        progress,
+    )
+    return periods, sets, params
+end
+
+function create_model(
+    config_file,
+    data_folder;
+    optimizer = nothing,
+    optimizer_attributes = (),
+    include_string_names = true,
+    input_format = :auto,
+    scenario_rng = Random.default_rng(),
+    progress = nothing,
+)
+    config, periods, sets, params = _prepare_model_inputs(
+        config_file,
+        data_folder;
+        input_format,
+        scenario_rng,
+        progress,
+    )
 
     # Financial parameters
     params.WACC = config["wacc"]

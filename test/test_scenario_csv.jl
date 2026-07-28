@@ -547,6 +547,35 @@ function test_create_model_with_raw_csv_scenarios()
     end
 end
 
+function test_generate_scenarios_without_model()
+    mktempdir() do root
+        dataset = joinpath(root, "test")
+        cp(joinpath(pkgdir(OpenEMPIRE), "data", "test"), dataset)
+        # Remove the shipped generated CSVs so the assertions prove this call writes them.
+        scenario_dir = joinpath(dataset, "ScenarioData")
+        for f in ("sloadRaw.csv", "maxRegHydroGenRaw.csv", "genCapAvailStochRaw.csv", "sampling_key.csv")
+            rm(joinpath(scenario_dir, f); force = true)
+        end
+
+        periods, sets, params = OpenEMPIRE.generate_scenarios(
+            joinpath(pkgdir(OpenEMPIRE), "data", "test_excel", "testrun.yaml"),
+            dataset;
+            input_format = :csv,
+            scenario_rng = MersenneTwister(1),
+        )
+
+        # No JuMP model is built, but the scenario CSVs (and a fresh sampling key,
+        # since the test config is not fixed-sample) are written to disk and the
+        # stochastic profiles are populated in params.
+        @test isfile(joinpath(scenario_dir, "sloadRaw.csv"))
+        @test isfile(joinpath(scenario_dir, "maxRegHydroGenRaw.csv"))
+        @test isfile(joinpath(scenario_dir, "genCapAvailStochRaw.csv"))
+        @test isfile(joinpath(scenario_dir, "sampling_key.csv"))
+        @test length(params.sloadRaw) == 3
+        @test haskey(params.genCapAvail, ("Germany", "Solar"))
+    end
+end
+
 function test_write_scenario_sampling_key_artifacts()
     mktempdir() do root
         dataset = joinpath(root, "dataset")
