@@ -1,14 +1,19 @@
-# OOS implementation status and handoff
+# OOS implementation evidence journal
+
+> New sessions should start with [`OOS_HANDOFF.md`](OOS_HANDOFF.md). This large
+> file preserves detailed historical commands, failures, hashes, runtime
+> evidence, and decisions. Read only the sections needed for the current task.
 
 Last updated: 2026-07-28
 
-This is the living handoff document for out-of-sample (OOS) work in the Julia
-version of EMPIRE. Update it whenever OOS behavior, workflow, concrete
-experiment state, important risks, or the recommended next task changes.
+This is the detailed evidence journal for out-of-sample (OOS) work in the Julia
+version of EMPIRE. Keep it for auditability; maintain the compact current state
+in `OOS_HANDOFF.md`.
 
 ## Start here in a new agent session
 
-1. Read this file and the OOS section of `README.md`.
+1. Read `OOS_HANDOFF.md` and the OOS section of `README.md`. Open this journal
+   only for specific historical evidence.
 2. Work on `torgrim/oos-workbench-continuation`. As of 2026-07-28 it is
    checked out in the clean worktree
    `OpenEMPIRE.jl-oos-workbench-continuation`. The
