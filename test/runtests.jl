@@ -35,6 +35,8 @@ end
     test_read_raw_csv_scenarios()
     test_fixed_sample_raw_csv_scenarios()
     test_configurable_regular_scenario_seasons()
+    test_scenario_filter_metrics_and_clustering()
+    test_scenario_filter_make_and_use()
     test_python_fixed_sample_scenario_parity()
     test_create_model_with_raw_csv_scenarios()
     test_generate_scenarios_without_model()

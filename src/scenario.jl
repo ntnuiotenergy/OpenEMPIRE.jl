@@ -86,6 +86,14 @@ const SamplingKeyRow = NamedTuple{
     (:Period, :Scenario, :Season, :Year, :Month, :Hour),
     Tuple{Int, Int, String, Int, Int, Int},
 }
+const FilterMetricRow = NamedTuple{
+    (:Year, :Season, :SampleIndex, :Value, :Value2),
+    Tuple{Int, String, Int, Float64, Float64},
+}
+const FilterResultRow = NamedTuple{
+    (:Year, :Season, :SampleIndex, :Value, :Value2, :ClusterGroup),
+    Tuple{Int, String, Int, Float64, Float64, Int},
+}
 
 function _generated_scenario_csv_files(data_folder::AbstractString)
     return (
@@ -297,6 +305,307 @@ function _sample_years(tables::RawScenarioTable...)
     end
     isempty(common_years) && throw(ArgumentError("Raw scenario CSV files have no common sample years"))
     return sort!(collect(common_years))
+end
+
+function _total_scenario_values(table::RawScenarioTable)
+    totals = zeros(Float64, length(table.timestamps))
+    for column in table.columns
+        values = table.values[column]
+        length(values) == length(totals) || throw(DimensionMismatch(
+            "Raw scenario column $column has $(length(values)) values; expected $(length(totals))",
+        ))
+        @inbounds for index in eachindex(totals)
+            totals[index] += values[index]
+        end
+    end
+    all(isfinite, totals) || throw(ArgumentError(
+        "Electric-load data contains non-finite total values",
+    ))
+    return totals
+end
+
+function _wasserstein_distance_sorted(
+    reference::AbstractVector{<:Real},
+    sample::AbstractVector{<:Real},
+)
+    isempty(reference) && throw(ArgumentError("Wasserstein reference must not be empty"))
+    isempty(sample) && throw(ArgumentError("Wasserstein sample must not be empty"))
+
+    reference_index = 1
+    sample_index = 1
+    reference_cdf = 0.0
+    sample_cdf = 0.0
+    previous = min(Float64(first(reference)), Float64(first(sample)))
+    distance = 0.0
+
+    while reference_index <= length(reference) || sample_index <= length(sample)
+        reference_value = reference_index <= length(reference) ?
+                          Float64(reference[reference_index]) : Inf
+        sample_value = sample_index <= length(sample) ?
+                       Float64(sample[sample_index]) : Inf
+        value = min(reference_value, sample_value)
+        distance += abs(reference_cdf - sample_cdf) * (value - previous)
+
+        while reference_index <= length(reference) &&
+              Float64(reference[reference_index]) == value
+            reference_index += 1
+        end
+        while sample_index <= length(sample) &&
+              Float64(sample[sample_index]) == value
+            sample_index += 1
+        end
+
+        reference_cdf = (reference_index - 1) / length(reference)
+        sample_cdf = (sample_index - 1) / length(sample)
+        previous = value
+    end
+
+    return distance
+end
+
+function _wasserstein_distance_1d(
+    reference::AbstractVector{<:Real},
+    sample::AbstractVector{<:Real},
+)
+    all(isfinite, reference) || throw(ArgumentError(
+        "Wasserstein reference contains non-finite values",
+    ))
+    all(isfinite, sample) || throw(ArgumentError(
+        "Wasserstein sample contains non-finite values",
+    ))
+    return _wasserstein_distance_sorted(sort!(Float64.(reference)), sort!(Float64.(sample)))
+end
+
+function _filter_metric_rows(
+    table::RawScenarioTable,
+    seasons,
+    regular_hours::Int,
+)
+    regular_hours > 0 || throw(ArgumentError(
+        "length_of_regular_season must be positive when making a scenario filter",
+    ))
+
+    totals = _total_scenario_values(table)
+    years = sort!(unique(table.years))
+    rows = FilterMetricRow[]
+    sample_values = Vector{Float64}(undef, regular_hours)
+
+    for season in seasons
+        months = _season_months(season)
+        season_indices = [
+            index for index in eachindex(table.months)
+            if table.months[index] in months
+        ]
+        isempty(season_indices) && throw(ArgumentError(
+            "No electric-load rows are available for filter season $season",
+        ))
+        reference = sort!(totals[season_indices])
+
+        season_start = length(rows) + 1
+        for year in years
+            year_indices = _season_indices(table, year, season)
+            candidate_count = length(year_indices) - regular_hours - 1
+            candidate_count <= 0 && continue
+
+            for sample_hour in 0:(candidate_count - 1)
+                window_sum = 0.0
+                @inbounds for offset in 1:regular_hours
+                    value = totals[year_indices[sample_hour + offset]]
+                    sample_values[offset] = value
+                    window_sum += value
+                end
+                mean_value = window_sum / regular_hours
+                sort!(sample_values)
+                wasserstein = _wasserstein_distance_sorted(reference, sample_values)
+                isfinite(wasserstein) && isfinite(mean_value) || throw(ArgumentError(
+                    "Filter metric is non-finite for $season $year at hour $sample_hour",
+                ))
+                push!(rows, (
+                    Year = year,
+                    Season = String(season),
+                    SampleIndex = sample_hour,
+                    Value = wasserstein,
+                    Value2 = mean_value,
+                ))
+            end
+        end
+        length(rows) >= season_start || throw(ArgumentError(
+            "No complete filter windows are available for season $season with " *
+            "length_of_regular_season=$regular_hours",
+        ))
+    end
+
+    return rows
+end
+
+function _cluster_filter_rows(
+    metrics::Vector{FilterMetricRow},
+    seasons,
+    n_cluster::Int,
+    rng;
+    n_init::Int = 100,
+)
+    n_cluster > 0 || throw(ArgumentError("n_cluster must be positive"))
+    n_init > 0 || throw(ArgumentError("K-means initialization count must be positive"))
+    rows = FilterResultRow[]
+
+    for season in seasons
+        season_metrics = [row for row in metrics if row.Season == season]
+        length(season_metrics) >= n_cluster || throw(ArgumentError(
+            "n_cluster=$n_cluster exceeds the $(length(season_metrics)) filter candidates " *
+            "for season $season",
+        ))
+
+        features = Matrix{Float64}(undef, 2, length(season_metrics))
+        for (index, row) in enumerate(season_metrics)
+            features[1, index] = row.Value
+            features[2, index] = row.Value2
+        end
+
+        best_result = nothing
+        best_cost = Inf
+        for _ in 1:n_init
+            result = Clustering.kmeans(
+                features,
+                n_cluster;
+                init = :kmpp,
+                maxiter = 300,
+                rng,
+            )
+            if isfinite(result.totalcost) && result.totalcost < best_cost
+                best_result = result
+                best_cost = result.totalcost
+            end
+        end
+        best_result === nothing && throw(ArgumentError(
+            "K-means did not produce a finite result for season $season",
+        ))
+        all(>(0), best_result.counts) || throw(ArgumentError(
+            "K-means produced an empty cluster for season $season",
+        ))
+
+        center_order = sortperm(
+            1:n_cluster;
+            by = cluster -> (
+                best_result.centers[1, cluster],
+                best_result.centers[2, cluster],
+                cluster,
+            ),
+        )
+        canonical_group = Vector{Int}(undef, n_cluster)
+        for (group, cluster) in enumerate(center_order)
+            canonical_group[cluster] = group - 1
+        end
+
+        for (index, row) in enumerate(season_metrics)
+            push!(rows, (
+                Year = row.Year,
+                Season = row.Season,
+                SampleIndex = row.SampleIndex,
+                Value = row.Value,
+                Value2 = row.Value2,
+                ClusterGroup = canonical_group[best_result.assignments[index]],
+            ))
+        end
+    end
+
+    return rows
+end
+
+function _make_filter_result!(
+    scenario_dir::AbstractString,
+    load_table::RawScenarioTable,
+    seasons,
+    regular_hours::Int,
+    n_cluster::Int,
+    rng,
+)
+    metrics = _filter_metric_rows(load_table, seasons, regular_hours)
+    rows = _cluster_filter_rows(metrics, seasons, n_cluster, rng)
+    CSV.write(joinpath(scenario_dir, "filter_result.csv"), rows)
+    return rows
+end
+
+function _filter_candidate_groups(
+    scenario_dir::AbstractString,
+    seasons,
+    n_cluster::Int,
+    load_table::RawScenarioTable,
+    regular_hours::Int,
+)
+    n_cluster > 0 || throw(ArgumentError("n_cluster must be positive"))
+    path = joinpath(scenario_dir, "filter_result.csv")
+    isfile(path) || throw(ArgumentError(
+        "filter_use is true, but scenario filter not found: $path",
+    ))
+
+    file = CSV.File(path; normalizenames = false)
+    required_columns = ["Year", "Season", "SampleIndex", "Value", "Value2", "ClusterGroup"]
+    names = string.(propertynames(file))
+    missing_columns = setdiff(required_columns, names)
+    isempty(missing_columns) || throw(ArgumentError(
+        "Scenario filter is missing column(s): $(join(missing_columns, ", "))",
+    ))
+
+    requested_seasons = Set(String.(seasons))
+    groups = Dict{Tuple{String, Int}, Vector{FilterResultRow}}()
+    seen = Set{Tuple{Int, String, Int}}()
+    available_hours = Dict(
+        (year, String(season)) => length(_season_indices(load_table, year, season))
+        for year in unique(load_table.years), season in seasons
+    )
+    for input_row in file
+        row = (
+            Year = Int(input_row.Year),
+            Season = String(input_row.Season),
+            SampleIndex = Int(input_row.SampleIndex),
+            Value = Float64(input_row.Value),
+            Value2 = Float64(input_row.Value2),
+            ClusterGroup = Int(input_row.ClusterGroup),
+        )
+        row.Season in requested_seasons || continue
+        row.SampleIndex >= 0 || throw(ArgumentError(
+            "Scenario filter contains a negative SampleIndex for $(row.Season) $(row.Year)",
+        ))
+        isfinite(row.Value) && isfinite(row.Value2) || throw(ArgumentError(
+            "Scenario filter contains a non-finite metric for $(row.Season) $(row.Year)",
+        ))
+        0 <= row.ClusterGroup < n_cluster || throw(ArgumentError(
+            "Scenario filter ClusterGroup $(row.ClusterGroup) is outside 0:$(n_cluster - 1)",
+        ))
+        key = (row.Year, row.Season, row.SampleIndex)
+        key in seen && throw(ArgumentError(
+            "Scenario filter contains duplicate candidate $key",
+        ))
+        push!(seen, key)
+        hours = get(available_hours, (row.Year, row.Season), 0)
+        row.SampleIndex + regular_hours <= hours || throw(ArgumentError(
+            "Scenario filter candidate $(row.Season) $(row.Year) hour " *
+            "$(row.SampleIndex) exceeds the $hours available rows",
+        ))
+        push!(get!(groups, (row.Season, row.ClusterGroup), FilterResultRow[]), row)
+    end
+
+    for season in seasons, cluster in 0:(n_cluster - 1)
+        isempty(get(groups, (String(season), cluster), FilterResultRow[])) &&
+            throw(ArgumentError(
+                "Scenario filter has no candidates for season $season and ClusterGroup $cluster",
+            ))
+    end
+    return groups
+end
+
+function _sample_filter_candidate(rng, candidates::Vector{FilterResultRow})
+    selected_year = rand(rng, candidates).Year
+    count_for_year = count(row -> row.Year == selected_year, candidates)
+    selected_index = rand(rng, 1:count_for_year)
+    seen = 0
+    for row in candidates
+        row.Year == selected_year || continue
+        seen += 1
+        seen == selected_index && return row.Year, row.SampleIndex
+    end
+    error("Unreachable filtered-candidate selection state")
 end
 
 function _sampling_key(path::AbstractString)
@@ -540,11 +849,39 @@ function generate_scenario_csv!(data_folder, periods, params::EmpireParams, sets
     peak_hours = scenario_peak_hours(config)
     fixed_sample = get(config, "use_fixed_sample", false)
     sample_key = fixed_sample ? _sampling_key(data_folder) : nothing
+    filter_make = get(config, "filter_make", false)
+    filter_use = get(config, "filter_use", false)
+    n_cluster = Int(get(config, "n_cluster", 10))
 
     load_table = _read_raw_scenario_table(_required_scenario_csv(data_folder, "electricload.csv"), dateformat)
     hydro_table = _read_raw_scenario_table(_required_scenario_csv(data_folder, "hydroseasonal.csv"), dateformat)
     generator_sources = _raw_generator_sources(data_folder, dateformat, sets)
     sample_years = _sample_years(load_table, hydro_table, (source[2] for source in generator_sources)...)
+    if filter_make || (!fixed_sample && filter_use)
+        n_cluster > 0 || throw(ArgumentError("n_cluster must be positive"))
+    end
+    if filter_make
+        _make_filter_result!(
+            scenario_dir,
+            load_table,
+            regular_seasons,
+            regular_hours,
+            n_cluster,
+            rng,
+        )
+    end
+    filter_groups = if !fixed_sample && filter_use
+        _filter_candidate_groups(
+            scenario_dir,
+            regular_seasons,
+            n_cluster,
+            load_table,
+            regular_hours,
+        )
+    else
+        nothing
+    end
+    filter_cluster = n_cluster - 1
 
     load_columns = _node_columns(load_table, sets)
     hydro_columns = _node_columns(hydro_table, sets)
@@ -565,6 +902,12 @@ function generate_scenario_csv!(data_folder, periods, params::EmpireParams, sets
                 season_index > length(representative_periods) && break
                 if fixed_sample
                     year, sample_hour = _get_fixed_sample(sample_key, strategic_index, scenario_index, season)
+                elseif filter_groups !== nothing
+                    filter_cluster = filter_cluster == n_cluster - 1 ? 0 : filter_cluster + 1
+                    year, sample_hour = _sample_filter_candidate(
+                        rng,
+                        filter_groups[(String(season), filter_cluster)],
+                    )
                 else
                     year = rand(rng, sample_years)
                     sample_hour = _random_regular_sample(rng, load_table, year, season, regular_hours)
