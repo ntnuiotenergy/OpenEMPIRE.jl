@@ -124,12 +124,13 @@ end
 function preprocess_max_installed_cap(params::EmpireParams, sets, periods)
     # Ensure that the maximum installed capacity is at least equal to the initial capacity
 
-    # Generators of technology
+    # Generators of technology. Python builds this parameter over the full
+    # Node × Technology × Period product, using a raw default of zero.
     params.genMaxInstalledCap = Dict{Tuple{String,String}, TimeProfile}()
-    for (n, gt) in keys(params.genMaxInstalledCapRaw)
+    for n in nodes(sets), gt in techs(sets)
         vals = Float64[]
         for sp in strat_periods(periods)
-            max_cap = params.genMaxInstalledCapRaw[(n, gt)]
+            max_cap = get(params.genMaxInstalledCapRaw, (n, gt), DEFAULT_GEN_MAX_INST_CAP_RAW)
             init_cap = sum(gencap_init(params, n, g, sp) for g in generators_tech(sets, n, gt); init = 0)
             if init_cap > max_cap
                 @warn "Initial capacity $init_cap for technology $gt at node $n exceeds maximum installed capacity $max_cap. Setting maximum installed capacity to initial capacity."
@@ -219,13 +220,26 @@ function preprocess_stoch_load(params::EmpireParams, sets, periods)
         end
         repr_profiles = RepresentativeProfile[]
         for sp in strat_periods(periods)
-            load_raw = sum(multiple_strat(sp, t) * probability(t) * params.sloadRaw[n][t] for t in sp)
+            representatives = collect(repr_periods(sp))
+            # Match Python (empire.py): the annual-demand normalization denominator is summed
+            # over REGULAR seasons only. Peak seasons are excluded here (the resulting factor
+            # is still applied to peak hours below). Including peaks would inflate the
+            # denominator and scale every load down (~0.7% on europe_v51), because peak hours
+            # carry above-average demand.
+            regular_count = regular_season_count(params, length(representatives))
+            regular_reps = representatives[1:regular_count]
+            load_raw = sum(
+                multiple_strat(sp, t) * probability(t) * params.sloadRaw[n][t]
+                for rp in regular_reps
+                for sc in opscenarios(rp)
+                for t in sc
+            )
             scale_factor = 0.0
             if haskey(params.sloadAnnualDemand, n)
                 scale_factor = params.sloadAnnualDemand[n][sp] / load_raw
             end
             scen_profiles = ScenarioProfile[]
-            for rp in repr_periods(sp)
+            for rp in representatives
                 op_profiles = OperationalProfile[]
                 for sc in opscenarios(rp)
                     scaled_vals = [params.sloadRaw[n][t] * scale_factor for t in sc]

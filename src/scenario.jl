@@ -1,6 +1,6 @@
 
-function scenario_id(sc)
-    m = match(r"\d+$", sc)
+function scenario_id(scenario_name)
+    m = match(r"\d+$", scenario_name)
     if m !== nothing
         value = parse(Int, m.match)
         return value
@@ -8,130 +8,834 @@ function scenario_id(sc)
     return nothing
 end
 
-function read_scenario_tab(data_folder, periods, params::EmpireParams, season_for_hour::Dict{Int, Int})
+const REGULAR_SCENARIO_SEASONS = ("winter", "spring", "summer", "fall")
+const SCENARIO_METADATA_COLUMNS = Set(["time", "year", "month", "hour", "dayofweek"])
+const COUNTRY_NODE_MAPPING = Dict(
+    "AT" => "Austria",
+    "BA" => "BosniaH",
+    "BE" => "Belgium",
+    "BG" => "Bulgaria",
+    "CH" => "Switzerland",
+    "CZ" => "CzechR",
+    "DE" => "Germany",
+    "DK" => "Denmark",
+    "EE" => "Estonia",
+    "ES" => "Spain",
+    "FI" => "Finland",
+    "FR" => "France",
+    "GB" => "GreatBrit.",
+    "GR" => "Greece",
+    "HR" => "Croatia",
+    "HU" => "Hungary",
+    "IE" => "Ireland",
+    "IT" => "Italy",
+    "LT" => "Lithuania",
+    "LU" => "Luxemb.",
+    "LV" => "Latvia",
+    "MK" => "Macedonia",
+    "NL" => "Netherlands",
+    "NO" => "Norway",
+    "PL" => "Poland",
+    "PT" => "Portugal",
+    "RO" => "Romania",
+    "RS" => "Serbia",
+    "SE" => "Sweden",
+    "SI" => "Slovenia",
+    "SK" => "Slovakia",
+    "MF" => "MorayFirth",
+    "FF" => "FirthofForth",
+    "DB" => "DoggerBank",
+    "HS" => "Hornsea",
+    "OD" => "OuterDowsing",
+    "NF" => "Norfolk",
+    "EA" => "EastAnglia",
+    "BS" => "Borssele",
+    "HK" => "HollandseeKust",
+    "HB" => "HelgolanderBucht",
+    "NS" => "Nordsoen",
+    "UN" => "UtsiraNord",
+    "SN1" => "SorligeNordsjoI",
+    "SN2" => "SorligeNordsjoII",
+)
 
-    params.sloadRaw = Dict{String, TimeProfile}()
-    params.maxRegHydroGenRaw = Dict{String, TimeProfile}()
+struct RawScenarioTable
+    columns::Vector{String}
+    timestamps::Vector{DateTime}
+    years::Vector{Int}
+    months::Vector{Int}
+    values::Dict{String, Vector{Float64}}
+end
 
-    el_file = joinpath(data_folder, "ScenarioData", "Stochastic_ElectricLoadRaw.tab")
-    hydro_file = joinpath(data_folder, "ScenarioData", "Stochastic_HydroGenMaxSeasonalProduction.tab")
-    avail_file = joinpath(data_folder, "ScenarioData", "Stochastic_StochasticAvailability.tab")
+regular_scenario_seasons(config) = Tuple(String.(get(config, "regular_seasons", collect(REGULAR_SCENARIO_SEASONS))))
+scenario_peak_count(config) = Int(get(config, "n_peak_seasons", 2))
+scenario_peak_hours(config) = Int(get(config, "len_peak_season", 24))
 
-    missing_files = filter(!isfile, [el_file, hydro_file, avail_file])
-    if !isempty(missing_files)
+const LoadScenarioRow = NamedTuple{
+    (:Node, :Operationalhour, :Scenario, :Period, :ElectricLoadRaw_in_MW),
+    Tuple{String, Int, String, Int, Float64},
+}
+const HydroScenarioRow = NamedTuple{
+    (:Node, :Period, :Season, :Operationalhour, :Scenario, :HydroGeneratorMaxSeasonalProduction),
+    Tuple{String, Int, String, Int, String, Float64},
+}
+const GeneratorScenarioRow = NamedTuple{
+    (:Node, :IntermitentGenerators, :Operationalhour, :Scenario, :Period, :GeneratorStochasticAvailabilityRaw),
+    Tuple{String, String, Int, String, Int, Float64},
+}
+const SamplingKeyRow = NamedTuple{
+    (:Period, :Scenario, :Season, :Year, :Month, :Hour),
+    Tuple{Int, Int, String, Int, Int, Int},
+}
+
+function _generated_scenario_csv_files(data_folder::AbstractString)
+    return (
+        joinpath(data_folder, "ScenarioData", "sloadRaw.csv"),
+        joinpath(data_folder, "ScenarioData", "maxRegHydroGenRaw.csv"),
+        joinpath(data_folder, "ScenarioData", "genCapAvailStochRaw.csv"),
+    )
+end
+
+"""
+    read_scenario_data!(data_folder, periods, params, sets, config, season_for_hour; rng=Random.default_rng())
+
+Populate stochastic scenario profiles in `params`.
+
+When `use_scenario_generation` is true, raw `ScenarioData/*.csv` files are
+sampled and written as generated stochastic CSV files. When it is false,
+existing generated stochastic CSV files are loaded.
+"""
+function read_scenario_data!(
+    data_folder,
+    periods,
+    params::EmpireParams,
+    sets,
+    config,
+    season_for_hour::Dict{Int, Int};
+    rng = Random.default_rng(),
+)
+    use_generation = get(config, "use_scenario_generation", true)
+    if use_generation
+        return generate_scenario_csv!(data_folder, periods, params, sets, config; rng)
+    end
+
+    scenario_files = _generated_scenario_csv_files(data_folder)
+    has_csvs = isfile.(scenario_files)
+    if all(has_csvs)
+        return read_generated_scenario_csv!(data_folder, periods, params, sets, season_for_hour)
+    elseif any(has_csvs)
+        missing_files = collect(scenario_files)[.!collect(has_csvs)]
         throw(ArgumentError(
-            "Generated stochastic .tab scenario files are required by the Julia model. " *
-            "Raw ScenarioData CSV files must first be converted/generated. Missing files: " *
+            "Generated stochastic scenario CSV files are incomplete. Missing files: " *
             join(missing_files, ", ")
         ))
     end
 
-    read_scenario_data(el_file, params.sloadRaw, periods, season_for_hour, 5)
-    read_scenario_data(hydro_file, params.maxRegHydroGenRaw, periods, season_for_hour, 6)
-
-    params.genCapAvail = Dict{Tuple{String,String}, TimeProfile}()
-    read_scenario_data_gen(avail_file, params.genCapAvail, periods, season_for_hour, 6)
-
+    throw(ArgumentError(
+        "Generated stochastic scenario CSV files are missing. Set use_scenario_generation=true " *
+        "or provide sloadRaw.csv, maxRegHydroGenRaw.csv, and genCapAvailStochRaw.csv in " *
+        joinpath(data_folder, "ScenarioData")
+    ))
 end
 
-function read_scenario_data(file, node_val::Dict{String, TimeProfile}, periods, season_for_hour::Dict{Int, Int}, value_col)
+function _python_dateformat(time_format::AbstractString)
+    unsupported = [m.match for m in eachmatch(r"%[A-Za-z]", time_format) if !(m.match in ("%Y", "%m", "%d", "%H", "%M", "%S"))]
+    if !isempty(unsupported)
+        throw(ArgumentError("Unsupported time_format token(s): $(join(unique(unsupported), ", "))"))
+    end
+    julia_format = replace(
+        time_format,
+        "%Y" => "yyyy",
+        "%m" => "mm",
+        "%d" => "dd",
+        "%H" => "HH",
+        "%M" => "MM",
+        "%S" => "SS",
+    )
+    return DateFormat(julia_format)
+end
 
-    @info "Reading scenario data from $file"
+function _season_months(season::AbstractString)
+    season == "winter" && return (1, 2, 3)
+    season == "spring" && return (4, 5, 6)
+    season == "summer" && return (7, 8, 9)
+    season == "fall" && return (10, 11, 12)
+    throw(ArgumentError("$season is not a valid regular season"))
+end
 
-    # Read the scenario data from tab files
-    sc_data = CSV.File(file; delim='\t')
+function _required_scenario_csv(data_folder::AbstractString, filename::AbstractString)
+    path = joinpath(data_folder, "ScenarioData", filename)
+    isfile(path) || throw(ArgumentError("Required raw scenario CSV file not found: $path"))
+    return path
+end
 
-    nodes = unique(String(r[1]) for r in sc_data)
+function _float_value(x)
+    _is_blank(x) && return 0.0
+    return x isa Real ? Float64(x) : parse(Float64, strip(string(x)))
+end
 
-    profiles = Dict{Tuple{String,Int,Int,Int}, Vector{Float64}}()
+function _read_raw_scenario_table(path::AbstractString, dateformat::DateFormat)
+    file = CSV.File(path; normalizenames = false)
+    names = string.(propertynames(file))
+    time_col = findfirst(==("time"), names)
+    time_col === nothing && throw(ArgumentError("Raw scenario CSV file must contain a time column: $path"))
 
-    for n in nodes
-        for (i, sp) in enumerate(strat_periods(periods))
-            for (j, rp) in enumerate(repr_periods(sp))
-                for (k, sc) in enumerate(opscenarios(rp))
-                    profiles[(n, i, j, k)] = Float64[]
-                end
+    data_cols = [i for (i, name) in enumerate(names) if !(lowercase(name) in SCENARIO_METADATA_COLUMNS)]
+    columns = names[data_cols]
+    values = Dict(col => Float64[] for col in columns)
+    timestamps = DateTime[]
+    years = Int[]
+    months = Int[]
+
+    for row in file
+        timestamp = DateTime(strip(string(row[time_col])), dateformat)
+        push!(timestamps, timestamp)
+        push!(years, Dates.year(timestamp))
+        push!(months, Dates.month(timestamp))
+        for (col, idx) in zip(columns, data_cols)
+            push!(values[col], _float_value(row[idx]))
+        end
+    end
+    return RawScenarioTable(columns, timestamps, years, months, values)
+end
+
+function _node_name(raw::AbstractString, node_set::Set{String})
+    raw in node_set && return raw
+    mapped = get(COUNTRY_NODE_MAPPING, raw, raw)
+    mapped in node_set && return mapped
+    return nothing
+end
+
+function _node_names_for_generator(raw::AbstractString, generator::AbstractString, node_set::Set{String})
+    exact = _node_name(raw, node_set)
+    exact !== nothing && return [exact]
+
+    if raw == "NO"
+        start_area = generator in ("Windoffshore", "Windoffshoregrounded", "Windoffshorefloating") ? 2 : 1
+        return [node for node in ("NO$(i)" for i in start_area:5) if node in node_set]
+    end
+
+    return String[]
+end
+
+function _season_indices(table::RawScenarioTable, year::Int, season::AbstractString)
+    months = Set(_season_months(season))
+    return [i for i in eachindex(table.years) if table.years[i] == year && table.months[i] in months]
+end
+
+function _year_indices(table::RawScenarioTable, year::Int)
+    return [i for i in eachindex(table.years) if table.years[i] == year]
+end
+
+function _sample_regular_indices(
+    table::RawScenarioTable,
+    year::Int,
+    season::AbstractString,
+    sample_hour::Int,
+    hours::Int,
+)
+    indices = _season_indices(table, year, season)
+    if sample_hour < 0 || sample_hour + hours > length(indices)
+        throw(ArgumentError(
+            "Invalid sample window for $season $year: hour $sample_hour with length $hours " *
+            "but only $(length(indices)) rows are available",
+        ))
+    end
+    return indices[(sample_hour + 1):(sample_hour + hours)]
+end
+
+function _random_regular_sample(rng, table::RawScenarioTable, year::Int, season::AbstractString, hours::Int)
+    indices = _season_indices(table, year, season)
+    max_start = length(indices) - hours
+    max_start < 0 && throw(ArgumentError(
+        "Not enough hours in $season $year. Need $hours but found $(length(indices)).",
+    ))
+    return max_start == 0 ? 0 : rand(rng, 0:max_start)
+end
+
+function _sample_peak_indices(table::RawScenarioTable, year::Int, center_zero_based::Int, hours::Int)
+    indices = _year_indices(table, year)
+    length(indices) >= hours || throw(ArgumentError(
+        "Not enough hours in year $year. Need $hours but found $(length(indices)).",
+    ))
+    start_index = center_zero_based - div(hours, 2) + 1
+    start_index = clamp(start_index, 1, length(indices) - hours + 1)
+    return indices[start_index:(start_index + hours - 1)]
+end
+
+function _peak_centers(load_table::RawScenarioTable, year::Int)
+    indices = _year_indices(load_table, year)
+    isempty(indices) && throw(ArgumentError("No electric load data found for year $year"))
+
+    best_system_value = -Inf
+    best_system_position = 0
+    best_node_value = -Inf
+    best_node_position = 0
+
+    for (pos, idx) in enumerate(indices)
+        system_value = 0.0
+        for col in load_table.columns
+            value = load_table.values[col][idx]
+            system_value += value
+            if value > best_node_value
+                best_node_value = value
+                best_node_position = pos - 1
             end
+        end
+        if system_value > best_system_value
+            best_system_value = system_value
+            best_system_position = pos - 1
         end
     end
 
-    for r in sc_data
-        n = String(r[1])
-        sp = r.Period
-        rp = season_for_hour[r.Operationalhour]
-        sc = OpenEMPIRE.scenario_id(r.Scenario)
-        push!(profiles[(n, sp, rp, sc)], r[value_col])
-    end
+    return best_node_position, best_system_position
+end
 
+function _sample_years(tables::RawScenarioTable...)
+    common_years = Set(tables[1].years)
+    for table in tables[2:end]
+        intersect!(common_years, Set(table.years))
+    end
+    isempty(common_years) && throw(ArgumentError("Raw scenario CSV files have no common sample years"))
+    return sort!(collect(common_years))
+end
+
+function _sampling_key(path::AbstractString)
+    key_path = joinpath(path, "ScenarioData", "sampling_key.csv")
+    isfile(key_path) || throw(ArgumentError("use_fixed_sample is true, but sampling key not found: $key_path"))
+
+    values = Dict{Tuple{Int, Int, String}, Tuple{Int, Int}}()
+    for row in CSV.File(key_path; normalizenames = false)
+        values[(Int(row.Period), Int(row.Scenario), String(row.Season))] = (Int(row.Year), Int(row.Hour))
+    end
+    return values
+end
+
+function _sample_month(table::RawScenarioTable, indices)::Int
+    isempty(indices) && return 0
+    return table.months[first(indices)]
+end
+
+function _get_fixed_sample(key, period::Int, scenario::Int, season::AbstractString)
+    sample = get(key, (period, scenario, season), nothing)
+    sample === nothing && throw(ArgumentError(
+        "sampling_key.csv is missing Period=$period, Scenario=$scenario, Season=$season",
+    ))
+    return sample
+end
+
+_scenario_name(scenario_index::Int) = "scenario$scenario_index"
+_normalized_scenario_value(value) = value <= 0.001 ? 0.0 : value
+
+function _fill_load_values!(
+    profiles::Dict{Tuple{String, Int, Int, Int}, Vector{Float64}},
+    rows::Vector{LoadScenarioRow},
+    table::RawScenarioTable,
+    columns_to_nodes,
+    indices,
+    strategic_index::Int,
+    representative_index::Int,
+    scenario_index::Int,
+    first_operational_hour::Int,
+)
+    scenario = _scenario_name(scenario_index)
+    for (col, node) in columns_to_nodes
+        vals = get!(profiles, (node, strategic_index, representative_index, scenario_index), Float64[])
+        source = table.values[col]
+        for (offset, idx) in enumerate(indices)
+            value = _normalized_scenario_value(source[idx])
+            push!(vals, value)
+            push!(rows, (
+                Node = node,
+                Operationalhour = first_operational_hour + offset - 1,
+                Scenario = scenario,
+                Period = strategic_index,
+                ElectricLoadRaw_in_MW = value,
+            ))
+        end
+    end
+end
+
+function _fill_hydro_values!(
+    profiles::Dict{Tuple{String, Int, Int, Int}, Vector{Float64}},
+    rows::Vector{HydroScenarioRow},
+    table::RawScenarioTable,
+    columns_to_nodes,
+    indices,
+    strategic_index::Int,
+    representative_index::Int,
+    scenario_index::Int,
+    season::AbstractString,
+    first_operational_hour::Int,
+)
+    scenario = _scenario_name(scenario_index)
+    for (col, node) in columns_to_nodes
+        vals = get!(profiles, (node, strategic_index, representative_index, scenario_index), Float64[])
+        source = table.values[col]
+        for (offset, idx) in enumerate(indices)
+            value = _normalized_scenario_value(source[idx])
+            push!(vals, value)
+            push!(rows, (
+                Node = node,
+                Period = strategic_index,
+                Season = String(season),
+                Operationalhour = first_operational_hour + offset - 1,
+                Scenario = scenario,
+                HydroGeneratorMaxSeasonalProduction = value,
+            ))
+        end
+    end
+end
+
+function _fill_generator_values!(
+    profiles::Dict{Tuple{String, String, Int, Int, Int}, Vector{Float64}},
+    rows::Vector{GeneratorScenarioRow},
+    table::RawScenarioTable,
+    columns_to_node_gens,
+    indices,
+    strategic_index::Int,
+    representative_index::Int,
+    scenario_index::Int,
+    first_operational_hour::Int,
+)
+    scenario = _scenario_name(scenario_index)
+    for (col, node_gens) in columns_to_node_gens
+        source = table.values[col]
+        for (node, gen) in node_gens
+            vals = get!(profiles, (node, gen, strategic_index, representative_index, scenario_index), Float64[])
+            for (offset, idx) in enumerate(indices)
+                value = _normalized_scenario_value(source[idx])
+                push!(vals, value)
+                push!(rows, (
+                    Node = node,
+                    IntermitentGenerators = gen,
+                    Operationalhour = first_operational_hour + offset - 1,
+                    Scenario = scenario,
+                    Period = strategic_index,
+                    GeneratorStochasticAvailabilityRaw = value,
+                ))
+            end
+        end
+    end
+end
+
+function _build_node_profiles(profiles::Dict{Tuple{String, Int, Int, Int}, Vector{Float64}}, periods)
+    nodes = sort!(collect(Set(k[1] for k in keys(profiles))))
+    out = Dict{String, TimeProfile}()
     for n in nodes
         repr_profiles = RepresentativeProfile[]
-        for (i, sp) in enumerate(strat_periods(periods))
+        for (strategic_index, strategic_period) in enumerate(strat_periods(periods))
             scen_profiles = ScenarioProfile[]
-            for (j, rp) in enumerate(repr_periods(sp))
+            for (representative_index, representative_period) in enumerate(repr_periods(strategic_period))
                 op_profiles = OperationalProfile[]
-                for (k, sc) in enumerate(opscenarios(rp))
-                    vals = profiles[(n, i, j, k)]
+                for (scenario_index, operational_scenario) in enumerate(opscenarios(representative_period))
+                    vals = get(profiles, (n, strategic_index, representative_index, scenario_index), Float64[])
+                    length(vals) == length(operational_scenario) || throw(ArgumentError(
+                        "Scenario profile for node $n, period $strategic_index, " *
+                        "representative period $representative_index, scenario $scenario_index " *
+                        "has $(length(vals)) values; expected $(length(operational_scenario))",
+                    ))
                     push!(op_profiles, OperationalProfile(vals))
                 end
                 push!(scen_profiles, ScenarioProfile(op_profiles))
             end
             push!(repr_profiles, RepresentativeProfile(scen_profiles))
         end
-        profile = StrategicProfile(repr_profiles)
-        node_val[String(n)] = profile
+        out[n] = StrategicProfile(repr_profiles)
     end
+    return out
 end
 
-function read_scenario_data_gen(
-    file,
-    node_gen_val::Dict{Tuple{String,String}, TimeProfile},
-    periods::TimeStructure,
-    season_for_hour::Dict{Int, Int},
-    value_col::Int
+function _build_generator_profiles(
+    profiles::Dict{Tuple{String, String, Int, Int, Int}, Vector{Float64}},
+    periods,
 )
-    @info "Reading scenario data from $file"
-
-    # Read the scenario data from tab files
-    sc_data = CSV.File(file; delim='\t')
-
-    node_gens = unique((String(r[1]), String(r[2])) for r in sc_data)
-
-    profiles = Dict{Tuple{String,String,Int,Int,Int}, Vector{Float64}}()
-
-    for (n,g) in node_gens
-        for (i, sp) in enumerate(strat_periods(periods))
-            for (j, rp) in enumerate(repr_periods(sp))
-                for (k, sc) in enumerate(opscenarios(rp))
-                    profiles[(n, g, i, j, k)] = Float64[]
-                end
-            end
-        end
-    end
-
-    for r in sc_data
-        n = String(r[1])
-        g = String(r[2])
-        sp = r.Period
-        rp = season_for_hour[r.Operationalhour]
-        sc = OpenEMPIRE.scenario_id(r.Scenario)
-        push!(profiles[(n, g, sp, rp, sc)], r[value_col])
-    end
-
+    node_gens = sort!(collect(Set((k[1], k[2]) for k in keys(profiles))))
+    out = Dict{Tuple{String, String}, TimeProfile}()
     for (n, g) in node_gens
         repr_profiles = RepresentativeProfile[]
-        for (i, sp) in enumerate(strat_periods(periods))
+        for (strategic_index, strategic_period) in enumerate(strat_periods(periods))
             scen_profiles = ScenarioProfile[]
-            for (j, rp) in enumerate(repr_periods(sp))
+            for (representative_index, representative_period) in enumerate(repr_periods(strategic_period))
                 op_profiles = OperationalProfile[]
-                for (k, sc) in enumerate(opscenarios(rp))
-                    vals = profiles[(n, g, i, j, k)]
+                for (scenario_index, operational_scenario) in enumerate(opscenarios(representative_period))
+                    vals = get(profiles, (n, g, strategic_index, representative_index, scenario_index), Float64[])
+                    length(vals) == length(operational_scenario) || throw(ArgumentError(
+                        "Scenario profile for generator $((n, g)), period $strategic_index, " *
+                        "representative period $representative_index, scenario $scenario_index " *
+                        "has $(length(vals)) values; expected $(length(operational_scenario))",
+                    ))
                     push!(op_profiles, OperationalProfile(vals))
                 end
                 push!(scen_profiles, ScenarioProfile(op_profiles))
             end
             push!(repr_profiles, RepresentativeProfile(scen_profiles))
         end
-        profile = StrategicProfile(repr_profiles)
-        node_gen_val[(String(n), String(g))] = profile
+        out[(n, g)] = StrategicProfile(repr_profiles)
     end
+    return out
+end
+
+function _generator_columns(table::RawScenarioTable, generator::AbstractString, sets)
+    node_set = Set(nodes(sets))
+    node_gens = Set(sets.GeneratorsOfNode)
+    mapping = Tuple{String, Vector{Tuple{String, String}}}[]
+    for col in table.columns
+        pairs = Tuple{String, String}[]
+        for node in _node_names_for_generator(col, generator, node_set)
+            (node, generator) in node_gens && push!(pairs, (node, generator))
+        end
+        !isempty(pairs) && push!(mapping, (col, pairs))
+    end
+    return mapping
+end
+
+function _node_columns(table::RawScenarioTable, sets)
+    node_set = Set(nodes(sets))
+    mapping = Tuple{String, String}[]
+    for col in table.columns
+        node = _node_name(col, node_set)
+        node !== nothing && push!(mapping, (col, node))
+    end
+    return mapping
+end
+
+function _offshore_generators(sets)
+    gens = String[]
+    "Windoffshore" in sets.Generator && push!(gens, "Windoffshore")
+    "Windoffshoregrounded" in sets.Generator && push!(gens, "Windoffshoregrounded")
+    "Windoffshorefloating" in sets.Generator && push!(gens, "Windoffshorefloating")
+    return gens
+end
+
+function _raw_generator_sources(data_folder::AbstractString, dateformat::DateFormat, sets)
+    sources = Tuple{String, RawScenarioTable}[
+        ("Solar", _read_raw_scenario_table(_required_scenario_csv(data_folder, "solar.csv"), dateformat)),
+        ("Windonshore", _read_raw_scenario_table(_required_scenario_csv(data_folder, "windonshore.csv"), dateformat)),
+    ]
+    offshore_table = _read_raw_scenario_table(_required_scenario_csv(data_folder, "windoffshore.csv"), dateformat)
+    for generator in _offshore_generators(sets)
+        push!(sources, (generator, offshore_table))
+    end
+    push!(
+        sources,
+        ("Hydrorun-of-the-river", _read_raw_scenario_table(_required_scenario_csv(data_folder, "hydroror.csv"), dateformat)),
+    )
+    return sources
+end
+
+"""
+    generate_scenario_csv!(data_folder, periods, params, sets, config; rng=Random.default_rng())
+
+Sample raw CSV scenario time series, write generated stochastic CSV files, and
+fill `sloadRaw`, `maxRegHydroGenRaw`, and `genCapAvail` directly on `params`.
+"""
+function generate_scenario_csv!(data_folder, periods, params::EmpireParams, sets, config; rng = Random.default_rng())
+    scenario_dir = joinpath(data_folder, "ScenarioData")
+    @info "Generating stochastic scenario CSV data in $scenario_dir"
+
+    dateformat = _python_dateformat(get(config, "time_format", "%d/%m/%Y %H:%M"))
+    regular_seasons = regular_scenario_seasons(config)
+    regular_hours = Int(config["length_of_regular_season"])
+    peak_count = scenario_peak_count(config)
+    peak_hours = scenario_peak_hours(config)
+    fixed_sample = get(config, "use_fixed_sample", false)
+    sample_key = fixed_sample ? _sampling_key(data_folder) : nothing
+
+    load_table = _read_raw_scenario_table(_required_scenario_csv(data_folder, "electricload.csv"), dateformat)
+    hydro_table = _read_raw_scenario_table(_required_scenario_csv(data_folder, "hydroseasonal.csv"), dateformat)
+    generator_sources = _raw_generator_sources(data_folder, dateformat, sets)
+    sample_years = _sample_years(load_table, hydro_table, (source[2] for source in generator_sources)...)
+
+    load_columns = _node_columns(load_table, sets)
+    hydro_columns = _node_columns(hydro_table, sets)
+    generator_columns = Dict(g => _generator_columns(table, g, sets) for (g, table) in generator_sources)
+
+    load_profiles = Dict{Tuple{String, Int, Int, Int}, Vector{Float64}}()
+    hydro_profiles = Dict{Tuple{String, Int, Int, Int}, Vector{Float64}}()
+    gen_profiles = Dict{Tuple{String, String, Int, Int, Int}, Vector{Float64}}()
+    load_rows = LoadScenarioRow[]
+    hydro_rows = HydroScenarioRow[]
+    generator_rows = GeneratorScenarioRow[]
+    sampling_rows = SamplingKeyRow[]
+
+    for (strategic_index, strategic_period) in enumerate(strat_periods(periods))
+        representative_periods = collect(repr_periods(strategic_period))
+        for (scenario_index, _) in enumerate(opscenarios(first(representative_periods)))
+            for (season_index, season) in enumerate(regular_seasons)
+                season_index > length(representative_periods) && break
+                if fixed_sample
+                    year, sample_hour = _get_fixed_sample(sample_key, strategic_index, scenario_index, season)
+                else
+                    year = rand(rng, sample_years)
+                    sample_hour = _random_regular_sample(rng, load_table, year, season, regular_hours)
+                end
+                load_indices = _sample_regular_indices(load_table, year, season, sample_hour, regular_hours)
+                hydro_indices = _sample_regular_indices(hydro_table, year, season, sample_hour, regular_hours)
+                !fixed_sample && push!(sampling_rows, (
+                    Period = strategic_index,
+                    Scenario = scenario_index,
+                    Season = String(season),
+                    Year = year,
+                    Month = _sample_month(load_table, load_indices),
+                    Hour = sample_hour,
+                ))
+                first_operational_hour = (season_index - 1) * regular_hours + 1
+                _fill_load_values!(
+                    load_profiles,
+                    load_rows,
+                    load_table,
+                    load_columns,
+                    load_indices,
+                    strategic_index,
+                    season_index,
+                    scenario_index,
+                    first_operational_hour,
+                )
+                _fill_hydro_values!(
+                    hydro_profiles,
+                    hydro_rows,
+                    hydro_table,
+                    hydro_columns,
+                    hydro_indices,
+                    strategic_index,
+                    season_index,
+                    scenario_index,
+                    season,
+                    first_operational_hour,
+                )
+                for (generator, table) in generator_sources
+                    indices = _sample_regular_indices(table, year, season, sample_hour, regular_hours)
+                    _fill_generator_values!(
+                        gen_profiles,
+                        generator_rows,
+                        table,
+                        generator_columns[generator],
+                        indices,
+                        strategic_index,
+                        season_index,
+                        scenario_index,
+                        first_operational_hour,
+                    )
+                end
+            end
+
+            peak_start = length(regular_seasons) + 1
+            if peak_count > 0 && peak_start <= length(representative_periods)
+                if fixed_sample
+                    peak_year, _ = _get_fixed_sample(sample_key, strategic_index, scenario_index, "peak")
+                else
+                    peak_year = rand(rng, sample_years)
+                end
+                !fixed_sample && push!(sampling_rows, (
+                    Period = strategic_index,
+                    Scenario = scenario_index,
+                    Season = "peak",
+                    Year = peak_year,
+                    Month = 0,
+                    Hour = 0,
+                ))
+
+                country_peak, overall_peak = _peak_centers(load_table, peak_year)
+                peak_centers = (country_peak, overall_peak)
+                max_peak_offset = min(peak_count - 1, length(representative_periods) - peak_start, length(peak_centers) - 1)
+                for peak_offset in 0:max_peak_offset
+                    representative_index = peak_start + peak_offset
+                    center = peak_centers[peak_offset + 1]
+                    season = "peak$(peak_offset + 1)"
+                    first_operational_hour = length(regular_seasons) * regular_hours + peak_offset * peak_hours + 1
+                    load_indices = _sample_peak_indices(load_table, peak_year, center, peak_hours)
+                    hydro_indices = _sample_peak_indices(hydro_table, peak_year, center, peak_hours)
+                    _fill_load_values!(
+                        load_profiles,
+                        load_rows,
+                        load_table,
+                        load_columns,
+                        load_indices,
+                        strategic_index,
+                        representative_index,
+                        scenario_index,
+                        first_operational_hour,
+                    )
+                    _fill_hydro_values!(
+                        hydro_profiles,
+                        hydro_rows,
+                        hydro_table,
+                        hydro_columns,
+                        hydro_indices,
+                        strategic_index,
+                        representative_index,
+                        scenario_index,
+                        season,
+                        first_operational_hour,
+                    )
+                    for (generator, table) in generator_sources
+                        indices = _sample_peak_indices(table, peak_year, center, peak_hours)
+                        _fill_generator_values!(
+                            gen_profiles,
+                            generator_rows,
+                            table,
+                            generator_columns[generator],
+                            indices,
+                            strategic_index,
+                            representative_index,
+                            scenario_index,
+                            first_operational_hour,
+                        )
+                    end
+                end
+            end
+        end
+    end
+
+    _write_generated_scenario_csvs!(
+        scenario_dir,
+        load_rows,
+        hydro_rows,
+        generator_rows,
+        sampling_rows;
+        write_sampling_key = !fixed_sample,
+    )
+
+    params.sloadRaw = _build_node_profiles(load_profiles, periods)
+    params.maxRegHydroGenRaw = _build_node_profiles(hydro_profiles, periods)
+    params.genCapAvail = _build_generator_profiles(gen_profiles, periods)
+    _fill_missing_stochastic_availability!(params, sets, periods)
+    _validate_stochastic_availability(params, sets)
+
+    return params
+end
+
+read_scenario_csv!(data_folder, periods, params::EmpireParams, sets, config; rng = Random.default_rng()) =
+    generate_scenario_csv!(data_folder, periods, params, sets, config; rng)
+
+function _write_generated_scenario_csvs!(
+    scenario_dir::AbstractString,
+    load_rows::Vector{LoadScenarioRow},
+    hydro_rows::Vector{HydroScenarioRow},
+    generator_rows::Vector{GeneratorScenarioRow},
+    sampling_rows::Vector{SamplingKeyRow};
+    write_sampling_key::Bool,
+)
+    mkpath(scenario_dir)
+    CSV.write(joinpath(scenario_dir, "sloadRaw.csv"), load_rows)
+    CSV.write(joinpath(scenario_dir, "maxRegHydroGenRaw.csv"), hydro_rows)
+    CSV.write(joinpath(scenario_dir, "genCapAvailStochRaw.csv"), generator_rows)
+    write_sampling_key && CSV.write(joinpath(scenario_dir, "sampling_key.csv"), sampling_rows)
+    return nothing
+end
+
+function _zero_time_profile(periods)
+    repr_profiles = RepresentativeProfile[]
+    for strategic_period in strat_periods(periods)
+        scen_profiles = ScenarioProfile[]
+        for representative_period in repr_periods(strategic_period)
+            op_profiles = OperationalProfile[]
+            for operational_scenario in opscenarios(representative_period)
+                push!(op_profiles, OperationalProfile(zeros(Float64, length(operational_scenario))))
+            end
+            push!(scen_profiles, ScenarioProfile(op_profiles))
+        end
+        push!(repr_profiles, RepresentativeProfile(scen_profiles))
+    end
+    return StrategicProfile(repr_profiles)
+end
+
+function _fill_missing_stochastic_availability!(params::EmpireParams, sets, periods)
+    zero_profile = nothing
+    for (node, generator) in sets.GeneratorsOfNode
+        get(params.genCapAvailType, generator, 1.0) == 0.0 || continue
+        haskey(params.genCapAvail, (node, generator)) && continue
+        zero_profile === nothing && (zero_profile = _zero_time_profile(periods))
+        params.genCapAvail[(node, generator)] = zero_profile
+    end
+end
+
+function _validate_stochastic_availability(params::EmpireParams, sets)
+    missing_pairs = Tuple{String, String}[]
+    for (node, generator) in sets.GeneratorsOfNode
+        get(params.genCapAvailType, generator, 1.0) == 0.0 || continue
+        haskey(params.genCapAvail, (node, generator)) && continue
+        push!(missing_pairs, (node, generator))
+    end
+    if !isempty(missing_pairs)
+        preview = join(string.(missing_pairs[1:min(end, 20)]), ", ")
+        suffix = length(missing_pairs) > 20 ? " ..." : ""
+        throw(ArgumentError("Missing stochastic availability for generator-node pair(s): $preview$suffix"))
+    end
+end
+
+function _read_generated_node_profiles(
+    file::AbstractString,
+    periods,
+    season_for_hour::Dict{Int, Int},
+    value_column::Symbol,
+)
+    @info "Reading generated scenario CSV data from $file"
+    profiles = Dict{Tuple{String,Int,Int,Int}, Vector{Float64}}()
+
+    for row in CSV.File(file; normalizenames = false)
+        node = String(row.Node)
+        strategic_index = Int(row.Period)
+        representative_index = season_for_hour[Int(row.Operationalhour)]
+        scenario_index = scenario_id(String(row.Scenario))
+        scenario_index === nothing && throw(ArgumentError("Invalid scenario name in $file: $(row.Scenario)"))
+        vals = get!(profiles, (node, strategic_index, representative_index, scenario_index), Float64[])
+        push!(vals, _float_value(getproperty(row, value_column)))
+    end
+
+    return _build_node_profiles(profiles, periods)
+end
+
+function _read_generated_generator_profiles(
+    file::AbstractString,
+    periods::TimeStructure,
+    season_for_hour::Dict{Int, Int},
+)
+    @info "Reading generated scenario CSV data from $file"
+    profiles = Dict{Tuple{String,String,Int,Int,Int}, Vector{Float64}}()
+
+    for row in CSV.File(file; normalizenames = false)
+        node = String(row.Node)
+        generator = String(row.IntermitentGenerators)
+        strategic_index = Int(row.Period)
+        representative_index = season_for_hour[Int(row.Operationalhour)]
+        scenario_index = scenario_id(String(row.Scenario))
+        scenario_index === nothing && throw(ArgumentError("Invalid scenario name in $file: $(row.Scenario)"))
+        vals = get!(profiles, (node, generator, strategic_index, representative_index, scenario_index), Float64[])
+        push!(vals, _float_value(row.GeneratorStochasticAvailabilityRaw))
+    end
+
+    return _build_generator_profiles(profiles, periods)
+end
+
+function read_generated_scenario_csv!(
+    data_folder,
+    periods,
+    params::EmpireParams,
+    sets,
+    season_for_hour::Dict{Int, Int},
+)
+    sload_file, hydro_file, availability_file = _generated_scenario_csv_files(data_folder)
+
+    params.sloadRaw = _read_generated_node_profiles(
+        sload_file,
+        periods,
+        season_for_hour,
+        :ElectricLoadRaw_in_MW,
+    )
+    params.maxRegHydroGenRaw = _read_generated_node_profiles(
+        hydro_file,
+        periods,
+        season_for_hour,
+        :HydroGeneratorMaxSeasonalProduction,
+    )
+    params.genCapAvail = _read_generated_generator_profiles(
+        availability_file,
+        periods,
+        season_for_hour,
+    )
+    _fill_missing_stochastic_availability!(params, sets, periods)
+    _validate_stochastic_availability(params, sets)
+
+    return params
 end

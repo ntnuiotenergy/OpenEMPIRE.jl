@@ -24,73 +24,76 @@ Base.@kwdef mutable struct EmpireParams
     discountRate::Union{Nothing, Float64} = nothing
 
     # Generator inputs from file
-    genCapitalCost::Dict{String, TimeProfile}                       = Dict{String, TimeProfile}()
-    genFixedOMCost::Dict{String, TimeProfile}                       = Dict{String, TimeProfile}()
-    genVariableOMCost::Dict{String, Float64}                        = Dict{String, Float64}()
-    genFuelCost::Dict{String, TimeProfile}                          = Dict{String, TimeProfile}()
-    CCSCostTSVariable::Union{Nothing, TimeProfile}                  = nothing
-    genEfficiency::Dict{String, TimeProfile}                        = Dict{String, TimeProfile}()
-    genRefInitCap::Dict{Tuple{String,String}, Float64}              = Dict{Tuple{String,String}, Float64}()
-    genScaleInitCap::Dict{String, TimeProfile}                      = Dict{String, TimeProfile}()
-    genInitCap::Dict{Tuple{String,String}, TimeProfile}             = Dict{Tuple{String,String}, TimeProfile}()
-    genMaxBuiltCap::Dict{Tuple{String,String}, TimeProfile}         = Dict{Tuple{String,String}, TimeProfile}()
-    genMaxInstalledCapRaw::Dict{Tuple{String,String}, Float64}      = Dict{Tuple{String,String}, Float64}()
-    genMaxInstalledCap::Dict{Tuple{String,String}, TimeProfile}     = Dict{Tuple{String,String}, TimeProfile}()
-    genRampUpCap::Dict{String, Float64}                             = Dict{String, Float64}()
-    genCapAvailType::Dict{String, Float64}                          = Dict{String, Float64}()
-    genCO2Content::Dict{String, Float64}                            = Dict{String, Float64}()
-    genLifetime::Dict{String, Float64}                              = Dict{String, Float64}()
+    genCapitalCost::Dict{String, TimeProfile}                    = Dict{String, TimeProfile}()
+    genFixedOMCost::Dict{String, TimeProfile}                    = Dict{String, TimeProfile}()
+    genVariableOMCost::Dict{String, Float64}                     = Dict{String, Float64}()
+    genFuelCost::Dict{String, TimeProfile}                       = Dict{String, TimeProfile}()
+    CCSCostTSVariable::Union{Nothing, TimeProfile}               = nothing
+    genEfficiency::Dict{String, TimeProfile}                     = Dict{String, TimeProfile}()
+    genRefInitCap::Dict{Tuple{String, String}, Float64}          = Dict{Tuple{String, String}, Float64}()
+    genScaleInitCap::Dict{String, TimeProfile}                   = Dict{String, TimeProfile}()
+    genInitCap::Dict{Tuple{String, String}, TimeProfile}         = Dict{Tuple{String, String}, TimeProfile}()
+    genMaxBuiltCap::Dict{Tuple{String, String}, TimeProfile}     = Dict{Tuple{String, String}, TimeProfile}()
+    genMaxInstalledCapRaw::Dict{Tuple{String, String}, Float64}  = Dict{Tuple{String, String}, Float64}()
+    genMaxInstalledCap::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
+    genRampUpCap::Dict{String, Float64}                          = Dict{String, Float64}()
+    genCapAvailType::Dict{String, Float64}                       = Dict{String, Float64}()
+    genCO2Content::Dict{String, Float64}                         = Dict{String, Float64}()
+    genLifetime::Dict{String, Float64}                           = Dict{String, Float64}()
 
     # Transmission inputs from file
-    transmissionInitCap::Dict{Tuple{String,String}, TimeProfile}            = Dict{Tuple{String,String}, TimeProfile}()
-    transmissionMaxBuiltCap::Dict{Tuple{String,String}, TimeProfile}        = Dict{Tuple{String,String}, TimeProfile}()
-    transmissionMaxInstalledCap::Dict{Tuple{String,String}, TimeProfile}    = Dict{Tuple{String,String}, TimeProfile}()
-    transmissionLength::Dict{Tuple{String,String}, Float64}                 = Dict{Tuple{String,String}, Float64}()
-    transmissionTypeCapitalCost::Dict{String, TimeProfile}                  = Dict{String, TimeProfile}()
-    transmissionTypeFixedOMCost::Dict{String, TimeProfile}                  = Dict{String, TimeProfile}()
-    lineEfficiency::Dict{Tuple{String,String}, Float64}                     = Dict{Tuple{String,String}, Float64}()
-    transmissionLifetime::Dict{Tuple{String,String}, Float64}               = Dict{Tuple{String,String}, Float64}()
+    transmissionInitCap::Dict{Tuple{String, String}, TimeProfile}         = Dict{Tuple{String, String}, TimeProfile}()
+    transmissionMaxBuiltCap::Dict{Tuple{String, String}, TimeProfile}     = Dict{Tuple{String, String}, TimeProfile}()
+    transmissionMaxInstalledCap::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
+    transmissionLength::Dict{Tuple{String, String}, Float64}              = Dict{Tuple{String, String}, Float64}()
+    transmissionTypeCapitalCost::Dict{String, TimeProfile}                = Dict{String, TimeProfile}()
+    transmissionTypeFixedOMCost::Dict{String, TimeProfile}                = Dict{String, TimeProfile}()
+    lineEfficiency::Dict{Tuple{String, String}, Float64}                  = Dict{Tuple{String, String}, Float64}()
+    transmissionLifetime::Dict{Tuple{String, String}, Float64}            = Dict{Tuple{String, String}, Float64}()
 
     # Storage inputs from file
-    storageBleedEff::Dict{String, Float64}                              = Dict{String, Float64}()
-    storageChargeEff::Dict{String, Float64}                             = Dict{String, Float64}()
-    storageDischargeEff::Dict{String, Float64}                          = Dict{String, Float64}()
-    storagePowToEnergy::Dict{String, Float64}                           = Dict{String, Float64}()
-    storENCapitalCost::Dict{String, TimeProfile}                        = Dict{String, TimeProfile}()
-    storENFixedOMCost::Dict{String, TimeProfile}                        = Dict{String, TimeProfile}()
-    storENInitCap::Dict{Tuple{String,String}, TimeProfile}              = Dict{Tuple{String,String}, TimeProfile}()
-    storENMaxBuiltCap::Dict{Tuple{String,String}, TimeProfile}          = Dict{Tuple{String,String}, TimeProfile}()
-    storENMaxInstalledCap::Dict{Tuple{String,String}, Float64}          = Dict{Tuple{String,String}, Float64}()
-    storOperationalInit::Dict{String, Float64}                          = Dict{String, Float64}()
-    storPWCapitalCost::Dict{String, TimeProfile}                        = Dict{String, TimeProfile}()
-    storPWFixedOMCost::Dict{String, TimeProfile}                        = Dict{String, TimeProfile}()
-    storPWInitCap::Dict{Tuple{String,String}, TimeProfile}              = Dict{Tuple{String,String}, TimeProfile}()
-    storPWMaxBuiltCap::Dict{Tuple{String,String}, TimeProfile}          = Dict{Tuple{String,String}, TimeProfile}()
-    storPWMaxInstalledCap::Dict{Tuple{String,String}, Float64}          = Dict{Tuple{String,String}, Float64}()
-    storageLifetime::Dict{String, Float64}                              = Dict{String, Float64}()
+    storageBleedEff::Dict{String, Float64}                      = Dict{String, Float64}()
+    storageChargeEff::Dict{String, Float64}                     = Dict{String, Float64}()
+    storageDischargeEff::Dict{String, Float64}                  = Dict{String, Float64}()
+    storageDiscToCharRatio::Dict{String, Float64}               = Dict{String, Float64}()
+    storagePowToEnergy::Dict{String, Float64}                   = Dict{String, Float64}()
+    storENCapitalCost::Dict{String, TimeProfile}                = Dict{String, TimeProfile}()
+    storENFixedOMCost::Dict{String, TimeProfile}                = Dict{String, TimeProfile}()
+    storENInitCap::Dict{Tuple{String, String}, TimeProfile}     = Dict{Tuple{String, String}, TimeProfile}()
+    storENMaxBuiltCap::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
+    storENMaxInstalledCap::Dict{Tuple{String, String}, Float64} = Dict{Tuple{String, String}, Float64}()
+    storOperationalInit::Dict{String, Float64}                  = Dict{String, Float64}()
+    storPWCapitalCost::Dict{String, TimeProfile}                = Dict{String, TimeProfile}()
+    storPWFixedOMCost::Dict{String, TimeProfile}                = Dict{String, TimeProfile}()
+    storPWInitCap::Dict{Tuple{String, String}, TimeProfile}     = Dict{Tuple{String, String}, TimeProfile}()
+    storPWMaxBuiltCap::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
+    storPWMaxInstalledCap::Dict{Tuple{String, String}, Float64} = Dict{Tuple{String, String}, Float64}()
+    storageLifetime::Dict{String, Float64}                      = Dict{String, Float64}()
 
     # Node inputs from file
-    nodeLostLoadCost::Dict{String, TimeProfile}     = Dict{String, TimeProfile}()
-    sloadAnnualDemand::Dict{String, TimeProfile}    = Dict{String, TimeProfile}()
-    maxHydroNode::Dict{String, Float64}             = Dict{String, Float64}()
+    nodeLostLoadCost::Dict{String, TimeProfile}  = Dict{String, TimeProfile}()
+    sloadAnnualDemand::Dict{String, TimeProfile} = Dict{String, TimeProfile}()
+    maxHydroNode::Dict{String, Float64}          = Dict{String, Float64}()
 
     # General parameters from file
-    CO2cap::Union{Nothing, TimeProfile}     = nothing
-    CO2price::Union{Nothing, TimeProfile}   = nothing
+    CO2cap::Union{Nothing, TimeProfile}   = nothing
+    CO2price::Union{Nothing, TimeProfile} = nothing
+    seasonNames::Vector{String}           = String[]
+    regularSeasonCount::Int               = 0
 
     # Stochastic parameters
-    sloadRaw::Dict{String, TimeProfile}                             = Dict{String, TimeProfile}()
-    sload::Dict{String, TimeProfile}                                = Dict{String, TimeProfile}()
-    genCapAvail::Dict{Tuple{String,String}, TimeProfile}            = Dict{Tuple{String,String}, TimeProfile}()
-    maxRegHydroGenRaw::Dict{String, TimeProfile}                    = Dict{String, TimeProfile}()
-    maxRegHydroGen::Dict{String, TimeProfile}                       = Dict{String, TimeProfile}()
+    sloadRaw::Dict{String, TimeProfile}                   = Dict{String, TimeProfile}()
+    sload::Dict{String, TimeProfile}                      = Dict{String, TimeProfile}()
+    genCapAvail::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
+    maxRegHydroGenRaw::Dict{String, TimeProfile}          = Dict{String, TimeProfile}()
+    maxRegHydroGen::Dict{String, TimeProfile}             = Dict{String, TimeProfile}()
 
     # Processed parameters
-    genInvCost::Dict{String, TimeProfile}                           = Dict{String, TimeProfile}()
-    storENInvCost::Dict{String, TimeProfile}                        = Dict{String, TimeProfile}()
-    storPWInvCost::Dict{String, TimeProfile}                        = Dict{String, TimeProfile}()
-    transmissionInvCost::Dict{Tuple{String,String}, TimeProfile}    = Dict{Tuple{String,String}, TimeProfile}()
-    genMargCost::Dict{String, TimeProfile}                          = Dict{String, TimeProfile}()
+    genInvCost::Dict{String, TimeProfile}                         = Dict{String, TimeProfile}()
+    storENInvCost::Dict{String, TimeProfile}                      = Dict{String, TimeProfile}()
+    storPWInvCost::Dict{String, TimeProfile}                      = Dict{String, TimeProfile}()
+    transmissionInvCost::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
+    genMargCost::Dict{String, TimeProfile}                        = Dict{String, TimeProfile}()
 end
 
 # Default values used by the accessor helpers below.
@@ -100,47 +103,68 @@ end
 # arc), these constants are returned by the corresponding accessor.
 
 # Loads / generation quantities default to zero (no demand, no production)
-const DEFAULT_LOAD              = 0.0
-const DEFAULT_MAX_HYDRO_GEN     = 0.0
+const DEFAULT_LOAD          = 0.0
+const DEFAULT_MAX_HYDRO_GEN = 0.0
 
 # Initial installed capacities default to zero
-const DEFAULT_GEN_INIT_CAP      = 0.0
-const DEFAULT_STOR_EN_INIT_CAP  = 0.0
-const DEFAULT_STOR_PW_INIT_CAP  = 0.0
-const DEFAULT_TRANS_INIT_CAP    = 0.0
+const DEFAULT_GEN_INIT_CAP     = 0.0
+const DEFAULT_STOR_EN_INIT_CAP = 0.0
+const DEFAULT_STOR_PW_INIT_CAP = 0.0
+const DEFAULT_TRANS_INIT_CAP   = 0.0
 
-# Build / installed capacity limits default to `nothing`, meaning no limits
-const DEFAULT_MAX_BUILD_CAP     = nothing
-const DEFAULT_MAX_INST_CAP      = nothing
-const DEFAULT_TRANS_MAX_BUILD   = nothing
-const DEFAULT_TRANS_MAX_INST    = nothing
-const DEFAULT_MAX_HYDRO_NODE    = nothing
+# Build / installed capacity limits. Defaults mirror the Python formulation:
+# storage build cap defaults to 500000 MW (Param default in empire.py) and the
+# storage installed cap defaults to 0.0 (storENMaxInstalledCapRaw/storPWMaxInstalledCapRaw
+# default 0.0 -> a storage absent from the cap data is NOT buildable, e.g. the
+# Finland/Macedonia HydroPumpStorage entries present in StoragesOfNode). Returning
+# `nothing` (no limit) here previously let Julia build storage that Python forbids.
+const DEFAULT_GEN_MAX_BUILD_CAP    = 500000.0
+const DEFAULT_GEN_MAX_INST_CAP_RAW = 0.0
+const DEFAULT_MAX_BUILD_CAP        = 500000.0
+const DEFAULT_MAX_INST_CAP         = 0.0
+const DEFAULT_TRANS_MAX_BUILD      = nothing
+const DEFAULT_TRANS_MAX_INST       = nothing
+const DEFAULT_MAX_HYDRO_NODE       = nothing
 
+# Ramp-up cap for a thermal generator missing from genRampUpCap data defaults to 0.0,
+# matching Python (`genRampUpCap = Param(model.ThermalGenerators, default=0.0)` in empire.py).
+# A missing entry therefore forbids hour-to-hour ramp-up within a season (genOp[h] <= genOp[h-1]),
+# rather than leaving the generator unconstrained. This matters for europe_v51, where
+# `LigniteCCSsup` is in ThermalGenerators but absent from genRampUpCap.csv (the file duplicates
+# `LigniteCCSadv` and omits `LigniteCCSsup`); a 1.0 default left it effectively unrampable-limited
+# in Julia while Python pinned it to 0.0.
+const DEFAULT_RAMPUP_CAP                 = 0.0
 # Efficiencies / availability factors default to 1.0 (lossless / fully available)
-const DEFAULT_RAMPUP_CAP        = 1.0
-const DEFAULT_BLEED_EFF         = 1.0
-const DEFAULT_CHARGE_EFF        = 1.0
-const DEFAULT_DISCHARGE_EFF     = 1.0
-const DEFAULT_LINE_EFF          = 1.0
-const DEFAULT_POWER_TO_ENERGY   = 1.0
+const DEFAULT_BLEED_EFF                  = 1.0
+const DEFAULT_CHARGE_EFF                 = 1.0
+const DEFAULT_DISCHARGE_EFF              = 1.0
+const DEFAULT_STORAGE_DISC_TO_CHAR_RATIO = 1.0
+const DEFAULT_LINE_EFF                   = 1.0
+const DEFAULT_POWER_TO_ENERGY            = 1.0
 
 # Operational initial state of storages defaults to empty
-const DEFAULT_STORAGE_INIT      = 0.0
+const DEFAULT_STORAGE_INIT = 0.0
 
 # Lifetimes default to 40 years
-const DEFAULT_GEN_LIFETIME      = 40
-const DEFAULT_STORAGE_LIFETIME  = 40
-const DEFAULT_TRANS_LIFETIME    = 40
+const DEFAULT_GEN_LIFETIME     = 40
+const DEFAULT_STORAGE_LIFETIME = 40
+const DEFAULT_TRANS_LIFETIME   = 40
 
 # Investment / marginal costs default to zero
-const DEFAULT_GEN_INVEST_COST    = 0.0
+const DEFAULT_GEN_INVEST_COST     = 0.0
 const DEFAULT_STOR_EN_INVEST_COST = 0.0
 const DEFAULT_STOR_PW_INVEST_COST = 0.0
-const DEFAULT_TRANS_INVEST_COST  = 0.0
-const DEFAULT_GEN_MARGINAL_COST  = 0.0
+const DEFAULT_TRANS_INVEST_COST   = 0.0
+const DEFAULT_GEN_MARGINAL_COST   = 0.0
 
-# Penalty cost for unserved load (high so it is rarely optimal to shed load)
-const DEFAULT_LOST_LOAD_COST     = 1000.0
+# Penalty cost for unserved load (high so it is rarely optimal to shed load).
+# Must match Python's `nodeLostLoadCost = Param(model.Node, model.Period, default=22000.0)`
+# (empire.py). europe_v51's nodeLostLoadCost.csv lists only 35 of 49 nodes (period 1 only);
+# the 14 missing nodes fall back to this default. A 1000.0 default made shedding ~22x cheaper
+# than Python at those nodes, so Julia shed load instead of building generation (~36e9 less
+# generator investment) and reached a spuriously cheaper optimum — the bulk of the long-horizon
+# europe_v51 objective gap.
+const DEFAULT_LOST_LOAD_COST = 22000.0
 
 # Helper functions to get parameter values with default fallbacks, the model should
 # only use these functions to access parameter values
@@ -157,13 +181,19 @@ ccs_cost_variable(par, sp) = par.CCSCostTSVariable === nothing ? 0.0 : par.CCSCo
 
 # General properties
 load(par, n, t) = haskey(par.sload, n) ? par.sload[n][t] : DEFAULT_LOAD
+season_name(par, representative_index::Integer) =
+    1 <= representative_index <= length(par.seasonNames) ? par.seasonNames[representative_index] : ""
+regular_season_count(par, representative_count::Integer) =
+    par.regularSeasonCount > 0 ? min(par.regularSeasonCount, representative_count) : representative_count
 
 # Generator properties
 gencap_avail(par, n, g, t) =
     haskey(par.genCapAvail, (n, g)) ? par.genCapAvail[(n, g)][t] : par.genCapAvailType[g]
 rampup_cap(par, g) = get(par.genRampUpCap, g, DEFAULT_RAMPUP_CAP)
-max_build_cap(par, n, gt, sp) = (n, gt) in keys(par.genMaxBuiltCap) ? par.genMaxBuiltCap[(n, gt)][sp] : DEFAULT_MAX_BUILD_CAP
-max_inst_cap(par, n, gt, sp) = (n, gt) in keys(par.genMaxInstalledCap) ? par.genMaxInstalledCap[(n, gt)][sp] : DEFAULT_MAX_INST_CAP
+max_build_cap(par, n, gt, sp) =
+    haskey(par.genMaxBuiltCap, (n, gt)) ? par.genMaxBuiltCap[(n, gt)][sp] : DEFAULT_GEN_MAX_BUILD_CAP
+max_inst_cap(par, n, gt, sp) =
+    haskey(par.genMaxInstalledCap, (n, gt)) ? par.genMaxInstalledCap[(n, gt)][sp] : DEFAULT_GEN_MAX_INST_CAP_RAW
 gen_lifetime(par, g) = get(par.genLifetime, g, DEFAULT_GEN_LIFETIME)
 gencap_init(par, n, g, sp) = (n, g) in keys(par.genInitCap) ? par.genInitCap[(n, g)][sp] : DEFAULT_GEN_INIT_CAP
 max_hydro_gen(par, n, sc) = haskey(par.maxRegHydroGen, n) ? par.maxRegHydroGen[n][sc] : DEFAULT_MAX_HYDRO_GEN
@@ -173,24 +203,61 @@ max_hydro_node(par, n) = get(par.maxHydroNode, n, DEFAULT_MAX_HYDRO_NODE)
 bleed_eff(par, s) = get(par.storageBleedEff, s, DEFAULT_BLEED_EFF)
 charge_eff(par, s) = get(par.storageChargeEff, s, DEFAULT_CHARGE_EFF)
 discharge_eff(par, s) = get(par.storageDischargeEff, s, DEFAULT_DISCHARGE_EFF)
+storage_disc_to_char_ratio(par, s) =
+    get(par.storageDiscToCharRatio, s, DEFAULT_STORAGE_DISC_TO_CHAR_RATIO)
 storage_init(par, s) = get(par.storOperationalInit, s, DEFAULT_STORAGE_INIT)
 lifetime_storage(par, s) = get(par.storageLifetime, s, DEFAULT_STORAGE_LIFETIME)
 stor_cap_init_en(par, n, s, sp) = haskey(par.storENInitCap, (n, s)) ? par.storENInitCap[(n, s)][sp] : DEFAULT_STOR_EN_INIT_CAP
 stor_cap_init_pow(par, n, s, sp) = haskey(par.storPWInitCap, (n, s)) ? par.storPWInitCap[(n, s)][sp] : DEFAULT_STOR_PW_INIT_CAP
+stor_en_max_build_cap(par, n, s, sp) =
+    haskey(par.storENMaxBuiltCap, (n, s)) ? par.storENMaxBuiltCap[(n, s)][sp] : DEFAULT_MAX_BUILD_CAP
+stor_pw_max_build_cap(par, n, s, sp) =
+    haskey(par.storPWMaxBuiltCap, (n, s)) ? par.storPWMaxBuiltCap[(n, s)][sp] : DEFAULT_MAX_BUILD_CAP
+stor_en_max_inst_cap(par, n, s, sp) =
+    haskey(par.storENMaxInstalledCap, (n, s)) ? par.storENMaxInstalledCap[(n, s)] : DEFAULT_MAX_INST_CAP
+stor_pw_max_inst_cap(par, n, s, sp) =
+    haskey(par.storPWMaxInstalledCap, (n, s)) ? par.storPWMaxInstalledCap[(n, s)] : DEFAULT_MAX_INST_CAP
 power_to_energy(par, s) = get(par.storagePowToEnergy, s, DEFAULT_POWER_TO_ENERGY)
 
 # Transmission properties
-trans_cap_init(par, m, n, sp) = haskey(par.transmissionInitCap, (m, n)) ? par.transmissionInitCap[(m, n)][sp] : DEFAULT_TRANS_INIT_CAP
-trans_lifetime(par, m, n) = get(par.transmissionLifetime, (m, n), DEFAULT_TRANS_LIFETIME)
-trans_max_build_cap(par, m, n, sp) = haskey(par.transmissionMaxBuiltCap, (m, n)) ? par.transmissionMaxBuiltCap[(m, n)][sp] : DEFAULT_TRANS_MAX_BUILD
-trans_max_inst_cap(par, m, n, sp) = haskey(par.transmissionMaxInstalledCap, (m, n)) ? par.transmissionMaxInstalledCap[(m, n)][sp] : DEFAULT_TRANS_MAX_INST
-line_eff(par, m, n) = get(par.lineEfficiency, (m, n), DEFAULT_LINE_EFF)
+#
+# A transmission corridor is a single physical line whose data (capacity, cost,
+# lifetime, efficiency, length) is symmetric in its two flow directions, but each
+# value is stored under a single (from, to) orientation in the CSV input. The model
+# uses one capacity variable and one investment cost per corridor, indexed by the
+# canonical orientation `bidir_arcs` assigns via `is_bidir` (min, max) — which need
+# not match the orientation present in the data. Every per-corridor accessor must
+# therefore resolve the value from either stored orientation; otherwise the canonical
+# key misses, the `nothing`/default leaks in, and (for caps) the constraint is silently
+# skipped or (for cost) the line becomes free. Python avoids this entirely by collapsing
+# both links into one orientation-independent BidirectionalArc; see
+# DIAGNOSIS_parity_test_dataset.md.
+_corridor_profile(dict, m, n) =
+    haskey(dict, (m, n)) ? dict[(m, n)] : get(dict, (n, m), nothing)
+
+function trans_cap_init(par, m, n, sp)
+    p = _corridor_profile(par.transmissionInitCap, m, n)
+    return p === nothing ? DEFAULT_TRANS_INIT_CAP : p[sp]
+end
+trans_lifetime(par, m, n) =
+    haskey(par.transmissionLifetime, (m, n)) ? par.transmissionLifetime[(m, n)] :
+    get(par.transmissionLifetime, (n, m), DEFAULT_TRANS_LIFETIME)
+trans_max_build_cap(par, m, n, sp) =
+    (p = _corridor_profile(par.transmissionMaxBuiltCap, m, n)) === nothing ? DEFAULT_TRANS_MAX_BUILD : p[sp]
+trans_max_inst_cap(par, m, n, sp) =
+    (p = _corridor_profile(par.transmissionMaxInstalledCap, m, n)) === nothing ? DEFAULT_TRANS_MAX_INST : p[sp]
+line_eff(par, m, n) =
+    haskey(par.lineEfficiency, (m, n)) ? par.lineEfficiency[(m, n)] :
+    get(par.lineEfficiency, (n, m), DEFAULT_LINE_EFF)
 
 # Cost properties
 gen_invest_cost(par, g, sp) = haskey(par.genInvCost, g) ? par.genInvCost[g][sp] : DEFAULT_GEN_INVEST_COST
 stor_en_invest_cost(par, s, sp) = haskey(par.storENInvCost, s) ? par.storENInvCost[s][sp] : DEFAULT_STOR_EN_INVEST_COST
 stor_pw_invest_cost(par, s, sp) = haskey(par.storPWInvCost, s) ? par.storPWInvCost[s][sp] : DEFAULT_STOR_PW_INVEST_COST
-trans_invest_cost(par, m, n, sp) = haskey(par.transmissionInvCost, (m, n)) ? par.transmissionInvCost[(m, n)][sp] : DEFAULT_TRANS_INVEST_COST
+function trans_invest_cost(par, m, n, sp)
+    p = _corridor_profile(par.transmissionInvCost, m, n)
+    return p === nothing ? DEFAULT_TRANS_INVEST_COST : p[sp]
+end
 
 lost_load_cost(par, n, t) = haskey(par.nodeLostLoadCost, n) ? par.nodeLostLoadCost[n][t] : DEFAULT_LOST_LOAD_COST
 sload(par, n, t) = haskey(par.sload, n) ? par.sload[n][t] : DEFAULT_LOAD
@@ -213,7 +280,7 @@ function _check_scalar!(errs, name, x; min = nothing, max = nothing, allow_nothi
     x === nothing && return allow_nothing ||
         (push!(errs, "$name must not be nothing"); false)
     min !== nothing && x < min && push!(errs, "$name = $(x) is below minimum $(min)")
-    max !== nothing && x > max && push!(errs, "$name = $(x) is above maximum $(max)")
+    return max !== nothing && x > max && push!(errs, "$name = $(x) is above maximum $(max)")
 end
 
 function _check_float_dict!(errs, name, d::AbstractDict; min = nothing, max = nothing)
@@ -221,11 +288,14 @@ function _check_float_dict!(errs, name, d::AbstractDict; min = nothing, max = no
         min !== nothing && v < min && push!(errs, "$name[$(k)] = $(v) is below minimum $(min)")
         max !== nothing && v > max && push!(errs, "$name[$(k)] = $(v) is above maximum $(max)")
     end
+    return
 end
 
-function _check_profile_dict!(errs, name, d::AbstractDict,
-                              periods::Union{Nothing, TimeStructure};
-                              min = nothing, max = nothing)
+function _check_profile_dict!(
+        errs, name, d::AbstractDict,
+        periods::Union{Nothing, TimeStructure};
+        min = nothing, max = nothing
+    )
     periods === nothing && return
     for (k, prof) in d
         for v in _profile_values(prof, periods)
@@ -239,11 +309,14 @@ function _check_profile_dict!(errs, name, d::AbstractDict,
             end
         end
     end
+    return
 end
 
-function _check_profile_scalar!(errs, name, prof,
-                                periods::Union{Nothing, TimeStructure};
-                                min = nothing, max = nothing)
+function _check_profile_scalar!(
+        errs, name, prof,
+        periods::Union{Nothing, TimeStructure};
+        min = nothing, max = nothing
+    )
     prof === nothing && return
     periods === nothing && return
     for v in _profile_values(prof, periods)
@@ -252,6 +325,7 @@ function _check_profile_scalar!(errs, name, prof,
         max !== nothing && v > max &&
             (push!(errs, "$name contains a value $(v) above maximum $(max)"); break)
     end
+    return
 end
 
 function _check_keys_in_set!(errs, name, d::AbstractDict, valid_set, label)
@@ -259,10 +333,13 @@ function _check_keys_in_set!(errs, name, d::AbstractDict, valid_set, label)
     for k in keys(d)
         k in valid_set || push!(errs, "$name has unknown $label key: $(k)")
     end
+    return
 end
 
-function _check_tuple_keys_in_sets!(errs, name, d::AbstractDict, valid1, label1, valid2, label2;
-                                    allowed_pairs = nothing)
+function _check_tuple_keys_in_sets!(
+        errs, name, d::AbstractDict, valid1, label1, valid2, label2;
+        allowed_pairs = nothing
+    )
     for k in keys(d)
         a, b = k[1], k[2]
         (!isempty(valid1) && !(a in valid1)) &&
@@ -273,6 +350,7 @@ function _check_tuple_keys_in_sets!(errs, name, d::AbstractDict, valid1, label1,
             push!(errs, "$name key $(k) is not a valid ($label1, $label2) pair")
         end
     end
+    return
 end
 
 """
@@ -288,6 +366,7 @@ The function performs three kinds of checks:
    - `WACC` and `discountRate` are finite numbers in `[0, 1]` (if set).
    - Efficiencies (`lineEfficiency`, `storageBleedEff`, `storageChargeEff`,
      `storageDischargeEff`) are in `[0, 1]`.
+   - `storageDiscToCharRatio` is non-negative.
    - Costs, capacities and CO2 quantities are finite and non-negative.
    - Lifetimes are strictly positive.
    - `genRampUpCap` and `genCapAvailType` are in `[0, 1]`.
@@ -308,9 +387,11 @@ When `strict = true` (the default) an `ArgumentError` is thrown summarising
 all detected issues. When `strict = false` the function returns the vector
 of issue messages (empty if everything is valid) and only emits warnings.
 """
-function validate(par::EmpireParams; sets::Union{Nothing, EmpireSets} = nothing,
-                  periods::Union{Nothing, TimeStructure} = nothing,
-                  strict::Bool = true)
+function validate(
+        par::EmpireParams; sets::Union{Nothing, EmpireSets} = nothing,
+        periods::Union{Nothing, TimeStructure} = nothing,
+        strict::Bool = true
+    )
     errs = String[]
 
     # Scalar / financial parameters
@@ -334,6 +415,7 @@ function validate(par::EmpireParams; sets::Union{Nothing, EmpireSets} = nothing,
     _check_float_dict!(errs, "storageBleedEff", par.storageBleedEff; min = 0.0, max = 1.0)
     _check_float_dict!(errs, "storageChargeEff", par.storageChargeEff; min = 0.0, max = 1.0)
     _check_float_dict!(errs, "storageDischargeEff", par.storageDischargeEff; min = 0.0, max = 1.0)
+    _check_float_dict!(errs, "storageDiscToCharRatio", par.storageDiscToCharRatio; min = 0.0)
     _check_float_dict!(errs, "storagePowToEnergy", par.storagePowToEnergy; min = 0.0)
     _check_float_dict!(errs, "storENMaxInstalledCap", par.storENMaxInstalledCap; min = 0.0)
     _check_float_dict!(errs, "storPWMaxInstalledCap", par.storPWMaxInstalledCap; min = 0.0)
@@ -344,38 +426,38 @@ function validate(par::EmpireParams; sets::Union{Nothing, EmpireSets} = nothing,
 
     # TimeProfile dicts
     for (name, d) in (
-        ("genCapitalCost",              par.genCapitalCost),
-        ("genFixedOMCost",              par.genFixedOMCost),
-        ("genFuelCost",                 par.genFuelCost),
-        ("genScaleInitCap",             par.genScaleInitCap),
-        ("genInitCap",                  par.genInitCap),
-        ("genMaxBuiltCap",              par.genMaxBuiltCap),
-        ("genMaxInstalledCap",          par.genMaxInstalledCap),
-        ("transmissionInitCap",         par.transmissionInitCap),
-        ("transmissionMaxBuiltCap",     par.transmissionMaxBuiltCap),
-        ("transmissionMaxInstalledCap", par.transmissionMaxInstalledCap),
-        ("transmissionTypeCapitalCost", par.transmissionTypeCapitalCost),
-        ("transmissionTypeFixedOMCost", par.transmissionTypeFixedOMCost),
-        ("storENCapitalCost",           par.storENCapitalCost),
-        ("storENFixedOMCost",           par.storENFixedOMCost),
-        ("storENInitCap",               par.storENInitCap),
-        ("storENMaxBuiltCap",           par.storENMaxBuiltCap),
-        ("storPWCapitalCost",           par.storPWCapitalCost),
-        ("storPWFixedOMCost",           par.storPWFixedOMCost),
-        ("storPWInitCap",               par.storPWInitCap),
-        ("storPWMaxBuiltCap",           par.storPWMaxBuiltCap),
-        ("nodeLostLoadCost",            par.nodeLostLoadCost),
-        ("sloadAnnualDemand",           par.sloadAnnualDemand),
-        ("sloadRaw",                    par.sloadRaw),
-        ("sload",                       par.sload),
-        ("maxRegHydroGenRaw",           par.maxRegHydroGenRaw),
-        ("maxRegHydroGen",              par.maxRegHydroGen),
-        ("genInvCost",                  par.genInvCost),
-        ("storENInvCost",               par.storENInvCost),
-        ("storPWInvCost",               par.storPWInvCost),
-        ("transmissionInvCost",         par.transmissionInvCost),
-        ("genMargCost",                 par.genMargCost),
-    )
+            ("genCapitalCost", par.genCapitalCost),
+            ("genFixedOMCost", par.genFixedOMCost),
+            ("genFuelCost", par.genFuelCost),
+            ("genScaleInitCap", par.genScaleInitCap),
+            ("genInitCap", par.genInitCap),
+            ("genMaxBuiltCap", par.genMaxBuiltCap),
+            ("genMaxInstalledCap", par.genMaxInstalledCap),
+            ("transmissionInitCap", par.transmissionInitCap),
+            ("transmissionMaxBuiltCap", par.transmissionMaxBuiltCap),
+            ("transmissionMaxInstalledCap", par.transmissionMaxInstalledCap),
+            ("transmissionTypeCapitalCost", par.transmissionTypeCapitalCost),
+            ("transmissionTypeFixedOMCost", par.transmissionTypeFixedOMCost),
+            ("storENCapitalCost", par.storENCapitalCost),
+            ("storENFixedOMCost", par.storENFixedOMCost),
+            ("storENInitCap", par.storENInitCap),
+            ("storENMaxBuiltCap", par.storENMaxBuiltCap),
+            ("storPWCapitalCost", par.storPWCapitalCost),
+            ("storPWFixedOMCost", par.storPWFixedOMCost),
+            ("storPWInitCap", par.storPWInitCap),
+            ("storPWMaxBuiltCap", par.storPWMaxBuiltCap),
+            ("nodeLostLoadCost", par.nodeLostLoadCost),
+            ("sloadAnnualDemand", par.sloadAnnualDemand),
+            ("sloadRaw", par.sloadRaw),
+            ("sload", par.sload),
+            ("maxRegHydroGenRaw", par.maxRegHydroGenRaw),
+            ("maxRegHydroGen", par.maxRegHydroGen),
+            ("genInvCost", par.genInvCost),
+            ("storENInvCost", par.storENInvCost),
+            ("storPWInvCost", par.storPWInvCost),
+            ("transmissionInvCost", par.transmissionInvCost),
+            ("genMargCost", par.genMargCost),
+        )
         _check_profile_dict!(errs, name, d, periods; min = 0.0)
     end
 
@@ -391,9 +473,9 @@ function validate(par::EmpireParams; sets::Union{Nothing, EmpireSets} = nothing,
 
     # Index checks (only if a set is provided)
     if sets !== nothing
-        gset  = Set(generators(sets))
-        sset  = Set(storages(sets))
-        nset  = Set(nodes(sets))
+        gset = Set(generators(sets))
+        sset = Set(storages(sets))
+        nset = Set(nodes(sets))
         ttset = Set(transmission_types(sets))
         arcset = Set(arcs(sets))
         ng_pairs = Set(node_generators(sets))
@@ -401,105 +483,118 @@ function validate(par::EmpireParams; sets::Union{Nothing, EmpireSets} = nothing,
 
         # String-keyed dicts indexed by generator
         for (name, d) in (
-            ("genCapitalCost",    par.genCapitalCost),
-            ("genFixedOMCost",    par.genFixedOMCost),
-            ("genVariableOMCost", par.genVariableOMCost),
-            ("genFuelCost",       par.genFuelCost),
-            ("genEfficiency",     par.genEfficiency),
-            ("genScaleInitCap",   par.genScaleInitCap),
-            ("genRampUpCap",      par.genRampUpCap),
-            ("genCapAvailType",   par.genCapAvailType),
-            ("genCO2Content",     par.genCO2Content),
-            ("genLifetime",       par.genLifetime),
-            ("genInvCost",        par.genInvCost),
-            ("genMargCost",       par.genMargCost),
-        )
+                ("genCapitalCost", par.genCapitalCost),
+                ("genFixedOMCost", par.genFixedOMCost),
+                ("genVariableOMCost", par.genVariableOMCost),
+                ("genFuelCost", par.genFuelCost),
+                ("genEfficiency", par.genEfficiency),
+                ("genScaleInitCap", par.genScaleInitCap),
+                ("genRampUpCap", par.genRampUpCap),
+                ("genCapAvailType", par.genCapAvailType),
+                ("genCO2Content", par.genCO2Content),
+                ("genLifetime", par.genLifetime),
+                ("genInvCost", par.genInvCost),
+                ("genMargCost", par.genMargCost),
+            )
             _check_keys_in_set!(errs, name, d, gset, "generator")
         end
 
         # String-keyed dicts indexed by storage
         for (name, d) in (
-            ("storageBleedEff",     par.storageBleedEff),
-            ("storageChargeEff",    par.storageChargeEff),
-            ("storageDischargeEff", par.storageDischargeEff),
-            ("storagePowToEnergy",  par.storagePowToEnergy),
-            ("storENCapitalCost",   par.storENCapitalCost),
-            ("storENFixedOMCost",   par.storENFixedOMCost),
-            ("storOperationalInit", par.storOperationalInit),
-            ("storPWCapitalCost",   par.storPWCapitalCost),
-            ("storPWFixedOMCost",   par.storPWFixedOMCost),
-            ("storageLifetime",     par.storageLifetime),
-            ("storENInvCost",       par.storENInvCost),
-            ("storPWInvCost",       par.storPWInvCost),
-        )
+                ("storageBleedEff", par.storageBleedEff),
+                ("storageChargeEff", par.storageChargeEff),
+                ("storageDischargeEff", par.storageDischargeEff),
+                ("storageDiscToCharRatio", par.storageDiscToCharRatio),
+                ("storagePowToEnergy", par.storagePowToEnergy),
+                ("storENCapitalCost", par.storENCapitalCost),
+                ("storENFixedOMCost", par.storENFixedOMCost),
+                ("storOperationalInit", par.storOperationalInit),
+                ("storPWCapitalCost", par.storPWCapitalCost),
+                ("storPWFixedOMCost", par.storPWFixedOMCost),
+                ("storageLifetime", par.storageLifetime),
+                ("storENInvCost", par.storENInvCost),
+                ("storPWInvCost", par.storPWInvCost),
+            )
             _check_keys_in_set!(errs, name, d, sset, "storage")
         end
 
         # String-keyed dicts indexed by node
         for (name, d) in (
-            ("nodeLostLoadCost",  par.nodeLostLoadCost),
-            ("sloadAnnualDemand", par.sloadAnnualDemand),
-            ("maxHydroNode",      par.maxHydroNode),
-            ("sloadRaw",          par.sloadRaw),
-            ("sload",             par.sload),
-            ("maxRegHydroGenRaw", par.maxRegHydroGenRaw),
-            ("maxRegHydroGen",    par.maxRegHydroGen),
-        )
+                ("nodeLostLoadCost", par.nodeLostLoadCost),
+                ("sloadAnnualDemand", par.sloadAnnualDemand),
+                ("maxHydroNode", par.maxHydroNode),
+                ("sloadRaw", par.sloadRaw),
+                ("sload", par.sload),
+                ("maxRegHydroGenRaw", par.maxRegHydroGenRaw),
+                ("maxRegHydroGen", par.maxRegHydroGen),
+            )
             _check_keys_in_set!(errs, name, d, nset, "node")
         end
 
         # String-keyed dicts indexed by transmission type
         for (name, d) in (
-            ("transmissionTypeCapitalCost", par.transmissionTypeCapitalCost),
-            ("transmissionTypeFixedOMCost", par.transmissionTypeFixedOMCost),
-        )
+                ("transmissionTypeCapitalCost", par.transmissionTypeCapitalCost),
+                ("transmissionTypeFixedOMCost", par.transmissionTypeFixedOMCost),
+            )
             _check_keys_in_set!(errs, name, d, ttset, "transmission type")
         end
 
         # Tuple{node, generator} keyed dicts
         for (name, d) in (
-            ("genRefInitCap",         par.genRefInitCap),
-            ("genInitCap",            par.genInitCap),
-            ("genMaxBuiltCap",        par.genMaxBuiltCap),
-            ("genMaxInstalledCapRaw", par.genMaxInstalledCapRaw),
-            ("genMaxInstalledCap",    par.genMaxInstalledCap),
-            ("genCapAvail",           par.genCapAvail),
-        )
-            _check_tuple_keys_in_sets!(errs, name, d, nset, "node", gset, "generator";
-                                       allowed_pairs = ng_pairs)
+                ("genRefInitCap", par.genRefInitCap),
+                ("genInitCap", par.genInitCap),
+                ("genCapAvail", par.genCapAvail),
+            )
+            _check_tuple_keys_in_sets!(
+                errs, name, d, nset, "node", gset, "generator";
+                allowed_pairs = ng_pairs
+            )
+        end
+
+        # Tuple{node, technology} keyed dicts
+        for (name, d) in (
+                ("genMaxBuiltCap", par.genMaxBuiltCap),
+                ("genMaxInstalledCapRaw", par.genMaxInstalledCapRaw),
+                ("genMaxInstalledCap", par.genMaxInstalledCap),
+            )
+            _check_tuple_keys_in_sets!(errs, name, d, nset, "node", Set(techs(sets)), "technology")
         end
 
         # Tuple{node, storage} keyed dicts
         for (name, d) in (
-            ("storENInitCap",       par.storENInitCap),
-            ("storENMaxBuiltCap",   par.storENMaxBuiltCap),
-            ("storENMaxInstalledCap", par.storENMaxInstalledCap),
-            ("storPWInitCap",       par.storPWInitCap),
-            ("storPWMaxBuiltCap",   par.storPWMaxBuiltCap),
-            ("storPWMaxInstalledCap", par.storPWMaxInstalledCap),
-        )
-            _check_tuple_keys_in_sets!(errs, name, d, nset, "node", sset, "storage";
-                                       allowed_pairs = ns_pairs)
+                ("storENInitCap", par.storENInitCap),
+                ("storENMaxBuiltCap", par.storENMaxBuiltCap),
+                ("storENMaxInstalledCap", par.storENMaxInstalledCap),
+                ("storPWInitCap", par.storPWInitCap),
+                ("storPWMaxBuiltCap", par.storPWMaxBuiltCap),
+                ("storPWMaxInstalledCap", par.storPWMaxInstalledCap),
+            )
+            _check_tuple_keys_in_sets!(
+                errs, name, d, nset, "node", sset, "storage";
+                allowed_pairs = ns_pairs
+            )
         end
 
         # Tuple{node, node} keyed dicts (arcs)
         for (name, d) in (
-            ("transmissionInitCap",         par.transmissionInitCap),
-            ("transmissionMaxBuiltCap",     par.transmissionMaxBuiltCap),
-            ("transmissionMaxInstalledCap", par.transmissionMaxInstalledCap),
-            ("transmissionLength",          par.transmissionLength),
-            ("lineEfficiency",              par.lineEfficiency),
-            ("transmissionLifetime",        par.transmissionLifetime),
-            ("transmissionInvCost",         par.transmissionInvCost),
-        )
-            _check_tuple_keys_in_sets!(errs, name, d, nset, "node", nset, "node";
-                                       allowed_pairs = arcset)
+                ("transmissionInitCap", par.transmissionInitCap),
+                ("transmissionMaxBuiltCap", par.transmissionMaxBuiltCap),
+                ("transmissionMaxInstalledCap", par.transmissionMaxInstalledCap),
+                ("transmissionLength", par.transmissionLength),
+                ("lineEfficiency", par.lineEfficiency),
+                ("transmissionLifetime", par.transmissionLifetime),
+                ("transmissionInvCost", par.transmissionInvCost),
+            )
+            _check_tuple_keys_in_sets!(
+                errs, name, d, nset, "node", nset, "node";
+                allowed_pairs = arcset
+            )
         end
     end
 
     if !isempty(errs)
         msg = "EmpireParams validation found $(length(errs)) issue(s):\n  - " *
-              join(errs, "\n  - ")
+            join(errs, "\n  - ")
         if strict
             throw(ArgumentError(msg))
         else

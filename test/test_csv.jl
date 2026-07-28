@@ -104,7 +104,6 @@ function test_read_csv_dataset()
         @test params.transmissionLength[("A", "B")] == 10.0
         @test params.storageChargeEff["battery"] == 0.9
         @test params.maxHydroNode["A"] == 0.0
-
         sets2, params2 = OpenEMPIRE.read_data(dataset; format = :csv)
         @test OpenEMPIRE.nodes(sets2) == OpenEMPIRE.nodes(sets)
         @test params2.genVariableOMCost == params.genVariableOMCost
@@ -133,4 +132,245 @@ function test_read_bundled_csv_datasets()
     @test length(OpenEMPIRE.generators(europe_sets)) == 28
     @test length(OpenEMPIRE.arcs(europe_sets)) == 380
     @test length(europe_params.genCapitalCost) == 23
+end
+
+function test_native_timestruct_operational_weights()
+    periods = OpenEMPIRE.create_timestruct(1, 5, 4, 2, 2, 1, 2)
+    sp = first(strat_periods(periods))
+    representatives = collect(repr_periods(sp))
+    first_time = first(first(opscenarios(first(representatives))))
+    discounter = Discounter(0.05, 1, periods)
+
+    params = OpenEMPIRE.EmpireParams(
+        WACC = 0.05,
+        discountRate = 0.05,
+        seasonNames = ["winter", "spring", "summer", "fall", "peak1", "peak2"],
+        regularSeasonCount = 4,
+    )
+
+    op_discount = sum((1 + 0.05)^(-j) for j in 0:4)
+    annual_multiple = (8760 - 2) / (4 * 2)
+
+    @test OpenEMPIRE.regular_season_count(params, length(representatives)) == 4
+    @test multiple_strat(sp, first_time) ≈ annual_multiple
+    @test probability(first_time) == 0.5
+    @test objective_weight(first_time, discounter; type = "avg_year") ≈
+          objective_weight(sp, discounter) * op_discount * annual_multiple * probability(first_time)
+end
+
+function test_write_solution_csv_tables()
+    sets = OpenEMPIRE.EmpireSets(
+        Generator = ["Solar"],
+        Storage = ["battery"],
+        Technology = ["Solar"],
+        Node = ["A", "B"],
+        DirectionalLink = [("A", "B"), ("B", "A")],
+        TransmissionType = ["HVDC"],
+        TransmissionTypeOfDirectionalLink = [("A", "B", "HVDC"), ("B", "A", "HVDC")],
+        GeneratorsOfTechnology = [("Solar", "Solar")],
+        GeneratorsOfNode = [("A", "Solar")],
+        StoragesOfNode = [("A", "battery")],
+    )
+    periods = OpenEMPIRE.create_timestruct(1, 5, 1, 2, 0, 0, 1)
+    sp = first(strat_periods(periods))
+    times = collect(periods)
+    first_time = times[1]
+    second_time = times[2]
+    params = OpenEMPIRE.EmpireParams(
+        WACC = 0.05,
+        discountRate = 0.05,
+        seasonNames = ["winter"],
+        regularSeasonCount = 1,
+        genInvCost = Dict("Solar" => StrategicProfile([10.0])),
+        genMargCost = Dict("Solar" => StrategicProfile([2.0])),
+        genEfficiency = Dict("Solar" => StrategicProfile([1.0])),
+        genCO2Content = Dict("Solar" => 0.0),
+        genCapAvailType = Dict("Solar" => 1.0),
+        storPWInvCost = Dict("battery" => StrategicProfile([4.0])),
+        storENInvCost = Dict("battery" => StrategicProfile([5.0])),
+        storageChargeEff = Dict("battery" => 0.9),
+        storageDischargeEff = Dict("battery" => 0.8),
+        storageBleedEff = Dict("battery" => 0.95),
+        lineEfficiency = Dict(("A", "B") => 0.9, ("B", "A") => 0.85),
+    )
+
+    emp = JuMP.Model(HiGHS.Optimizer)
+    JuMP.set_silent(emp)
+    OpenEMPIRE.create_variables(emp, sets, periods)
+    @constraint(emp, emp[:genInvCap]["A", "Solar", sp] == 3.0)
+    @constraint(emp, emp[:genInstalledCap]["A", "Solar", sp] == 10.0)
+    @constraint(emp, emp[:genOperational]["A", "Solar", first_time] == 4.0)
+    @constraint(emp, emp[:genOperational]["A", "Solar", second_time] == 6.0)
+    @constraint(emp, emp[:storPWInvCap]["A", "battery", sp] == 2.0)
+    @constraint(emp, emp[:storPWInstalledCap]["A", "battery", sp] == 7.0)
+    @constraint(emp, emp[:storENInvCap]["A", "battery", sp] == 3.0)
+    @constraint(emp, emp[:storENInstalledCap]["A", "battery", sp] == 8.0)
+    @constraint(emp, emp[:storCharge]["A", "battery", first_time] == 1.0)
+    @constraint(emp, emp[:storCharge]["A", "battery", second_time] == 2.0)
+    @constraint(emp, emp[:storDischarge]["A", "battery", first_time] == 5.0)
+    @constraint(emp, emp[:storDischarge]["A", "battery", second_time] == 7.0)
+    @constraint(emp, emp[:storOperational]["A", "battery", first_time] == 9.0)
+    @constraint(emp, emp[:storOperational]["A", "battery", second_time] == 10.0)
+    @constraint(emp, emp[:transmissionInvCap]["A", "B", sp] == 11.0)
+    @constraint(emp, emp[:transmissionInstalledCap]["A", "B", sp] == 12.0)
+    @constraint(emp, emp[:transmissionOperational]["A", "B", first_time] == 13.0)
+    @constraint(emp, emp[:transmissionOperational]["A", "B", second_time] == 14.0)
+    @constraint(emp, emp[:transmissionOperational]["B", "A", first_time] == 15.0)
+    @constraint(emp, emp[:transmissionOperational]["B", "A", second_time] == 16.0)
+    @objective(emp, Min, emp[:genInvCap]["A", "Solar", sp])
+    optimize!(emp)
+
+    @test JuMP.is_solved_and_feasible(emp)
+
+    mktempdir() do result_dir
+        output_dir = OpenEMPIRE.write_solution_tables(result_dir, emp, sets, params, periods)
+        @test basename(output_dir) == "output"
+        expected_files = [
+            "genInstalledCap.csv",
+            "genInvCap.csv",
+            "genOperational.csv",
+            "investment_costs.csv",
+            "loadShed.csv",
+            "marginal_costs.csv",
+            "results_objective.csv",
+            "results_output_EuropePlot.csv",
+            "results_output_EuropeSummary.csv",
+            "results_output_Operational.csv",
+            "results_output_curtailed_operational.csv",
+            "results_output_curtailed_prod.csv",
+            "results_output_gen.csv",
+            "results_output_stor.csv",
+            "results_output_transmission.csv",
+            "results_output_transmission_operational.csv",
+            "storCharge.csv",
+            "storDischarge.csv",
+            "storENInstalledCap.csv",
+            "storENInvCap.csv",
+            "storPWInstalledCap.csv",
+            "storPWInvCap.csv",
+            "storageOperational.csv",
+            "transmissionInvCap.csv",
+            "transmissionInstalledCap.csv",
+            "transmissionOperational.csv",
+        ]
+
+        @test sort(readdir(output_dir)) == sort(expected_files)
+        @test all(endswith(file, ".csv") for file in readdir(output_dir))
+
+        gen_inv = collect(CSV.File(joinpath(output_dir, "genInvCap.csv")))
+        @test propertynames(first(gen_inv)) == [:Node, :Generator, :Period, :genInvCap]
+        @test length(gen_inv) == 1
+        @test gen_inv[1].Node == "A"
+        @test gen_inv[1].Generator == "Solar"
+        @test gen_inv[1].Period == 1
+        @test gen_inv[1].genInvCap ≈ 3.0
+
+        trans_inv = collect(CSV.File(joinpath(output_dir, "transmissionInvCap.csv")))
+        @test propertynames(first(trans_inv)) == [:FromNode, :ToNode, :Period, :transmissionInvCap]
+        @test trans_inv[1].transmissionInvCap ≈ 11.0
+
+        gen_operational = collect(CSV.File(joinpath(output_dir, "genOperational.csv")))
+        @test propertynames(first(gen_operational)) ==
+              [:Node, :Generator, :Period, :Scenario, :Season, :Hour, :genOperational]
+        @test length(gen_operational) == 2
+        @test gen_operational[1].Season == "winter"
+        @test gen_operational[1].Scenario == 1
+        @test gen_operational[1].Hour == 1
+        @test gen_operational[1].genOperational ≈ 4.0
+
+        gen_report = collect(CSV.File(joinpath(output_dir, "results_output_gen.csv")))
+        weight = multiple_strat(sp, first_time) * probability(first_time)
+        expected_generation = weight * (4.0 + 6.0)
+        @test gen_report[1].GeneratorType == "Solar"
+        @test gen_report[1].genExpectedCapacityFactor ≈ expected_generation / (10.0 * 8760)
+        @test gen_report[1].DiscountedInvestmentCost_Euro ≈
+              objective_weight(sp, Discounter(OpenEMPIRE.discount_rate(params), 1, periods)) * 3.0 * 10.0
+        @test gen_report[1].genExpectedAnnualProduction_GWh ≈ expected_generation / 1000
+
+        stor_report = collect(CSV.File(joinpath(output_dir, "results_output_stor.csv")))
+        @test stor_report[1].ExpectedAnnualDischargeVolume_GWh ≈ weight * (5.0 + 7.0) / 1000
+        expected_storage_losses = weight * ((1 - 0.8) * (5.0 + 7.0) + (1 - 0.9) * (1.0 + 2.0))
+        @test stor_report[1].ExpectedAnnualLossesChargeDischarge_GWh ≈ expected_storage_losses / 1000
+
+        trans_report = collect(CSV.File(joinpath(output_dir, "results_output_transmission.csv")))
+        @test propertynames(first(trans_report)) == [
+            :BetweenNode,
+            :AndNode,
+            :Period,
+            :transmissionInvCap_MW,
+            :transmissionInstalledCap_MW,
+            :DiscountedInvestmentCost_Euro,
+            :transmissionExpectedAnnualVolume_GWh,
+            :ExpectedAnnualLosses_GWh,
+        ]
+        @test trans_report[1].transmissionExpectedAnnualVolume_GWh ≈ weight * (13.0 + 14.0 + 15.0 + 16.0) / 1000
+        expected_transmission_losses = weight * ((1 - 0.9) * (13.0 + 14.0) + (1 - 0.85) * (15.0 + 16.0))
+        @test trans_report[1].ExpectedAnnualLosses_GWh ≈ expected_transmission_losses / 1000
+
+        curtailment = collect(CSV.File(joinpath(output_dir, "results_output_curtailed_prod.csv")))
+        @test curtailment[1].ExpectedAnnualCurtailment_GWh ≈ weight * ((10.0 - 4.0) + (10.0 - 6.0)) / 1000
+
+        operational = collect(CSV.File(joinpath(output_dir, "results_output_Operational.csv")))
+        @test :Solar_MW in propertynames(first(operational))
+    end
+end
+
+function test_europe_summary_uses_per_scenario_totals()
+    sets = OpenEMPIRE.EmpireSets(
+        Generator = ["Solar"],
+        Storage = String[],
+        Technology = ["Solar"],
+        Node = ["A"],
+        DirectionalLink = Tuple{String, String}[],
+        TransmissionType = String[],
+        TransmissionTypeOfDirectionalLink = Tuple{String, String, String}[],
+        GeneratorsOfTechnology = [("Solar", "Solar")],
+        GeneratorsOfNode = [("A", "Solar")],
+        StoragesOfNode = Tuple{String, String}[],
+    )
+    periods = OpenEMPIRE.create_timestruct(1, 5, 1, 2, 0, 0, 2)
+    sp = first(strat_periods(periods))
+    scenarios = collect(opscenarios(first(repr_periods(sp))))
+    scenario_one_times = collect(scenarios[1])
+    scenario_two_times = collect(scenarios[2])
+    params = OpenEMPIRE.EmpireParams(
+        WACC = 0.05,
+        discountRate = 0.05,
+        seasonNames = ["winter"],
+        regularSeasonCount = 1,
+        genInvCost = Dict("Solar" => StrategicProfile([10.0])),
+        genMargCost = Dict("Solar" => StrategicProfile([2.0])),
+        genEfficiency = Dict("Solar" => StrategicProfile([1.0])),
+        genCO2Content = Dict("Solar" => 0.0),
+        genCapAvailType = Dict("Solar" => 1.0),
+    )
+
+    emp = JuMP.Model(HiGHS.Optimizer)
+    JuMP.set_silent(emp)
+    OpenEMPIRE.create_variables(emp, sets, periods)
+    @constraint(emp, emp[:genInvCap]["A", "Solar", sp] == 0.0)
+    @constraint(emp, emp[:genInstalledCap]["A", "Solar", sp] == 100.0)
+    @constraint(emp, emp[:genOperational]["A", "Solar", scenario_one_times[1]] == 4.0)
+    @constraint(emp, emp[:genOperational]["A", "Solar", scenario_one_times[2]] == 6.0)
+    @constraint(emp, emp[:genOperational]["A", "Solar", scenario_two_times[1]] == 10.0)
+    @constraint(emp, emp[:genOperational]["A", "Solar", scenario_two_times[2]] == 14.0)
+    @objective(emp, Min, emp[:genInvCap]["A", "Solar", sp])
+    optimize!(emp)
+
+    @test JuMP.is_solved_and_feasible(emp)
+
+    mktempdir() do result_dir
+        output_dir = OpenEMPIRE.write_solution_tables(result_dir, emp, sets, params, periods)
+
+        gen_report = collect(CSV.File(joinpath(output_dir, "results_output_gen.csv")))
+        annual_multiple = multiple_strat(sp, first(scenario_one_times))
+        expected_generation = annual_multiple * 0.5 * (4.0 + 6.0 + 10.0 + 14.0)
+        @test gen_report[1].genExpectedAnnualProduction_GWh ≈ expected_generation / 1000
+
+        europe_summary = collect(CSV.File(IOBuffer(first(split(read(joinpath(output_dir, "results_output_EuropeSummary.csv"), String), "\n\n")))))
+        scenario_one = only(row for row in europe_summary if row.Scenario == "scenario1")
+        scenario_two = only(row for row in europe_summary if row.Scenario == "scenario2")
+        @test scenario_one.AnnualGeneration_GWh ≈ annual_multiple * (4.0 + 6.0) / 1000
+        @test scenario_two.AnnualGeneration_GWh ≈ annual_multiple * (10.0 + 14.0) / 1000
+    end
 end

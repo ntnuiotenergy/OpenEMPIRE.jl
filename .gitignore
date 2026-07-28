@@ -2,3 +2,11 @@ Manifest.toml
 .vscode/settings.json
 data/~$*.xlsx
 *.lp
+results/
+logs/
+config/cluster.json
+data/*/ScenarioData/sloadRaw.csv
+data/*/ScenarioData/maxRegHydroGenRaw.csv
+data/*/ScenarioData/genCapAvailStochRaw.csv
+data/*/ScenarioData/sampling_key.csv
+**/.DS_Store

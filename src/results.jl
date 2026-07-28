@@ -13,7 +13,7 @@ function sol_invest_cost(emp, sets, par, periods, discounter::Discounter)
             sum(gen_invest_cost(par, g, sp) * value(genInvCap[n, g, sp]) for n in N for g in generators(sets, n); init = 0)
             for sp in SP)
     trans_cost = sum(objective_weight(sp, discounter) * (
-            sum(trans_invest_cost(par, m, n, sp) * value(transInvCap[m, n, sp]) for (m, n) in arcs(sets); init = 0)
+            sum(trans_invest_cost(par, m, n, sp) * value(transInvCap[m, n, sp]) for (m, n) in bidir_arcs(sets); init = 0)
             ) for sp in SP)
     stor_pw_cost = sum(objective_weight(sp, discounter) * (
             sum(stor_pw_invest_cost(par, s, sp) * value(storInvCapPow[n, s, sp]) for n in N for s in storages(sets, n); init = 0)
@@ -31,16 +31,1079 @@ function sol_operational_cost(emp, sets, par, periods, discounter::Discounter)
     genOperational = emp[:genOperational]
     loadShed = emp[:loadShed]
 
-    T = periods
     N = nodes(sets)
 
     gen_cost = sum(objective_weight(t, discounter; type = "avg_year") * (
             sum(gen_marginal_cost(par, g, t) * value(genOperational[n, g, t]) for n in N for g in generators(sets, n); init = 0)
-            ) for t in T)
+            )
+        for t in periods)
 
     load_shed_cost = sum(objective_weight(t, discounter; type = "avg_year") * (
             sum(lost_load_cost(par, n, t) * value(loadShed[n, t]) for n in N; init = 0)
-            ) for t in T)
+            )
+        for t in periods)
 
     return gen_cost, load_shed_cost
+end
+
+_solution_value(x) = Float64(JuMP.value(x))
+
+function _strategic_indices(periods::TimeStructure)
+    return collect(enumerate(strat_periods(periods)))
+end
+
+_scenario_label(scenario_index::Integer) = "scenario$scenario_index"
+
+function _foreach_operational_index(f, par::EmpireParams, periods::TimeStructure)
+    for (period_index, sp) in enumerate(strat_periods(periods))
+        for (representative_index, rp) in enumerate(repr_periods(sp))
+            season = season_name(par, representative_index)
+            for (scenario_index, sc) in enumerate(opscenarios(rp))
+                for (hour, t) in enumerate(sc)
+                    f(period_index, scenario_index, season, hour, t)
+                end
+            end
+        end
+    end
+    return nothing
+end
+
+function _foreach_operational_context(f, par::EmpireParams, periods::TimeStructure)
+    for (period_index, sp) in enumerate(strat_periods(periods))
+        hour_offset = 0
+        for (representative_index, rp) in enumerate(repr_periods(sp))
+            season = season_name(par, representative_index)
+            first_scenario = first(opscenarios(rp))
+            for (scenario_index, sc) in enumerate(opscenarios(rp))
+                for (local_hour, t) in enumerate(sc)
+                    f(period_index, sp, scenario_index, representative_index, season, hour_offset + local_hour, t)
+                end
+            end
+            hour_offset += length(first_scenario)
+        end
+    end
+    return nothing
+end
+
+function _write_csv_rows(path::AbstractString, rows)
+    mkpath(dirname(path))
+    CSV.write(path, rows)
+    return path
+end
+
+function _csv_field(value)
+    if value isa AbstractFloat && isnan(value)
+        return "NaN"
+    end
+    text = string(value)
+    if occursin(',', text) || occursin('"', text) || occursin('\n', text) || occursin('\r', text)
+        return "\"" * replace(text, "\"" => "\"\"") * "\""
+    end
+    return text
+end
+
+function _write_csv_row(io, row)
+    println(io, join((_csv_field(value) for value in row), ","))
+    return nothing
+end
+
+function _write_csv_table(path::AbstractString, header, write_rows::Function)
+    mkpath(dirname(path))
+    open(path, "w") do io
+        _write_csv_row(io, header)
+        write_rows(io)
+    end
+    return path
+end
+
+_write_csv_table(write_rows::Function, path::AbstractString, header) =
+    _write_csv_table(path, header, write_rows)
+
+function _value_or_zero(container, args...)
+    try
+        return _solution_value(container[args...])
+    catch
+        return 0.0
+    end
+end
+
+function _objective_value_or_nan(emp::JuMP.Model)
+    if haskey(emp.ext, :reported_objective_value)
+        return Float64(emp.ext[:reported_objective_value])
+    end
+    try
+        return Float64(JuMP.objective_value(emp))
+    catch
+        return NaN
+    end
+end
+
+function _dual_or_nan(container, args...)
+    try
+        return Float64(JuMP.dual(container[args...]))
+    catch
+        return NaN
+    end
+end
+
+function _period_labels(periods::TimeStructure; base_year::Int = 2020)
+    labels = String[]
+    start_year = base_year
+    for sp in strat_periods(periods)
+        years = round(Int, duration_strat(sp))
+        stop_year = start_year + years
+        push!(labels, "$start_year-$stop_year")
+        start_year = stop_year
+    end
+    return labels
+end
+
+function _period_label(labels::Vector{String}, period_index::Integer)
+    return labels[Int(period_index)]
+end
+
+function _discount_multiplier(par::EmpireParams, periods::TimeStructure, sp)
+    return objective_weight(sp, Discounter(discount_rate(par), 1, periods))
+end
+
+function _gen_efficiency(par::EmpireParams, generator::AbstractString, sp)
+    return haskey(par.genEfficiency, generator) ? par.genEfficiency[generator][sp] : 1.0
+end
+
+function _gen_capacity_availability(par::EmpireParams, node::AbstractString, generator::AbstractString, t)
+    if haskey(par.genCapAvail, (node, generator))
+        return par.genCapAvail[(node, generator)][t]
+    end
+    return get(par.genCapAvailType, generator, 1.0)
+end
+
+function _is_res_generator(sets, generator::AbstractString)
+    generator in ("Hydrorun-of-the-river", "Windonshore", "Windoffshore", "Solar") && return true
+    for (technology, gen) in sets.GeneratorsOfTechnology
+        gen == generator || continue
+        technology in ("Hydro_ror", "Wind_onshr", "Wind_offshr", "Solar") && return true
+    end
+    return false
+end
+
+function _flow_balance_price(emp::JuMP.Model, node::AbstractString, sp, t, discounter::Discounter)
+    objects = JuMP.object_dictionary(emp)
+    haskey(objects, :flow_balance) || return NaN
+    strategic_weight = objective_weight(sp, discounter)
+    strategic_weight == 0 && return NaN
+    scale = objective_weight(t, discounter; type = "avg_year") / strategic_weight
+    scale == 0 && return NaN
+    return _dual_or_nan(emp[:flow_balance], node, t) / scale
+end
+
+function _emission_price(emp::JuMP.Model, par::EmpireParams, sp, scenario_index::Integer, t, discounter::Discounter)
+    if co2_cap(par, sp) !== nothing && haskey(JuMP.object_dictionary(emp), :emission_cap)
+        # The emission-cap constraint (model_definition.jl) is written in tons:
+        #   sum(nodeEmission) <= 1e6 * co2_cap   (co2_cap is stored in Mtons).
+        # Its dual is therefore already in EUR/ton, so we only undo the objective's
+        # objective discount/probability weighting here. (Python's constraint is instead written
+        # in Mtons — LHS divided by 1e6 — so its dual is EUR/Mton and Python multiplies
+        # the divisor by 1e6 to reach EUR/ton; we must NOT, or the price comes out 1e6x
+        # too small. See results.jl parity notes / DIAGNOSIS_parity_test_dataset.md.)
+        strategic_weight = objective_weight(sp, discounter)
+        annual_multiple = multiple_strat(sp, t)
+        (strategic_weight == 0 || annual_multiple == 0) && return NaN
+        scale = objective_weight(t, discounter; type = "avg_year") /
+            (strategic_weight * annual_multiple)
+        scale == 0 && return NaN
+        return _dual_or_nan(emp[:emission_cap], sp, scenario_index) / scale
+    end
+    return co2_price(par, sp)
+end
+
+function _incoming_nodes(sets, node::AbstractString)
+    return [from for (from, to) in arcs(sets) if to == node]
+end
+
+function _outgoing_nodes(sets, node::AbstractString)
+    return [to for (from, to) in arcs(sets) if from == node]
+end
+
+"""
+    write_solution_tables(result_dir, emp, sets, params, periods)
+
+Write solved model variables and reports to CSV files in `joinpath(result_dir, "output")`.
+
+The low-level files mirror the simple first-stage and operational variable
+dumps, while the `results_*.csv` files provide Python-style reporting tables
+with cleaned Julia naming conventions.
+"""
+function write_solution_tables(result_dir::AbstractString, emp::JuMP.Model, sets, par::EmpireParams, periods::TimeStructure)
+    output_dir = joinpath(result_dir, "output")
+    mkpath(output_dir)
+
+    write_investment_csvs(output_dir, emp, sets, periods)
+    write_operational_csvs(output_dir, emp, sets, par, periods)
+    write_report_csvs(output_dir, emp, sets, par, periods)
+
+    return output_dir
+end
+
+const SCENARIO_ARTIFACT_CONFIG_KEYS = (
+    "use_scenario_generation",
+    "use_fixed_sample",
+    "number_of_scenarios",
+    "regular_seasons",
+    "n_peak_seasons",
+    "len_peak_season",
+    "length_of_regular_season",
+    "time_format",
+)
+
+function _insert_if_not_nothing!(dict, key::AbstractString, value)
+    value === nothing && return dict
+    dict[key] = value
+    return dict
+end
+
+"""
+    write_scenario_artifacts(result_dir, data_folder, config; kwargs...)
+
+Archive the scenario sampling key and run metadata under
+`joinpath(result_dir, "Input")` when scenario generation is enabled.
+
+The archived `Input/ScenarioData/sampling_key.csv` is enough to replay the
+exact sampled scenario tree together with the run config and original dataset.
+Returns the archived sampling-key path, or `nothing` when no sampling key is
+available or scenario generation is disabled.
+"""
+function write_scenario_artifacts(
+    result_dir::AbstractString,
+    data_folder::AbstractString,
+    config;
+    config_file = nothing,
+    dataset = nothing,
+    input_format = nothing,
+    seed = nothing,
+)
+    get(config, "use_scenario_generation", true) || return nothing
+
+    source_key = joinpath(data_folder, "ScenarioData", "sampling_key.csv")
+    isfile(source_key) || return nothing
+
+    input_dir = joinpath(result_dir, "Input")
+    scenario_dir = joinpath(input_dir, "ScenarioData")
+    mkpath(scenario_dir)
+
+    archived_key = joinpath(scenario_dir, "sampling_key.csv")
+    cp(source_key, archived_key; force = true)
+
+    if config_file !== nothing && isfile(config_file)
+        cp(config_file, joinpath(input_dir, "config.yaml"); force = true)
+    end
+
+    generated_files = Dict(
+        filename => isfile(joinpath(data_folder, "ScenarioData", filename))
+        for filename in ("sloadRaw.csv", "maxRegHydroGenRaw.csv", "genCapAvailStochRaw.csv")
+    )
+
+    metadata = Dict{String, Any}(
+        "data_folder" => data_folder,
+        "scenario_data_folder" => joinpath(data_folder, "ScenarioData"),
+        "source_sampling_key" => source_key,
+        "archived_sampling_key" => relpath(archived_key, result_dir),
+        "generated_scenario_files_present" => generated_files,
+    )
+    _insert_if_not_nothing!(metadata, "dataset", dataset)
+    _insert_if_not_nothing!(metadata, "config_file", config_file)
+    _insert_if_not_nothing!(metadata, "input_format", input_format === nothing ? nothing : string(input_format))
+    _insert_if_not_nothing!(metadata, "seed", seed)
+    for key in SCENARIO_ARTIFACT_CONFIG_KEYS
+        haskey(config, key) && (metadata[key] = config[key])
+    end
+    YAML.write_file(joinpath(input_dir, "scenario_metadata.yaml"), metadata)
+
+    return archived_key
+end
+
+function write_investment_csvs(output_dir::AbstractString, emp::JuMP.Model, sets, periods::TimeStructure)
+    strategic_periods = _strategic_indices(periods)
+
+    gen_inv = emp[:genInvCap]
+    gen_cap = emp[:genInstalledCap]
+    gen_rows = NamedTuple{(:Node, :Generator, :Period, :genInvCap), Tuple{String, String, Int, Float64}}[]
+    gen_cap_rows = NamedTuple{(:Node, :Generator, :Period, :genInstalledCap), Tuple{String, String, Int, Float64}}[]
+    for (n, g) in node_generators(sets), (period_index, sp) in strategic_periods
+        push!(gen_rows, (Node = n, Generator = g, Period = period_index, genInvCap = _solution_value(gen_inv[n, g, sp])))
+        push!(gen_cap_rows, (Node = n, Generator = g, Period = period_index, genInstalledCap = _solution_value(gen_cap[n, g, sp])))
+    end
+    _write_csv_rows(joinpath(output_dir, "genInvCap.csv"), gen_rows)
+    _write_csv_rows(joinpath(output_dir, "genInstalledCap.csv"), gen_cap_rows)
+
+    trans_inv = emp[:transmissionInvCap]
+    trans_cap = emp[:transmissionInstalledCap]
+    trans_rows = NamedTuple{(:FromNode, :ToNode, :Period, :transmissionInvCap), Tuple{String, String, Int, Float64}}[]
+    trans_cap_rows = NamedTuple{(:FromNode, :ToNode, :Period, :transmissionInstalledCap), Tuple{String, String, Int, Float64}}[]
+    for (m, n) in bidir_arcs(sets), (period_index, sp) in strategic_periods
+        push!(trans_rows, (FromNode = m, ToNode = n, Period = period_index, transmissionInvCap = _solution_value(trans_inv[m, n, sp])))
+        push!(trans_cap_rows, (FromNode = m, ToNode = n, Period = period_index, transmissionInstalledCap = _solution_value(trans_cap[m, n, sp])))
+    end
+    _write_csv_rows(joinpath(output_dir, "transmissionInvCap.csv"), trans_rows)
+    _write_csv_rows(joinpath(output_dir, "transmissionInstalledCap.csv"), trans_cap_rows)
+
+    stor_pw_inv = emp[:storPWInvCap]
+    stor_pw_cap = emp[:storPWInstalledCap]
+    stor_en_inv = emp[:storENInvCap]
+    stor_en_cap = emp[:storENInstalledCap]
+    stor_pw_rows = NamedTuple{(:Node, :Storage, :Period, :storPWInvCap), Tuple{String, String, Int, Float64}}[]
+    stor_pw_cap_rows = NamedTuple{(:Node, :Storage, :Period, :storPWInstalledCap), Tuple{String, String, Int, Float64}}[]
+    stor_en_rows = NamedTuple{(:Node, :Storage, :Period, :storENInvCap), Tuple{String, String, Int, Float64}}[]
+    stor_en_cap_rows = NamedTuple{(:Node, :Storage, :Period, :storENInstalledCap), Tuple{String, String, Int, Float64}}[]
+    for (n, s) in node_storages(sets), (period_index, sp) in strategic_periods
+        push!(stor_pw_rows, (Node = n, Storage = s, Period = period_index, storPWInvCap = _solution_value(stor_pw_inv[n, s, sp])))
+        push!(stor_pw_cap_rows, (Node = n, Storage = s, Period = period_index, storPWInstalledCap = _solution_value(stor_pw_cap[n, s, sp])))
+        push!(stor_en_rows, (Node = n, Storage = s, Period = period_index, storENInvCap = _solution_value(stor_en_inv[n, s, sp])))
+        push!(stor_en_cap_rows, (Node = n, Storage = s, Period = period_index, storENInstalledCap = _solution_value(stor_en_cap[n, s, sp])))
+    end
+    _write_csv_rows(joinpath(output_dir, "storPWInvCap.csv"), stor_pw_rows)
+    _write_csv_rows(joinpath(output_dir, "storPWInstalledCap.csv"), stor_pw_cap_rows)
+    _write_csv_rows(joinpath(output_dir, "storENInvCap.csv"), stor_en_rows)
+    _write_csv_rows(joinpath(output_dir, "storENInstalledCap.csv"), stor_en_cap_rows)
+
+    return output_dir
+end
+
+function write_operational_csvs(output_dir::AbstractString, emp::JuMP.Model, sets, par::EmpireParams, periods::TimeStructure)
+    gen_op = emp[:genOperational]
+    gen_rows = NamedTuple{
+        (:Node, :Generator, :Period, :Scenario, :Season, :Hour, :genOperational),
+        Tuple{String, String, Int, Int, String, Int, Float64},
+    }[]
+    _foreach_operational_index(par, periods) do period, scenario, season, hour, t
+        for (n, g) in node_generators(sets)
+            push!(gen_rows, (
+                Node = n,
+                Generator = g,
+                Period = period,
+                Scenario = scenario,
+                Season = season,
+                Hour = hour,
+                genOperational = _solution_value(gen_op[n, g, t]),
+            ))
+        end
+    end
+    _write_csv_rows(joinpath(output_dir, "genOperational.csv"), gen_rows)
+
+    trans_op = emp[:transmissionOperational]
+    trans_rows = NamedTuple{
+        (:FromNode, :ToNode, :Period, :Scenario, :Season, :Hour, :transmissionOperational),
+        Tuple{String, String, Int, Int, String, Int, Float64},
+    }[]
+    _foreach_operational_index(par, periods) do period, scenario, season, hour, t
+        for (m, n) in arcs(sets)
+            push!(trans_rows, (
+                FromNode = m,
+                ToNode = n,
+                Period = period,
+                Scenario = scenario,
+                Season = season,
+                Hour = hour,
+                transmissionOperational = _solution_value(trans_op[m, n, t]),
+            ))
+        end
+    end
+    _write_csv_rows(joinpath(output_dir, "transmissionOperational.csv"), trans_rows)
+
+    stor_charge = emp[:storCharge]
+    stor_discharge = emp[:storDischarge]
+    stor_operation = emp[:storOperational]
+    stor_charge_rows = NamedTuple{
+        (:Node, :Storage, :Period, :Scenario, :Season, :Hour, :storCharge),
+        Tuple{String, String, Int, Int, String, Int, Float64},
+    }[]
+    stor_discharge_rows = NamedTuple{
+        (:Node, :Storage, :Period, :Scenario, :Season, :Hour, :storDischarge),
+        Tuple{String, String, Int, Int, String, Int, Float64},
+    }[]
+    stor_operation_rows = NamedTuple{
+        (:Node, :Storage, :Period, :Scenario, :Season, :Hour, :storageOperational),
+        Tuple{String, String, Int, Int, String, Int, Float64},
+    }[]
+    _foreach_operational_index(par, periods) do period, scenario, season, hour, t
+        for (n, s) in node_storages(sets)
+            push!(stor_charge_rows, (
+                Node = n,
+                Storage = s,
+                Period = period,
+                Scenario = scenario,
+                Season = season,
+                Hour = hour,
+                storCharge = _solution_value(stor_charge[n, s, t]),
+            ))
+            push!(stor_discharge_rows, (
+                Node = n,
+                Storage = s,
+                Period = period,
+                Scenario = scenario,
+                Season = season,
+                Hour = hour,
+                storDischarge = _solution_value(stor_discharge[n, s, t]),
+            ))
+            push!(stor_operation_rows, (
+                Node = n,
+                Storage = s,
+                Period = period,
+                Scenario = scenario,
+                Season = season,
+                Hour = hour,
+                storageOperational = _solution_value(stor_operation[n, s, t]),
+            ))
+        end
+    end
+    _write_csv_rows(joinpath(output_dir, "storCharge.csv"), stor_charge_rows)
+    _write_csv_rows(joinpath(output_dir, "storDischarge.csv"), stor_discharge_rows)
+    _write_csv_rows(joinpath(output_dir, "storageOperational.csv"), stor_operation_rows)
+
+    load_shed = emp[:loadShed]
+    load_shed_rows = NamedTuple{
+        (:Node, :Period, :Scenario, :Season, :Hour, :loadShed),
+        Tuple{String, Int, Int, String, Int, Float64},
+    }[]
+    _foreach_operational_index(par, periods) do period, scenario, season, hour, t
+        for n in nodes(sets)
+            push!(load_shed_rows, (
+                Node = n,
+                Period = period,
+                Scenario = scenario,
+                Season = season,
+                Hour = hour,
+                loadShed = _solution_value(load_shed[n, t]),
+            ))
+        end
+    end
+    _write_csv_rows(joinpath(output_dir, "loadShed.csv"), load_shed_rows)
+
+    return output_dir
+end
+
+function write_report_csvs(output_dir::AbstractString, emp::JuMP.Model, sets, par::EmpireParams, periods::TimeStructure)
+    labels = _period_labels(periods)
+
+    write_objective_csv(output_dir, emp)
+    write_cost_diagnostic_csvs(output_dir, sets, par, periods)
+    write_generator_report_csv(output_dir, emp, sets, par, periods, labels)
+    write_storage_report_csv(output_dir, emp, sets, par, periods, labels)
+    write_transmission_report_csv(output_dir, emp, sets, par, periods, labels)
+    write_transmission_operational_report_csv(output_dir, emp, sets, par, periods, labels)
+    write_operational_report_csv(output_dir, emp, sets, par, periods, labels)
+    write_curtailment_report_csvs(output_dir, emp, sets, par, periods, labels)
+    write_europe_plot_report_csv(output_dir, emp, sets, par, periods, labels)
+    write_europe_summary_report_csv(output_dir, emp, sets, par, periods, labels)
+
+    return output_dir
+end
+
+function write_objective_csv(output_dir::AbstractString, emp::JuMP.Model)
+    return _write_csv_table(joinpath(output_dir, "results_objective.csv"), ["Objective function value:$(_objective_value_or_nan(emp))"]) do io
+        nothing
+    end
+end
+
+function write_cost_diagnostic_csvs(output_dir::AbstractString, sets, par::EmpireParams, periods::TimeStructure)
+    strategic_periods = _strategic_indices(periods)
+    _write_csv_table(joinpath(output_dir, "marginal_costs.csv"), ["Generator", "Period", "MarginalCost_EurperMWh"]) do io
+        for g in generators(sets), (period_index, sp) in strategic_periods
+            _write_csv_row(io, [g, period_index, gen_marginal_cost(par, g, sp)])
+        end
+    end
+    _write_csv_table(joinpath(output_dir, "investment_costs.csv"), ["Generator", "Period", "InvestmentCost_EurperMW"]) do io
+        for g in generators(sets), (period_index, sp) in strategic_periods
+            _write_csv_row(io, [g, period_index, gen_invest_cost(par, g, sp)])
+        end
+    end
+    return output_dir
+end
+
+function _weighted_generation(emp::JuMP.Model, par::EmpireParams, node::AbstractString, generator::AbstractString, sp, scenario_index = nothing)
+    gen_op = emp[:genOperational]
+    total = 0.0
+    for rp in repr_periods(sp)
+        for (sc_index, sc) in enumerate(opscenarios(rp))
+            scenario_index === nothing || sc_index == scenario_index || continue
+            for t in sc
+                total += multiple_strat(sp, t) * probability(t) * _value_or_zero(gen_op, node, generator, t)
+            end
+        end
+    end
+    return total
+end
+
+function _weighted_storage_discharge(emp::JuMP.Model, par::EmpireParams, node::AbstractString, storage::AbstractString, sp, scenario_index = nothing)
+    stor_discharge = emp[:storDischarge]
+    total = 0.0
+    for rp in repr_periods(sp)
+        for (sc_index, sc) in enumerate(opscenarios(rp))
+            scenario_index === nothing || sc_index == scenario_index || continue
+            for t in sc
+                total += multiple_strat(sp, t) * probability(t) * _value_or_zero(stor_discharge, node, storage, t)
+            end
+        end
+    end
+    return total
+end
+
+function _weighted_storage_losses(emp::JuMP.Model, par::EmpireParams, node::AbstractString, storage::AbstractString, sp, scenario_index = nothing)
+    stor_charge = emp[:storCharge]
+    stor_discharge = emp[:storDischarge]
+    total = 0.0
+    for rp in repr_periods(sp)
+        for (sc_index, sc) in enumerate(opscenarios(rp))
+            scenario_index === nothing || sc_index == scenario_index || continue
+            for t in sc
+                total += multiple_strat(sp, t) * probability(t) * (
+                    (1 - discharge_eff(par, storage)) * _value_or_zero(stor_discharge, node, storage, t) +
+                    (1 - charge_eff(par, storage)) * _value_or_zero(stor_charge, node, storage, t)
+                )
+            end
+        end
+    end
+    return total
+end
+
+function _weighted_transmission_volume(emp::JuMP.Model, par::EmpireParams, from::AbstractString, to::AbstractString, sp, scenario_index = nothing)
+    trans_op = emp[:transmissionOperational]
+    total = 0.0
+    for rp in repr_periods(sp)
+        for (sc_index, sc) in enumerate(opscenarios(rp))
+            scenario_index === nothing || sc_index == scenario_index || continue
+            for t in sc
+                weight = multiple_strat(sp, t) * probability(t)
+                total += weight * (
+                    _value_or_zero(trans_op, from, to, t) +
+                    _value_or_zero(trans_op, to, from, t)
+                )
+            end
+        end
+    end
+    return total
+end
+
+function _weighted_transmission_losses(emp::JuMP.Model, par::EmpireParams, from::AbstractString, to::AbstractString, sp, scenario_index = nothing)
+    trans_op = emp[:transmissionOperational]
+    total = 0.0
+    for rp in repr_periods(sp)
+        for (sc_index, sc) in enumerate(opscenarios(rp))
+            scenario_index === nothing || sc_index == scenario_index || continue
+            for t in sc
+                weight = multiple_strat(sp, t) * probability(t)
+                total += weight * (
+                    (1 - line_eff(par, from, to)) * _value_or_zero(trans_op, from, to, t) +
+                    (1 - line_eff(par, to, from)) * _value_or_zero(trans_op, to, from, t)
+                )
+            end
+        end
+    end
+    return total
+end
+
+function _weighted_curtailment(emp::JuMP.Model, par::EmpireParams, node::AbstractString, generator::AbstractString, sp, scenario_index = nothing)
+    gen_cap = emp[:genInstalledCap]
+    gen_op = emp[:genOperational]
+    installed = _value_or_zero(gen_cap, node, generator, sp)
+    total = 0.0
+    for rp in repr_periods(sp)
+        for (sc_index, sc) in enumerate(opscenarios(rp))
+            scenario_index === nothing || sc_index == scenario_index || continue
+            for t in sc
+                available = _gen_capacity_availability(par, node, generator, t) * installed
+                total += multiple_strat(sp, t) * probability(t) *
+                    (available - _value_or_zero(gen_op, node, generator, t))
+            end
+        end
+    end
+    return total
+end
+
+function _scenario_generation(emp::JuMP.Model, par::EmpireParams, node::AbstractString, generator::AbstractString, sp, scenario_index::Integer)
+    gen_op = emp[:genOperational]
+    total = 0.0
+    for rp in repr_periods(sp)
+        for (sc_index, sc) in enumerate(opscenarios(rp))
+            sc_index == scenario_index || continue
+            for t in sc
+                total += multiple_strat(sp, t) * _value_or_zero(gen_op, node, generator, t)
+            end
+        end
+    end
+    return total
+end
+
+function _scenario_storage_losses(emp::JuMP.Model, par::EmpireParams, node::AbstractString, storage::AbstractString, sp, scenario_index::Integer)
+    stor_charge = emp[:storCharge]
+    stor_discharge = emp[:storDischarge]
+    total = 0.0
+    for rp in repr_periods(sp)
+        for (sc_index, sc) in enumerate(opscenarios(rp))
+            sc_index == scenario_index || continue
+            for t in sc
+                total += multiple_strat(sp, t) * (
+                    (1 - discharge_eff(par, storage)) * _value_or_zero(stor_discharge, node, storage, t) +
+                    (1 - charge_eff(par, storage)) * _value_or_zero(stor_charge, node, storage, t)
+                )
+            end
+        end
+    end
+    return total
+end
+
+function _scenario_transmission_losses(emp::JuMP.Model, par::EmpireParams, from::AbstractString, to::AbstractString, sp, scenario_index::Integer)
+    trans_op = emp[:transmissionOperational]
+    total = 0.0
+    for rp in repr_periods(sp)
+        for (sc_index, sc) in enumerate(opscenarios(rp))
+            sc_index == scenario_index || continue
+            for t in sc
+                total += multiple_strat(sp, t) * (
+                    (1 - line_eff(par, from, to)) * _value_or_zero(trans_op, from, to, t) +
+                    (1 - line_eff(par, to, from)) * _value_or_zero(trans_op, to, from, t)
+                )
+            end
+        end
+    end
+    return total
+end
+
+function _scenario_curtailment(emp::JuMP.Model, par::EmpireParams, node::AbstractString, generator::AbstractString, sp, scenario_index::Integer)
+    gen_cap = emp[:genInstalledCap]
+    gen_op = emp[:genOperational]
+    installed = _value_or_zero(gen_cap, node, generator, sp)
+    total = 0.0
+    for rp in repr_periods(sp)
+        for (sc_index, sc) in enumerate(opscenarios(rp))
+            sc_index == scenario_index || continue
+            for t in sc
+                available = _gen_capacity_availability(par, node, generator, t) * installed
+                total += multiple_strat(sp, t) *
+                    (available - _value_or_zero(gen_op, node, generator, t))
+            end
+        end
+    end
+    return total
+end
+
+function _annual_emissions(emp::JuMP.Model, sets, par::EmpireParams, sp, scenario_index::Integer)
+    gen_op = emp[:genOperational]
+    total = 0.0
+    for rp in repr_periods(sp)
+        for (sc_index, sc) in enumerate(opscenarios(rp))
+            sc_index == scenario_index || continue
+            for t in sc, (n, g) in node_generators(sets)
+                total += multiple_strat(sp, t) *
+                    _value_or_zero(gen_op, n, g, t) *
+                    co2_content(par, g) *
+                    (3.6 / _gen_efficiency(par, g, sp))
+            end
+        end
+    end
+    return total
+end
+
+function _annual_generation(emp::JuMP.Model, sets, par::EmpireParams, sp, scenario_index::Integer)
+    return sum(
+        _scenario_generation(emp, par, n, g, sp, scenario_index)
+        for (n, g) in node_generators(sets);
+        init = 0.0,
+    )
+end
+
+function write_generator_report_csv(output_dir::AbstractString, emp::JuMP.Model, sets, par::EmpireParams, periods::TimeStructure, labels::Vector{String})
+    gen_inv = emp[:genInvCap]
+    gen_cap = emp[:genInstalledCap]
+    header = [
+        "Node",
+        "GeneratorType",
+        "Period",
+        "genInvCap_MW",
+        "genInstalledCap_MW",
+        "genExpectedCapacityFactor",
+        "DiscountedInvestmentCost_Euro",
+        "genExpectedAnnualProduction_GWh",
+    ]
+    return _write_csv_table(joinpath(output_dir, "results_output_gen.csv"), header) do io
+        for (n, g) in node_generators(sets), (period_index, sp) in _strategic_indices(periods)
+            installed = _value_or_zero(gen_cap, n, g, sp)
+            weighted_gen = _weighted_generation(emp, par, n, g, sp)
+            capacity_factor = installed == 0 ? 0.0 : weighted_gen / (installed * 8760)
+            inv_cap = _value_or_zero(gen_inv, n, g, sp)
+            discounted_cost = _discount_multiplier(par, periods, sp) * inv_cap * gen_invest_cost(par, g, sp)
+            _write_csv_row(io, [
+                n,
+                g,
+                _period_label(labels, period_index),
+                inv_cap,
+                installed,
+                capacity_factor,
+                discounted_cost,
+                weighted_gen / 1000,
+            ])
+        end
+    end
+end
+
+function write_storage_report_csv(output_dir::AbstractString, emp::JuMP.Model, sets, par::EmpireParams, periods::TimeStructure, labels::Vector{String})
+    stor_pw_inv = emp[:storPWInvCap]
+    stor_pw_cap = emp[:storPWInstalledCap]
+    stor_en_inv = emp[:storENInvCap]
+    stor_en_cap = emp[:storENInstalledCap]
+    header = [
+        "Node",
+        "StorageType",
+        "Period",
+        "storPWInvCap_MW",
+        "storPWInstalledCap_MW",
+        "storENInvCap_MWh",
+        "storENInstalledCap_MWh",
+        "DiscountedInvestmentCostPWEN_EuroPerMWMWh",
+        "ExpectedAnnualDischargeVolume_GWh",
+        "ExpectedAnnualLossesChargeDischarge_GWh",
+    ]
+    return _write_csv_table(joinpath(output_dir, "results_output_stor.csv"), header) do io
+        for (n, s) in node_storages(sets), (period_index, sp) in _strategic_indices(periods)
+            pw_inv = _value_or_zero(stor_pw_inv, n, s, sp)
+            en_inv = _value_or_zero(stor_en_inv, n, s, sp)
+            discounted_cost = _discount_multiplier(par, periods, sp) * (
+                pw_inv * stor_pw_invest_cost(par, s, sp) +
+                en_inv * stor_en_invest_cost(par, s, sp)
+            )
+            _write_csv_row(io, [
+                n,
+                s,
+                _period_label(labels, period_index),
+                pw_inv,
+                _value_or_zero(stor_pw_cap, n, s, sp),
+                en_inv,
+                _value_or_zero(stor_en_cap, n, s, sp),
+                discounted_cost,
+                _weighted_storage_discharge(emp, par, n, s, sp) / 1000,
+                _weighted_storage_losses(emp, par, n, s, sp) / 1000,
+            ])
+        end
+    end
+end
+
+function write_transmission_report_csv(output_dir::AbstractString, emp::JuMP.Model, sets, par::EmpireParams, periods::TimeStructure, labels::Vector{String})
+    trans_inv = emp[:transmissionInvCap]
+    trans_cap = emp[:transmissionInstalledCap]
+    header = [
+        "BetweenNode",
+        "AndNode",
+        "Period",
+        "transmissionInvCap_MW",
+        "transmissionInstalledCap_MW",
+        "DiscountedInvestmentCost_Euro",
+        "transmissionExpectedAnnualVolume_GWh",
+        "ExpectedAnnualLosses_GWh",
+    ]
+    return _write_csv_table(joinpath(output_dir, "results_output_transmission.csv"), header) do io
+        for (m, n) in bidir_arcs(sets), (period_index, sp) in _strategic_indices(periods)
+            inv_cap = _value_or_zero(trans_inv, m, n, sp)
+            discounted_cost = _discount_multiplier(par, periods, sp) * inv_cap * trans_invest_cost(par, m, n, sp)
+            _write_csv_row(io, [
+                m,
+                n,
+                _period_label(labels, period_index),
+                inv_cap,
+                _value_or_zero(trans_cap, m, n, sp),
+                discounted_cost,
+                _weighted_transmission_volume(emp, par, m, n, sp) / 1000,
+                _weighted_transmission_losses(emp, par, m, n, sp) / 1000,
+            ])
+        end
+    end
+end
+
+function write_transmission_operational_report_csv(output_dir::AbstractString, emp::JuMP.Model, sets, par::EmpireParams, periods::TimeStructure, labels::Vector{String})
+    trans_op = emp[:transmissionOperational]
+    header = ["FromNode", "ToNode", "Period", "Season", "Scenario", "Hour", "TransmissionReceived_MW", "Losses_MW"]
+    return _write_csv_table(joinpath(output_dir, "results_output_transmission_operational.csv"), header) do io
+        _foreach_operational_context(par, periods) do period_index, sp, scenario_index, _, season, hour, t
+            for (m, n) in arcs(sets)
+                sent = _value_or_zero(trans_op, m, n, t)
+                _write_csv_row(io, [
+                    m,
+                    n,
+                    _period_label(labels, period_index),
+                    season,
+                    _scenario_label(scenario_index),
+                    hour,
+                    line_eff(par, m, n) * sent,
+                    (1 - line_eff(par, m, n)) * sent,
+                ])
+            end
+        end
+    end
+end
+
+function write_operational_report_csv(output_dir::AbstractString, emp::JuMP.Model, sets, par::EmpireParams, periods::TimeStructure, labels::Vector{String})
+    gen_op = emp[:genOperational]
+    stor_charge = emp[:storCharge]
+    stor_discharge = emp[:storDischarge]
+    stor_op = emp[:storOperational]
+    trans_op = emp[:transmissionOperational]
+    load_shed = emp[:loadShed]
+    discounter = Discounter(discount_rate(par), 1, periods)
+    generator_columns = ["$(g)_MW" for g in generators(sets)]
+    header = vcat(
+        ["Node", "Period", "Scenario", "Season", "Hour", "AllGen_MW", "Load_MW", "Net_load_MW"],
+        generator_columns,
+        [
+            "storCharge_MW",
+            "storDischarge_MW",
+            "storEnergyLevel_MWh",
+            "LossesChargeDischargeBleed_MW",
+            "FlowOut_MW",
+            "FlowIn_MW",
+            "LossesFlowIn_MW",
+            "LoadShed_MW",
+            "Price_EURperMWh",
+            "AvgCO2_kgCO2perMWh",
+        ],
+    )
+    return _write_csv_table(joinpath(output_dir, "results_output_Operational.csv"), header) do io
+        _foreach_operational_context(par, periods) do period_index, sp, scenario_index, _, season, hour, t
+            for n in nodes(sets)
+                all_gen = sum(_value_or_zero(gen_op, n, g, t) for g in generators(sets, n); init = 0.0)
+                shed = _value_or_zero(load_shed, n, t)
+                storage_net = sum(
+                    _value_or_zero(stor_charge, n, s, t) - discharge_eff(par, s) * _value_or_zero(stor_discharge, n, s, t)
+                    for s in storages(sets, n);
+                    init = 0.0,
+                )
+                transmission_net = sum(_value_or_zero(trans_op, n, to, t) for to in _outgoing_nodes(sets, n); init = 0.0) -
+                    sum(line_eff(par, from, n) * _value_or_zero(trans_op, from, n, t) for from in _incoming_nodes(sets, n); init = 0.0)
+                net_load = -(sload(par, n, t) - shed + storage_net + transmission_net)
+                gen_values = [_value_or_zero(gen_op, n, g, t) for g in generators(sets)]
+                storage_charge = sum(-_value_or_zero(stor_charge, n, s, t) for s in storages(sets, n); init = 0.0)
+                storage_discharge = sum(_value_or_zero(stor_discharge, n, s, t) for s in storages(sets, n); init = 0.0)
+                storage_level = sum(_value_or_zero(stor_op, n, s, t) for s in storages(sets, n); init = 0.0)
+                storage_losses = sum(
+                    -(1 - discharge_eff(par, s)) * _value_or_zero(stor_discharge, n, s, t) -
+                    (1 - charge_eff(par, s)) * _value_or_zero(stor_charge, n, s, t) -
+                    (1 - bleed_eff(par, s)) * _value_or_zero(stor_op, n, s, t)
+                    for s in storages(sets, n);
+                    init = 0.0,
+                )
+                flow_out = sum(-_value_or_zero(trans_op, n, to, t) for to in _outgoing_nodes(sets, n); init = 0.0)
+                flow_in = sum(_value_or_zero(trans_op, from, n, t) for from in _incoming_nodes(sets, n); init = 0.0)
+                losses_flow_in = sum(
+                    -(1 - line_eff(par, from, n)) * _value_or_zero(trans_op, from, n, t)
+                    for from in _incoming_nodes(sets, n);
+                    init = 0.0,
+                )
+                co2_weighted_gen = sum(
+                    _value_or_zero(gen_op, n, g, t) * co2_content(par, g) * (3.6 / _gen_efficiency(par, g, sp))
+                    for g in generators(sets, n);
+                    init = 0.0,
+                )
+                avg_co2 = all_gen == 0 ? 0.0 : co2_weighted_gen / all_gen
+                _write_csv_row(io, vcat(Any[
+                    n,
+                    _period_label(labels, period_index),
+                    _scenario_label(scenario_index),
+                    season,
+                    hour,
+                    all_gen,
+                    -sload(par, n, t),
+                    net_load,
+                ], gen_values, Any[
+                    storage_charge,
+                    storage_discharge,
+                    storage_level,
+                    storage_losses,
+                    flow_out,
+                    flow_in,
+                    losses_flow_in,
+                    shed,
+                    _flow_balance_price(emp, n, sp, t, discounter),
+                    avg_co2,
+                ]))
+            end
+        end
+    end
+end
+
+function write_curtailment_report_csvs(output_dir::AbstractString, emp::JuMP.Model, sets, par::EmpireParams, periods::TimeStructure, labels::Vector{String})
+    gen_cap = emp[:genInstalledCap]
+    gen_op = emp[:genOperational]
+    res_pairs = [(n, g) for (n, g) in node_generators(sets) if _is_res_generator(sets, g)]
+    _write_csv_table(
+        joinpath(output_dir, "results_output_curtailed_operational.csv"),
+        ["Node", "Period", "Scenario", "Season", "Hour", "RESGeneratorType", "Curtailment_MWh"],
+    ) do io
+        _foreach_operational_context(par, periods) do period_index, sp, scenario_index, _, season, hour, t
+            for (n, g) in res_pairs
+                installed = _value_or_zero(gen_cap, n, g, sp)
+                curtailment = multiple_strat(sp, t) * probability(t) *
+                    (_gen_capacity_availability(par, n, g, t) * installed - _value_or_zero(gen_op, n, g, t))
+                _write_csv_row(io, [
+                    n,
+                    _period_label(labels, period_index),
+                    _scenario_label(scenario_index),
+                    season,
+                    hour,
+                    g,
+                    curtailment,
+                ])
+            end
+        end
+    end
+    _write_csv_table(
+        joinpath(output_dir, "results_output_curtailed_prod.csv"),
+        ["Node", "RESGeneratorType", "Period", "ExpectedAnnualCurtailment_GWh"],
+    ) do io
+        for (n, g) in res_pairs, (period_index, sp) in _strategic_indices(periods)
+            _write_csv_row(io, [n, g, _period_label(labels, period_index), _weighted_curtailment(emp, par, n, g, sp) / 1000])
+        end
+    end
+    return output_dir
+end
+
+function write_europe_plot_report_csv(output_dir::AbstractString, emp::JuMP.Model, sets, par::EmpireParams, periods::TimeStructure, labels::Vector{String})
+    gen_cap = emp[:genInstalledCap]
+    stor_pw_cap = emp[:storPWInstalledCap]
+    stor_en_cap = emp[:storENInstalledCap]
+    return _write_csv_table(joinpath(output_dir, "results_output_EuropePlot.csv"), ["Period", "genInstalledCap_MW"]) do io
+        _write_csv_row(io, vcat([""], generators(sets)))
+        _write_csv_row(io, vcat(Any["Initial"], [
+            sum(gencap_init(par, n, g, first(strat_periods(periods))) for n in nodes(sets) if (n, g) in Set(node_generators(sets)); init = 0.0)
+            for g in generators(sets)
+        ]))
+        for (period_index, sp) in _strategic_indices(periods)
+            _write_csv_row(io, vcat(Any[_period_label(labels, period_index)], [
+                sum(_value_or_zero(gen_cap, n, g, sp) for n in nodes(sets) if (n, g) in Set(node_generators(sets)); init = 0.0)
+                for g in generators(sets)
+            ]))
+        end
+        _write_csv_row(io, [""])
+        _write_csv_row(io, ["Period", "genExpectedAnnualProduction_GWh"])
+        _write_csv_row(io, vcat([""], generators(sets)))
+        for (period_index, sp) in _strategic_indices(periods)
+            _write_csv_row(io, vcat(Any[_period_label(labels, period_index)], [
+                sum(_weighted_generation(emp, par, n, g, sp) for n in nodes(sets) if (n, g) in Set(node_generators(sets)); init = 0.0) / 1000
+                for g in generators(sets)
+            ]))
+        end
+        _write_csv_row(io, [""])
+        _write_csv_row(io, ["Period", "storPWInstalledCap_MW"])
+        _write_csv_row(io, vcat([""], storages(sets)))
+        for (period_index, sp) in _strategic_indices(periods)
+            _write_csv_row(io, vcat(Any[_period_label(labels, period_index)], [
+                sum(_value_or_zero(stor_pw_cap, n, s, sp) for n in nodes(sets) if (n, s) in Set(node_storages(sets)); init = 0.0)
+                for s in storages(sets)
+            ]))
+        end
+        _write_csv_row(io, [""])
+        _write_csv_row(io, ["Period", "storENInstalledCap_MWh"])
+        _write_csv_row(io, vcat([""], storages(sets)))
+        for (period_index, sp) in _strategic_indices(periods)
+            _write_csv_row(io, vcat(Any[_period_label(labels, period_index)], [
+                sum(_value_or_zero(stor_en_cap, n, s, sp) for n in nodes(sets) if (n, s) in Set(node_storages(sets)); init = 0.0)
+                for s in storages(sets)
+            ]))
+        end
+        _write_csv_row(io, [""])
+        _write_csv_row(io, ["Period", "storExpectedAnnualDischarge_GWh"])
+        _write_csv_row(io, vcat([""], storages(sets)))
+        for (period_index, sp) in _strategic_indices(periods)
+            _write_csv_row(io, vcat(Any[_period_label(labels, period_index)], [
+                sum(_weighted_storage_discharge(emp, par, n, s, sp) for n in nodes(sets) if (n, s) in Set(node_storages(sets)); init = 0.0) / 1000
+                for s in storages(sets)
+            ]))
+        end
+    end
+end
+
+function write_europe_summary_report_csv(output_dir::AbstractString, emp::JuMP.Model, sets, par::EmpireParams, periods::TimeStructure, labels::Vector{String})
+    gen_inv = emp[:genInvCap]
+    gen_cap = emp[:genInstalledCap]
+    stor_pw_inv = emp[:storPWInvCap]
+    stor_pw_cap = emp[:storPWInstalledCap]
+    stor_en_inv = emp[:storENInvCap]
+    stor_en_cap = emp[:storENInstalledCap]
+    discounter = Discounter(discount_rate(par), 1, periods)
+    header = [
+        "Period",
+        "Scenario",
+        "AnnualCO2emission_Ton",
+        "CO2Price_EuroPerTon",
+        "CO2Cap_Ton",
+        "AnnualGeneration_GWh",
+        "AvgCO2factor_TonPerMWh",
+        "AvgELPrice_EuroPerMWh",
+        "TotAnnualCurtailedRES_GWh",
+        "TotAnnualLossesChargeDischarge_GWh",
+        "AnnualLossesTransmission_GWh",
+    ]
+    return _write_csv_table(joinpath(output_dir, "results_output_EuropeSummary.csv"), header) do io
+        for (period_index, sp) in _strategic_indices(periods)
+            scenario_count = length(opscenarios(first(repr_periods(sp))))
+            for scenario_index in 1:scenario_count
+                emissions = _annual_emissions(emp, sets, par, sp, scenario_index)
+                generation = _annual_generation(emp, sets, par, sp, scenario_index)
+                avg_co2 = generation == 0 ? 0.0 : emissions / generation
+                prices = Float64[]
+                for rp in repr_periods(sp)
+                    sc = collect(opscenarios(rp))[scenario_index]
+                    for t in sc, n in nodes(sets)
+                        push!(prices, _flow_balance_price(emp, n, sp, t, discounter))
+                    end
+                end
+                valid_prices = filter(!isnan, prices)
+                avg_price = isempty(valid_prices) ? NaN : sum(valid_prices) / length(valid_prices)
+                first_time = first(first(opscenarios(first(repr_periods(sp)))))
+                co2_price_value = _emission_price(emp, par, sp, scenario_index, first_time, discounter)
+                _write_csv_row(io, [
+                    _period_label(labels, period_index),
+                    _scenario_label(scenario_index),
+                    emissions,
+                    co2_price_value,
+                    co2_cap(par, sp) === nothing ? 0.0 : co2_cap(par, sp) * 1e6,
+                    generation / 1000,
+                    avg_co2,
+                    avg_price,
+                    sum(_scenario_curtailment(emp, par, n, g, sp, scenario_index) for (n, g) in node_generators(sets) if _is_res_generator(sets, g); init = 0.0) / 1000,
+                    sum(_scenario_storage_losses(emp, par, n, s, sp, scenario_index) for (n, s) in node_storages(sets); init = 0.0) / 1000,
+                    sum(_scenario_transmission_losses(emp, par, m, n, sp, scenario_index) for (m, n) in bidir_arcs(sets); init = 0.0) / 1000,
+                ])
+            end
+        end
+        _write_csv_row(io, [""])
+        _write_csv_row(io, ["GeneratorType", "Period", "genInvCap_MW", "genInstalledCap_MW", "TotDiscountedInvestmentCost_Euro", "genExpectedAnnualProduction_GWh"])
+        for g in generators(sets), (period_index, sp) in _strategic_indices(periods)
+            _write_csv_row(io, [
+                g,
+                _period_label(labels, period_index),
+                sum(_value_or_zero(gen_inv, n, g, sp) for n in nodes(sets) if (n, g) in Set(node_generators(sets)); init = 0.0),
+                sum(_value_or_zero(gen_cap, n, g, sp) for n in nodes(sets) if (n, g) in Set(node_generators(sets)); init = 0.0),
+                sum(_discount_multiplier(par, periods, sp) * _value_or_zero(gen_inv, n, g, sp) * gen_invest_cost(par, g, sp) for n in nodes(sets) if (n, g) in Set(node_generators(sets)); init = 0.0),
+                sum(_weighted_generation(emp, par, n, g, sp) for n in nodes(sets) if (n, g) in Set(node_generators(sets)); init = 0.0) / 1000,
+            ])
+        end
+        _write_csv_row(io, [""])
+        _write_csv_row(io, ["StorageType", "Period", "storPWInvCap_MW", "storPWInstalledCap_MW", "storENInvCap_MWh", "storENInstalledCap_MWh", "TotDiscountedInvestmentCostPWEN_Euro", "ExpectedAnnualDischargeVolume_GWh"])
+        for s in storages(sets), (period_index, sp) in _strategic_indices(periods)
+            _write_csv_row(io, [
+                s,
+                _period_label(labels, period_index),
+                sum(_value_or_zero(stor_pw_inv, n, s, sp) for n in nodes(sets) if (n, s) in Set(node_storages(sets)); init = 0.0),
+                sum(_value_or_zero(stor_pw_cap, n, s, sp) for n in nodes(sets) if (n, s) in Set(node_storages(sets)); init = 0.0),
+                sum(_value_or_zero(stor_en_inv, n, s, sp) for n in nodes(sets) if (n, s) in Set(node_storages(sets)); init = 0.0),
+                sum(_value_or_zero(stor_en_cap, n, s, sp) for n in nodes(sets) if (n, s) in Set(node_storages(sets)); init = 0.0),
+                sum(
+                    _discount_multiplier(par, periods, sp) * (
+                        _value_or_zero(stor_pw_inv, n, s, sp) * stor_pw_invest_cost(par, s, sp) +
+                        _value_or_zero(stor_en_inv, n, s, sp) * stor_en_invest_cost(par, s, sp)
+                    )
+                    for n in nodes(sets) if (n, s) in Set(node_storages(sets));
+                    init = 0.0,
+                ),
+                sum(_weighted_storage_discharge(emp, par, n, s, sp) for n in nodes(sets) if (n, s) in Set(node_storages(sets)); init = 0.0) / 1000,
+            ])
+        end
+    end
 end
