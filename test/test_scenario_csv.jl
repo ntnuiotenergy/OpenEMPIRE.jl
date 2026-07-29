@@ -32,12 +32,12 @@ function _scenario_test_sets(test_nodes = ["A"])
     )
 end
 
-function _scenario_time_rows()
+function _scenario_time_rows(year::Int = 2020)
     starts = DateTime[
-        DateTime(2020, 1, 1),
-        DateTime(2020, 4, 1),
-        DateTime(2020, 7, 1),
-        DateTime(2020, 10, 1),
+        DateTime(year, 1, 1),
+        DateTime(year, 4, 1),
+        DateTime(year, 7, 1),
+        DateTime(year, 10, 1),
     ]
     rows = String[]
     value = 1
@@ -148,6 +148,75 @@ Period,Scenario,Season,Year,Month,Hour
 """,
     )
     return scenario_dir
+end
+
+function _write_filter_parity_load(path; years = 2015:2016)
+    lines = ["time,A,B"]
+    value = 1
+    for year in years
+        starts = DateTime[
+            DateTime(year, 1, 1),
+            DateTime(year, 4, 1),
+            DateTime(year, 7, 1),
+            DateTime(year, 10, 1),
+        ]
+        for start in starts, hour in 0:7
+            timestamp = Dates.format(start + Dates.Hour(hour), dateformat"dd/mm/yyyy HH:MM")
+            push!(lines, "$timestamp,$value,$(2 * value + (value % 3))")
+            value += 1
+        end
+    end
+    return _write_csv(path, join(lines, "\n") * "\n")
+end
+
+function _python_filter_metrics_script()
+    return raw"""
+import pathlib
+import sys
+
+import pandas as pd
+
+reference_repo = pathlib.Path(sys.argv[1])
+input_path = pathlib.Path(sys.argv[2])
+output_path = pathlib.Path(sys.argv[3])
+regular_hours = int(sys.argv[4])
+sys.path.insert(0, str(reference_repo))
+
+from empire.core.scenario_random import make_mean, make_ws
+from empire.core.scenario_utils import make_datetime
+
+seasons = ["winter", "spring", "summer", "fall"]
+data = make_datetime(pd.read_csv(input_path), "%d/%m/%Y %H:%M")
+metrics = make_ws(data, regular_hours, seasons)
+means = make_mean(data, regular_hours, seasons)
+metrics.insert(len(metrics.columns), "Value2", means["Value"])
+metrics.to_csv(output_path, index=False)
+"""
+end
+
+function _run_python_filter_metrics(input_path, output_path, workdir; regular_hours::Int = 2)
+    reference_repo = joinpath(dirname(pkgdir(OpenEMPIRE)), "OpenEMPIRE-csv")
+    python = _python_reference_executable(reference_repo)
+    if python === nothing || !isfile(joinpath(reference_repo, "empire", "core", "scenario_random.py"))
+        return false
+    end
+    script_path = joinpath(workdir, "python_filter_metrics.py")
+    write(script_path, _python_filter_metrics_script())
+    try
+        command = Cmd([
+            python,
+            script_path,
+            reference_repo,
+            input_path,
+            output_path,
+            string(regular_hours),
+        ])
+        run(addenv(command, "MPLBACKEND" => "Agg"))
+    catch err
+        @warn "Python filter metric generation failed; skipping parity check" exception = err
+        return false
+    end
+    return true
 end
 
 function _python_reference_script()
@@ -405,6 +474,8 @@ function test_fixed_sample_raw_csv_scenarios()
             "length_of_regular_season" => 2,
             "number_of_scenarios" => 1,
             "use_fixed_sample" => true,
+            "filter_use" => true,
+            "n_cluster" => 2,
         )
         periods = OpenEMPIRE.create_timestruct(1, 5, 4, 2, 2, 24, 1)
 
@@ -427,6 +498,27 @@ function test_fixed_sample_raw_csv_scenarios()
         @test params.maxRegHydroGenRaw["A"][sc_winter[1]] == 20.0
         @test params.genCapAvail[("A", "Solar")][sc_winter[1]] == 0.02
         @test params.genCapAvail[("A", "Windoffshore")][sc_spring[1]] ≈ 0.93
+
+        generated_files = ("sloadRaw.csv", "maxRegHydroGenRaw.csv", "genCapAvailStochRaw.csv")
+        filtered_outputs = Dict(
+            filename => read(joinpath(scenario_dir, filename), String)
+            for filename in generated_files
+        )
+        unfiltered_params = OpenEMPIRE.EmpireParams(
+            genCapAvailType = copy(params.genCapAvailType),
+        )
+        OpenEMPIRE.generate_scenario_csv!(
+            root,
+            periods,
+            unfiltered_params,
+            sets,
+            merge(cfg, Dict("filter_use" => false));
+            rng = MersenneTwister(1),
+        )
+        @test all(
+            read(joinpath(scenario_dir, filename), String) == filtered_outputs[filename]
+            for filename in generated_files
+        )
     end
 end
 
@@ -472,6 +564,378 @@ Period,Scenario,Season,Year,Month,Hour
 
         @test params.sloadRaw["A"][winter_scenario[1]] == 2.0
         @test params.sloadRaw["A"][spring_scenario[1]] == 31.0
+    end
+end
+
+function test_scenario_filter_metrics_and_clustering()
+    @test OpenEMPIRE._wasserstein_distance_1d([0.0, 1.0], [0.0, 2.0]) == 0.5
+    @test OpenEMPIRE._wasserstein_distance_1d([1.0, 1.0], [1.0]) == 0.0
+    @test_throws ArgumentError OpenEMPIRE._wasserstein_distance_1d(Float64[], [1.0])
+    @test_throws ArgumentError OpenEMPIRE._wasserstein_distance_1d([NaN], [1.0])
+    @test OpenEMPIRE._wasserstein_distance_sorted(
+        [0.0, 1.0, 1.0, 3.0],
+        [0.0, 2.0],
+    ) ≈ 0.75
+    @test OpenEMPIRE._wasserstein_distance_sorted([1.0], [1.0, 1.0, 1.0]) == 0.0
+    @test_throws ArgumentError OpenEMPIRE._wasserstein_distance_sorted(
+        Float64[],
+        [1.0],
+    )
+
+    mktempdir() do root
+        load_path = joinpath(root, "electricload.csv")
+        _write_filter_parity_load(load_path)
+        table = OpenEMPIRE._read_raw_scenario_table(
+            load_path,
+            OpenEMPIRE._python_dateformat("%d/%m/%Y %H:%M"),
+        )
+        seasons = ("winter", "spring", "summer", "fall")
+        metrics = OpenEMPIRE._filter_metric_rows(table, seasons, 2, [2015, 2016])
+        @test length(metrics) == 40
+        @test all(count(row -> row.Season == season, metrics) == 10 for season in seasons)
+        @test [row.SampleIndex for row in metrics if row.Season == "winter"] ==
+              vcat(collect(0:4), collect(0:4))
+
+        restricted_metrics = OpenEMPIRE._filter_metric_rows(table, seasons, 2, [2016])
+        @test length(restricted_metrics) == 20
+        @test all(row.Year == 2016 for row in restricted_metrics)
+
+        clustered = OpenEMPIRE._cluster_filter_rows(
+            metrics,
+            seasons,
+            2,
+            MersenneTwister(19);
+            n_init = 5,
+        )
+        repeated = OpenEMPIRE._cluster_filter_rows(
+            metrics,
+            seasons,
+            2,
+            MersenneTwister(19);
+            n_init = 5,
+        )
+        @test clustered == repeated
+        for season in seasons
+            groups = sort!(unique(row.ClusterGroup for row in clustered if row.Season == season))
+            @test groups == [0, 1]
+        end
+        @test_throws ArgumentError OpenEMPIRE._cluster_filter_rows(
+            metrics,
+            seasons,
+            11,
+            MersenneTwister(1);
+            n_init = 1,
+        )
+
+        python_output = joinpath(root, "python_filter_metrics.csv")
+        if _run_python_filter_metrics(load_path, python_output, root)
+            python_rows = collect(CSV.File(python_output; normalizenames = false))
+            @test length(python_rows) == length(metrics)
+            for (julia_row, python_row) in zip(metrics, python_rows)
+                @test (
+                    julia_row.Year,
+                    julia_row.Season,
+                    julia_row.SampleIndex,
+                ) == (
+                    Int(python_row.Year),
+                    String(python_row.Season),
+                    Int(python_row.SampleIndex),
+                )
+                @test julia_row.Value ≈ Float64(python_row.Value) rtol = 1e-12 atol = 1e-12
+                @test julia_row.Value2 ≈ Float64(python_row.Value2) rtol = 1e-12 atol = 1e-12
+            end
+        else
+            @test_skip "Python/SciPy filter reference is unavailable"
+        end
+
+        future_path = joinpath(root, "electricload_2021.csv")
+        _write_filter_parity_load(future_path; years = (2021,))
+        future_table = OpenEMPIRE._read_raw_scenario_table(
+            future_path,
+            OpenEMPIRE._python_dateformat("%d/%m/%Y %H:%M"),
+        )
+        future_metrics = OpenEMPIRE._filter_metric_rows(
+            future_table,
+            seasons,
+            2,
+            [2021],
+        )
+        @test length(future_metrics) == 20
+        @test all(row.Year == 2021 for row in future_metrics)
+    end
+end
+
+function test_scenario_filter_make_and_use()
+    mktempdir() do root
+        first_root = joinpath(root, "first")
+        second_root = joinpath(root, "second")
+        mkpath(first_root)
+        _write_fixed_sample_scenario_data(first_root)
+        _write_raw_scenario_file(
+            joinpath(first_root, "ScenarioData", "electricload.csv"),
+            vcat(_scenario_time_rows(2019), _scenario_time_rows(2020)),
+        )
+        cp(first_root, second_root)
+        rm(joinpath(first_root, "ScenarioData", "sampling_key.csv"))
+        rm(joinpath(second_root, "ScenarioData", "sampling_key.csv"))
+
+        sets = _scenario_test_sets()
+        config = Dict(
+            "time_format" => "%d/%m/%Y %H:%M",
+            "regular_seasons" => ["winter", "spring", "summer", "fall"],
+            "n_peak_seasons" => 0,
+            "len_peak_season" => 0,
+            "length_of_regular_season" => 2,
+            "number_of_scenarios" => 3,
+            "use_fixed_sample" => false,
+            "filter_make" => true,
+            "filter_use" => true,
+            "n_cluster" => 3,
+        )
+        periods = OpenEMPIRE.create_timestruct(2, 5, 4, 2, 0, 0, 3)
+
+        function generate_filtered(root_path, run_config = config)
+            params = OpenEMPIRE.EmpireParams(
+                genCapAvailType = Dict(
+                    "Solar" => 0.0,
+                    "Windonshore" => 0.0,
+                    "Windoffshore" => 0.0,
+                    "Hydrorun-of-the-river" => 0.0,
+                ),
+            )
+            OpenEMPIRE.generate_scenario_csv!(
+                root_path,
+                periods,
+                params,
+                sets,
+                run_config;
+                rng = MersenneTwister(7),
+            )
+        end
+
+        generate_filtered(first_root)
+        generate_filtered(second_root)
+        first_filter = joinpath(first_root, "ScenarioData", "filter_result.csv")
+        second_filter = joinpath(second_root, "ScenarioData", "filter_result.csv")
+        @test read(first_filter, String) == read(second_filter, String)
+
+        filter_rows = collect(CSV.File(first_filter; normalizenames = false))
+        @test string.(propertynames(first(filter_rows))) ==
+              ["Year", "Season", "SampleIndex", "Value", "Value2", "ClusterGroup"]
+        @test all(Int(row.Year) == 2020 for row in filter_rows)
+        @test all(0 <= Int(row.ClusterGroup) < 3 for row in filter_rows)
+
+        candidate_groups = Dict(
+            (String(row.Season), Int(row.Year), Int(row.SampleIndex)) => Int(row.ClusterGroup)
+            for row in filter_rows
+        )
+        first_sampling_key = joinpath(first_root, "ScenarioData", "sampling_key.csv")
+        second_sampling_key = joinpath(second_root, "ScenarioData", "sampling_key.csv")
+        @test read(first_sampling_key, String) == read(second_sampling_key, String)
+        sampling_rows = collect(CSV.File(
+            first_sampling_key;
+            normalizenames = false,
+        ))
+        @test length(sampling_rows) == 24
+        for (index, row) in enumerate(sampling_rows)
+            expected_group = (index - 1) % 3
+            key = (String(row.Season), Int(row.Year), Int(row.Hour))
+            @test haskey(candidate_groups, key)
+            @test candidate_groups[key] == expected_group
+        end
+
+        generate_filtered(first_root, merge(config, Dict("filter_make" => false)))
+        reused_rows = collect(CSV.File(
+            joinpath(first_root, "ScenarioData", "sampling_key.csv");
+            normalizenames = false,
+        ))
+        @test length(reused_rows) == 24
+        for (index, row) in enumerate(reused_rows)
+            key = (String(row.Season), Int(row.Year), Int(row.Hour))
+            @test haskey(candidate_groups, key)
+            @test candidate_groups[key] == (index - 1) % 3
+        end
+
+        missing_root = joinpath(root, "missing")
+        mkpath(joinpath(missing_root, "ScenarioData"))
+        cp(
+            joinpath(first_root, "ScenarioData", "electricload.csv"),
+            joinpath(missing_root, "ScenarioData", "electricload.csv"),
+        )
+        load_table = OpenEMPIRE._read_raw_scenario_table(
+            joinpath(missing_root, "ScenarioData", "electricload.csv"),
+            OpenEMPIRE._python_dateformat("%d/%m/%Y %H:%M"),
+        )
+        @test_throws ArgumentError OpenEMPIRE._filter_candidate_groups(
+            joinpath(missing_root, "ScenarioData"),
+            ("winter",),
+            2,
+            load_table,
+            2,
+            [2020],
+        )
+        _write_csv(
+            joinpath(missing_root, "ScenarioData", "filter_result.csv"),
+            "Year,Season,SampleIndex,Value,Value2\n2020,winter,0,1.0,2.0\n",
+        )
+        @test_throws ArgumentError OpenEMPIRE._filter_candidate_groups(
+            joinpath(missing_root, "ScenarioData"),
+            ("winter",),
+            2,
+            load_table,
+            2,
+            [2020],
+        )
+
+        filter_header = "Year,Season,SampleIndex,Value,Value2,ClusterGroup\n"
+        function assert_invalid_filter(rows::AbstractString, expected::AbstractString)
+            _write_csv(
+                joinpath(missing_root, "ScenarioData", "filter_result.csv"),
+                filter_header * rows,
+            )
+            error = try
+                OpenEMPIRE._filter_candidate_groups(
+                    joinpath(missing_root, "ScenarioData"),
+                    ("winter",),
+                    2,
+                    load_table,
+                    2,
+                    [2020],
+                )
+                nothing
+            catch err
+                err
+            end
+            @test error isa ArgumentError
+            if error isa ArgumentError
+                @test occursin(expected, sprint(showerror, error))
+            end
+            return nothing
+        end
+
+        valid_group_one = "2020,winter,1,1.1,2.1,1\n"
+        assert_invalid_filter(
+            "2020,winter,0,,2.0,0\n" * valid_group_one,
+            "row 2 has an invalid Value",
+        )
+        assert_invalid_filter(
+            "2020,winter,0,abc,2.0,0\n" * valid_group_one,
+            "row 2 has an invalid Value",
+        )
+        assert_invalid_filter(
+            "2020,winter,0.5,1.0,2.0,0\n" * valid_group_one,
+            "row 2 has an invalid SampleIndex",
+        )
+        assert_invalid_filter(
+            "99999999999999999999999,winter,0,1.0,2.0,0\n" * valid_group_one,
+            "row 2 has an invalid Year",
+        )
+        assert_invalid_filter(
+            "2020,,0,1.0,2.0,0\n" * valid_group_one,
+            "row 2 has an invalid Season",
+        )
+        assert_invalid_filter(
+            "2020,winter,0,NaN,2.0,0\n" * valid_group_one,
+            "row 2 contains a non-finite metric",
+        )
+        assert_invalid_filter(
+            "2020,winter,0,1.0,Inf,0\n" * valid_group_one,
+            "row 2 contains a non-finite metric",
+        )
+        assert_invalid_filter(
+            "2020,winter,-1,1.0,2.0,0\n" * valid_group_one,
+            "row 2 contains a negative SampleIndex",
+        )
+        assert_invalid_filter(
+            "2020,winter,0,1.0,2.0,3\n" * valid_group_one,
+            "row 2 has ClusterGroup 3 outside 0:1",
+        )
+        assert_invalid_filter(
+            "2020,winter,0,1.0,2.0,0\n2020,winter,0,1.1,2.1,1\n",
+            "row 3 contains duplicate candidate",
+        )
+        assert_invalid_filter(
+            "2019,winter,0,1.0,2.0,0\n" * valid_group_one,
+            "Year=2019, which is not present in every raw scenario input",
+        )
+        assert_invalid_filter(
+            "2020,winter,29,1.0,2.0,0\n" * valid_group_one,
+            "hour 29 exceeds the 30 available rows",
+        )
+        assert_invalid_filter(
+            "2020,winter,0,1.0,2.0,0\n",
+            "has no candidates for season winter and ClusterGroup 1",
+        )
+    end
+end
+
+function test_scenario_filter_defaults()
+    mktempdir() do root
+        implicit_root = joinpath(root, "implicit")
+        explicit_root = joinpath(root, "explicit")
+        mkpath(implicit_root)
+        _write_fixed_sample_scenario_data(implicit_root)
+        cp(implicit_root, explicit_root)
+        rm(joinpath(implicit_root, "ScenarioData", "sampling_key.csv"))
+        rm(joinpath(explicit_root, "ScenarioData", "sampling_key.csv"))
+
+        sets = _scenario_test_sets()
+        config = Dict(
+            "time_format" => "%d/%m/%Y %H:%M",
+            "regular_seasons" => ["winter", "spring", "summer", "fall"],
+            "n_peak_seasons" => 0,
+            "len_peak_season" => 0,
+            "length_of_regular_season" => 2,
+            "number_of_scenarios" => 2,
+            "use_fixed_sample" => false,
+        )
+        periods = OpenEMPIRE.create_timestruct(1, 5, 4, 2, 0, 0, 2)
+
+        function generate_unfiltered(root_path, run_config)
+            params = OpenEMPIRE.EmpireParams(
+                genCapAvailType = Dict(
+                    "Solar" => 0.0,
+                    "Windonshore" => 0.0,
+                    "Windoffshore" => 0.0,
+                    "Hydrorun-of-the-river" => 0.0,
+                ),
+            )
+            OpenEMPIRE.generate_scenario_csv!(
+                root_path,
+                periods,
+                params,
+                sets,
+                run_config;
+                rng = MersenneTwister(31),
+            )
+        end
+
+        generate_unfiltered(implicit_root, config)
+        generate_unfiltered(
+            explicit_root,
+            merge(
+                config,
+                Dict(
+                    "filter_make" => false,
+                    "filter_use" => false,
+                    "n_cluster" => 10,
+                ),
+            ),
+        )
+        for filename in (
+            "sampling_key.csv",
+            "sloadRaw.csv",
+            "maxRegHydroGenRaw.csv",
+            "genCapAvailStochRaw.csv",
+        )
+            @test read(
+                joinpath(implicit_root, "ScenarioData", filename),
+                String,
+            ) == read(
+                joinpath(explicit_root, "ScenarioData", filename),
+                String,
+            )
+        end
     end
 end
 
@@ -588,6 +1052,10 @@ Period,Scenario,Season,Year,Month,Hour
 """,
         )
         _write_csv(joinpath(scenario_dir, "sloadRaw.csv"), "Node,Operationalhour,Scenario,Period,ElectricLoadRaw_in_MW\n")
+        filter_result = _write_csv(
+            joinpath(scenario_dir, "filter_result.csv"),
+            "Year,Season,SampleIndex,Value,Value2,ClusterGroup\n2020,winter,0,1.0,2.0,0\n",
+        )
 
         config = Dict(
             "use_scenario_generation" => true,
@@ -595,6 +1063,9 @@ Period,Scenario,Season,Year,Month,Hour
             "number_of_scenarios" => 1,
             "length_of_regular_season" => 24,
             "regular_seasons" => ["winter"],
+            "filter_make" => true,
+            "filter_use" => true,
+            "n_cluster" => 10,
         )
         config_file = joinpath(root, "run.yaml")
         YAML.write_file(config_file, config)
@@ -614,6 +1085,13 @@ Period,Scenario,Season,Year,Month,Hour
         @test archived_key == expected_key
         @test read(expected_key, String) == read(sampling_key, String)
         @test isfile(joinpath(result_dir, "Input", "config.yaml"))
+        archived_filter = joinpath(
+            result_dir,
+            "Input",
+            "ScenarioData",
+            "filter_result.csv",
+        )
+        @test read(archived_filter, String) == read(filter_result, String)
 
         metadata = YAML.load_file(joinpath(result_dir, "Input", "scenario_metadata.yaml"))
         @test metadata["dataset"] == "dataset"
@@ -621,8 +1099,37 @@ Period,Scenario,Season,Year,Month,Hour
         @test metadata["input_format"] == "csv"
         @test metadata["use_scenario_generation"] == true
         @test metadata["use_fixed_sample"] == false
+        @test metadata["filter_make"] == true
+        @test metadata["filter_use"] == true
+        @test metadata["n_cluster"] == 10
         @test metadata["archived_sampling_key"] == joinpath("Input", "ScenarioData", "sampling_key.csv")
+        @test metadata["source_filter_result"] == filter_result
+        @test metadata["archived_filter_result"] ==
+              joinpath("Input", "ScenarioData", "filter_result.csv")
         @test metadata["generated_scenario_files_present"]["sloadRaw.csv"] == true
+
+        unfiltered_result = joinpath(root, "unfiltered")
+        unfiltered_config = merge(
+            config,
+            Dict("filter_make" => false, "filter_use" => false),
+        )
+        OpenEMPIRE.write_scenario_artifacts(
+            unfiltered_result,
+            dataset,
+            unfiltered_config,
+        )
+        @test !ispath(joinpath(
+            unfiltered_result,
+            "Input",
+            "ScenarioData",
+            "filter_result.csv",
+        ))
+        unfiltered_metadata = YAML.load_file(joinpath(
+            unfiltered_result,
+            "Input",
+            "scenario_metadata.yaml",
+        ))
+        @test !haskey(unfiltered_metadata, "archived_filter_result")
 
         disabled_result = joinpath(root, "disabled")
         disabled_config = merge(config, Dict("use_scenario_generation" => false))
