@@ -1,4 +1,4 @@
-include(joinpath(@__DIR__, "..", "scripts", "run_julia_empire.jl"))
+include(joinpath(@__DIR__, "..", "scripts", "runner_staging.jl"))
 
 function test_stage_run_inputs_copies_without_mutating_source()
     mktempdir() do root
