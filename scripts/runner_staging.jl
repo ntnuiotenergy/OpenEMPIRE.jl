@@ -108,6 +108,10 @@ function _stage_run_inputs(
                 force = true,
             )
         end
+        OpenEMPIRE.stage_oos_fixed_investment_provenance(
+            fixed_investment_dir,
+            staged_fixed_investment_dir,
+        )
     end
 
     return (

@@ -128,6 +128,105 @@ function _write_investment_csvs(
     return output_dir
 end
 
+function _write_test_investment_run_evidence(run_dir, config_file)
+    input_dir = joinpath(run_dir, "Input")
+    mkpath(input_dir)
+    cp(config_file, joinpath(input_dir, "config.yaml"); force = true)
+    write(
+        joinpath(run_dir, "summary.txt"),
+        "OpenEMPIRE.jl run summary\noptimize=true\ntermination_status=OPTIMAL\n",
+    )
+    return run_dir
+end
+
+function test_fixed_investment_provenance_and_compatibility()
+    mktempdir() do root
+        config_file = joinpath(pkgdir(OpenEMPIRE), "config", "testrun.yaml")
+        config = YAML.load_file(config_file)
+        legacy_run = joinpath(root, "legacy")
+        _write_investment_csvs(joinpath(legacy_run, "Output"))
+        _write_test_investment_run_evidence(legacy_run, config_file)
+
+        legacy = OpenEMPIRE._oos_fixed_investment_metadata(legacy_run)
+        @test legacy["provenance"]["kind"] == "reconstructed_legacy_run"
+        @test legacy["provenance"]["summary_sha256"] ==
+              OpenEMPIRE._oos_sha256_file(joinpath(legacy_run, "summary.txt"))
+        @test OpenEMPIRE.validate_oos_fixed_investment_compatibility(
+            legacy,
+            config,
+        )["status"] == "compatible"
+
+        operationally_different = copy(config)
+        operationally_different["number_of_scenarios"] += 1
+        operationally_different["length_of_regular_season"] = 8760
+        @test OpenEMPIRE.validate_oos_fixed_investment_compatibility(
+            legacy,
+            operationally_different,
+        )["status"] == "compatible"
+
+        structurally_different = copy(config)
+        structurally_different["north_sea"] =
+            !get(structurally_different, "north_sea", false)
+        @test_throws ArgumentError OpenEMPIRE.validate_oos_fixed_investment_compatibility(
+            legacy,
+            structurally_different,
+        )
+
+        staged = joinpath(root, "staged")
+        mkpath(staged)
+        for source in OpenEMPIRE._oos_fixed_investment_source_files(legacy_run)
+            cp(source, joinpath(staged, basename(source)))
+        end
+        staged_metadata = OpenEMPIRE.stage_oos_fixed_investment_provenance(
+            legacy_run,
+            staged,
+        )
+        @test staged_metadata["sha256"] == legacy["sha256"]
+        @test staged_metadata["provenance"]["kind"] ==
+              "reconstructed_legacy_run"
+        @test isfile(joinpath(staged, "source_config.yaml"))
+        @test isfile(joinpath(staged, "fixed_investment_provenance.yaml"))
+
+        verified_run = joinpath(root, "verified")
+        _write_investment_csvs(joinpath(verified_run, "output"))
+        verified_input = joinpath(verified_run, "Input")
+        mkpath(verified_input)
+        cp(config_file, joinpath(verified_input, "config.yaml"))
+        capacity = OpenEMPIRE._oos_fixed_capacity_metadata(verified_run)
+        YAML.write_file(
+            joinpath(verified_run, "run_manifest.yaml"),
+            Dict{String, Any}(
+                "status" => "complete",
+                "config_sha256" => OpenEMPIRE._oos_sha256_file(
+                    joinpath(verified_input, "config.yaml"),
+                ),
+                "out_of_sample" => Dict("enabled" => false),
+                "solution" => Dict(
+                    "termination_status" => "OPTIMAL",
+                    "is_solved_and_feasible" => true,
+                ),
+                "investment_context" =>
+                    OpenEMPIRE._oos_structural_config(config),
+                "investment_result" => Dict(
+                    "fixed_investments_sha256" => capacity["sha256"],
+                ),
+            ),
+        )
+        verified = OpenEMPIRE._oos_fixed_investment_metadata(verified_run)
+        @test verified["provenance"]["kind"] == "verified_run_manifest"
+
+        unsupported = joinpath(root, "unsupported")
+        _write_investment_csvs(joinpath(unsupported, "output"))
+        mkpath(joinpath(unsupported, "Input"))
+        cp(config_file, joinpath(unsupported, "Input", "config.yaml"))
+        @test_throws ArgumentError OpenEMPIRE._oos_fixed_investment_metadata(
+            unsupported,
+        )
+    end
+
+    return nothing
+end
+
 function test_fix_only_investment_capacities()
     sets, periods = _oos_test_sets_and_periods()
     strategic_period = first(strat_periods(periods))

@@ -204,6 +204,19 @@ When the tree contains `metadata.yaml`, the runner verifies its file checksums,
 stages the metadata, and records the tree seed, full provenance, and base
 investment run in `run_manifest.yaml`.
 
+The source investment run must also provide provenance. New Julia run manifests
+record a normalized investment context and a checksum over the eight capacity
+tables. Older runs can be used only when a preserved config plus `summary.txt`
+prove `optimize=true` and `OPTIMAL`; these are explicitly labelled
+`reconstructed_legacy_run`. The runner stages this evidence as
+`fixed_investment_provenance.yaml` and `source_config.yaml`.
+
+Forecast horizon, investment-period length, North Sea mode, emission-cap mode,
+discount rate, WACC, and load-change mode must match the investment run.
+Scenario count and operational season/time settings may differ intentionally
+for OOS, including chronological full-year evaluation. Incompatibility fails
+before model construction.
+
 ### North Sea / offshore transmission cap
 
 The Python reference model has an optional North Sea transmission cap, and the

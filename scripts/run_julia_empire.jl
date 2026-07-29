@@ -399,6 +399,17 @@ function _oos_scenario_seed(spec::JuliaRunSpec)
 end
 
 function _initial_manifest(spec::JuliaRunSpec)
+    fixed_metadata =
+        isempty(spec.fixed_investment_dir) ?
+        nothing :
+        OpenEMPIRE._oos_fixed_investment_metadata(spec.fixed_investment_dir)
+    fixed_compatibility =
+        fixed_metadata === nothing ?
+        nothing :
+        OpenEMPIRE.validate_oos_fixed_investment_compatibility(
+            fixed_metadata,
+            spec.run_config,
+        )
     return Dict{String, Any}(
         "runtime" => "julia",
         "status" => "started",
@@ -442,6 +453,9 @@ function _initial_manifest(spec::JuliaRunSpec)
         ),
         "seed" => spec.seed,
         "fixed_sample" => spec.fixed_sample,
+        "investment_context" =>
+            OpenEMPIRE._oos_structural_config(spec.run_config),
+        "investment_result" => nothing,
         "sampling_key" => _sampling_key_info(spec.data_folder),
         "generate_only" => spec.generate_only,
         "optimize" => spec.optimize,
@@ -459,6 +473,8 @@ function _initial_manifest(spec::JuliaRunSpec)
                 isempty(spec.original_fixed_investment_dir) ?
                 nothing :
                 spec.original_fixed_investment_dir,
+            "fixed_investment_metadata" => fixed_metadata,
+            "fixed_investment_compatibility" => fixed_compatibility,
             "investments_fixed" => false,
             "original_scenario_data_root" =>
                 isempty(spec.original_scenario_data_root) ?
@@ -861,6 +877,15 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
     objective = solution.objective
     objective_components = solution.objective_components
     run_succeeded, run_error = _solver_run_state(solution, spec.optimize)
+    if solution.solved_and_feasible
+        capacity_metadata =
+            OpenEMPIRE._oos_fixed_capacity_metadata(spec.result_dir)
+        manifest["investment_result"] = Dict{String, Any}(
+            "fixed_investments_sha256" => capacity_metadata["sha256"],
+            "output_dir" => capacity_metadata["output_dir"],
+            "files" => capacity_metadata["files"],
+        )
+    end
 
     component_lines = if objective_components === nothing
         component_value = spec.optimize ? "unavailable" : "not_optimized"
@@ -876,6 +901,19 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
     end
     progress("Writing run summary")
     run_ended_at = now()
+    fixed_metadata = manifest["out_of_sample"]["fixed_investment_metadata"]
+    fixed_compatibility =
+        manifest["out_of_sample"]["fixed_investment_compatibility"]
+    fixed_sha256 =
+        fixed_metadata === nothing ? "none" : fixed_metadata["sha256"]
+    fixed_provenance =
+        fixed_metadata === nothing ?
+        "none" :
+        fixed_metadata["provenance"]["kind"]
+    fixed_compatibility_status =
+        fixed_compatibility === nothing ?
+        "not_applicable" :
+        fixed_compatibility["status"]
     summary_path = _write_summary(
         joinpath(spec.result_dir, "summary.txt"),
         vcat([
@@ -894,6 +932,9 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
             "scenario_checksums_verified=$(spec.scenario_tree_checksums_verified)",
             "base_investment_run=$(spec.original_fixed_investment_dir)",
             "fixed_investment_dir=$(spec.fixed_investment_dir)",
+            "fixed_investments_sha256=$fixed_sha256",
+            "fixed_investment_provenance=$fixed_provenance",
+            "fixed_investment_compatibility=$fixed_compatibility_status",
             "optimize=$(spec.optimize)",
             "variables=$(JuMP.num_variables(emp))",
             "constraints=$(JuMP.num_constraints(emp; count_variable_in_set_constraints = false))",

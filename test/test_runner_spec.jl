@@ -21,10 +21,11 @@ function test_resolve_julia_run_spec()
         )
 
         config_file = joinpath(root, "run.yaml")
-        write(
-            config_file,
-            "use_scenario_generation: false\nuse_fixed_sample: false\n",
-        )
+        config =
+            YAML.load_file(joinpath(pkgdir(OpenEMPIRE), "config", "testrun.yaml"))
+        config["use_scenario_generation"] = false
+        config["use_fixed_sample"] = false
+        YAML.write_file(config_file, config)
 
         results_root = joinpath(root, "results")
         options = _parse_args([
@@ -158,9 +159,17 @@ function test_resolve_single_tree_oos_run_spec()
         _write_runner_fixed_investment_files(joinpath(fixed_result, "output"))
 
         config_file = joinpath(root, "run.yaml")
+        config =
+            YAML.load_file(joinpath(pkgdir(OpenEMPIRE), "config", "testrun.yaml"))
+        config["use_scenario_generation"] = true
+        config["use_fixed_sample"] = true
+        YAML.write_file(config_file, config)
+        fixed_input = joinpath(fixed_result, "Input")
+        mkpath(fixed_input)
+        cp(config_file, joinpath(fixed_input, "config.yaml"))
         write(
-            config_file,
-            "use_scenario_generation: true\nuse_fixed_sample: true\n",
+            joinpath(fixed_result, "summary.txt"),
+            "OpenEMPIRE.jl run summary\noptimize=true\ntermination_status=OPTIMAL\n",
         )
         options = _parse_args([
             source,
@@ -186,7 +195,14 @@ function test_resolve_single_tree_oos_run_spec()
         @test spec.original_fixed_investment_dir == fixed_result
         @test spec.fixed_investment_dir ==
               joinpath(spec.result_dir, "Input", "fixed_investments")
-        @test length(readdir(spec.fixed_investment_dir)) == 8
+        @test length(readdir(spec.fixed_investment_dir)) == 10
+        @test isfile(
+            joinpath(
+                spec.fixed_investment_dir,
+                "fixed_investment_provenance.yaml",
+            ),
+        )
+        @test isfile(joinpath(spec.fixed_investment_dir, "source_config.yaml"))
 
         staged_scenario_dir = joinpath(spec.data_folder, "ScenarioData")
         for filename in _OOS_SCENARIO_FILENAMES
@@ -211,6 +227,10 @@ function test_resolve_single_tree_oos_run_spec()
         @test manifest["out_of_sample"]["scenario_checksums_verified"] == true
         @test manifest["out_of_sample"]["scenario_metadata"]["tree"] == "oos_tree7"
         @test manifest["out_of_sample"]["base_investment_run"] == fixed_result
+        @test manifest["out_of_sample"]["fixed_investment_compatibility"]["status"] ==
+              "compatible"
+        @test manifest["out_of_sample"]["fixed_investment_metadata"]["provenance"]["kind"] ==
+              "reconstructed_legacy_run"
         @test manifest["out_of_sample"]["investments_fixed"] == false
         @test manifest["input_staging"]["scenario_data_source"] == tree_root
         @test manifest["sampling_key"]["sha256"] == _sha256_file(

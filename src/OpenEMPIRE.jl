@@ -9,6 +9,7 @@ using Clustering
 using Dates
 using DelimitedFiles
 using Random
+using SHA
 using Statistics
 using YAML
 
