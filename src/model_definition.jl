@@ -148,7 +148,14 @@ function create_objective(emp::JuMP.Model, sets, par, periods::TimeStructure, di
 end
 
 # Create all constraints in the model
-function create_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
+function create_constraints(
+    emp::JuMP.Model,
+    sets,
+    par,
+    periods::TimeStructure;
+    include_investment_constraints::Bool = true,
+    progress = nothing,
+)
     @info "Creating constraints"
     _report_progress(progress, "Creating constraints")
 
@@ -172,9 +179,35 @@ function create_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; 
             shed[n, t] == load(par, n, t)
     )
 
-    create_generator_constraints(emp, sets, par, periods; progress)
-    create_storage_constraints(emp, sets, par, periods; progress)
-    create_transmission_constraints(emp, sets, par, periods; progress)
+    if !include_investment_constraints
+        @info "Omitting investment-only constraints for fixed-capacity evaluation"
+        _report_progress(progress, "Omitting investment-only constraints")
+    end
+
+    create_generator_constraints(
+        emp,
+        sets,
+        par,
+        periods;
+        include_investment_constraints,
+        progress,
+    )
+    create_storage_constraints(
+        emp,
+        sets,
+        par,
+        periods;
+        include_investment_constraints,
+        progress,
+    )
+    create_transmission_constraints(
+        emp,
+        sets,
+        par,
+        periods;
+        include_investment_constraints,
+        progress,
+    )
     create_emission_constraints(emp, sets, par, periods; progress)
     return nothing
 
@@ -187,7 +220,14 @@ function duration_aggr(sp, spp, strat_periods)
     return sum(duration_strat(p) for p in strat_periods if p >= sp && p < spp; init = 0)
 end
 
-function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
+function create_generator_constraints(
+    emp::JuMP.Model,
+    sets,
+    par,
+    periods::TimeStructure;
+    include_investment_constraints::Bool = true,
+    progress = nothing,
+)
     @info "Creating generator constraints"
     _report_progress(progress, "Creating generator constraints")
     N = nodes(sets)
@@ -235,6 +275,8 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
         ) <= max_hydro_node(par, n)
     )
 
+    include_investment_constraints || return nothing
+
     # Tracking installed capacity from investments across strategic periods that are within
     # the technology lifetime
     @info " - installed capacity constraints: $(length(node_generators(sets)) * length(SP))"
@@ -270,7 +312,14 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
     )
 end
 
-function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
+function create_storage_constraints(
+    emp::JuMP.Model,
+    sets,
+    par,
+    periods::TimeStructure;
+    include_investment_constraints::Bool = true,
+    progress = nothing,
+)
     @info "Creating storage constraints"
     _report_progress(progress, "Creating storage constraints")
     N = nodes(sets)
@@ -324,6 +373,8 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
         storDischarge[n, s, t] <= storage_disc_to_char_ratio(par, s) * storCapPow[n, s, sp]
     )
 
+    include_investment_constraints || return nothing
+
     @info " - investment constraints"
     _report_progress(progress, "Creating storage installed-capacity tracking constraints")
     # Tracking installed capacity from investments
@@ -375,7 +426,14 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
 
 end
 
-function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
+function create_transmission_constraints(
+    emp::JuMP.Model,
+    sets,
+    par,
+    periods::TimeStructure;
+    include_investment_constraints::Bool = true,
+    progress = nothing,
+)
     @info "Creating transmission constraints"
     _report_progress(progress, "Creating transmission constraints")
     N = nodes(sets)
@@ -391,6 +449,8 @@ function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::Ti
         trans_cap[(m, n) in arcs(sets), sp in SP, t in sp],
         transOp[m, n, t] <= (is_bidir(m, n) ? transCap[m, n, sp] : transCap[n, m, sp])
     )
+
+    include_investment_constraints || return nothing
 
     # Tracking installed capacity from investments across strategic periods that are within
     # the technology lifetime

@@ -53,6 +53,9 @@ end
 
 @testset "Out-of-sample" begin
     test_fix_investments_from_results()
+    test_fix_only_investment_capacities()
+    test_fixed_investment_key_validation()
+    test_oos_omits_investment_only_constraints()
 end
 
 @testset "Runner performance" begin

@@ -137,12 +137,21 @@ function generate_scenarios(
     return periods, sets, params
 end
 
+"""
+    create_model(config_file, data_folder; include_investment_constraints = true, ...)
+
+Build an EMPIRE model from configuration and input data. Set
+`include_investment_constraints = false` for out-of-sample evaluation after
+strategic capacities from a completed investment run will be fixed on the
+model.
+"""
 function create_model(
     config_file,
     data_folder;
     optimizer = nothing,
     optimizer_attributes = (),
     include_string_names = true,
+    include_investment_constraints::Bool = true,
     input_format = :auto,
     scenario_rng = Random.default_rng(),
     progress = nothing,
@@ -175,7 +184,14 @@ function create_model(
     _report_progress(progress, "Build 10/12: creating variables")
     @time OpenEMPIRE.create_variables(emp, sets, periods; progress)
     _report_progress(progress, "Build 11/12: creating constraints")
-    @time OpenEMPIRE.create_constraints(emp, sets, params, periods; progress)
+    @time OpenEMPIRE.create_constraints(
+        emp,
+        sets,
+        params,
+        periods;
+        include_investment_constraints,
+        progress,
+    )
     _report_progress(progress, "Build 12/12: creating objective")
     @time OpenEMPIRE.create_objective(
         emp,

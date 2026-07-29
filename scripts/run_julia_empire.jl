@@ -519,6 +519,7 @@ end
 
 function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
     perf_phases = JObj[]
+    include_investment_constraints = !spec.out_of_sample
 
     progress("Starting model build")
     build_stats = @timed OpenEMPIRE.create_model(
@@ -526,6 +527,7 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
         spec.data_folder;
         optimizer = spec.optimizer,
         optimizer_attributes = spec.optimizer_attributes,
+        include_investment_constraints,
         input_format = spec.input_format,
         scenario_rng = MersenneTwister(spec.seed),
         progress,
@@ -554,6 +556,7 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
             emp;
             count_variable_in_set_constraints = false,
         ),
+        "investment_constraints_included" => include_investment_constraints,
     )
     _write_run_manifest(spec.manifest_path, manifest)
     scenario_artifact = _archive_scenario_artifacts(spec)
@@ -616,6 +619,7 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
             "optimize=$(spec.optimize)",
             "variables=$(JuMP.num_variables(emp))",
             "constraints=$(JuMP.num_constraints(emp; count_variable_in_set_constraints = false))",
+            "investment_constraints_included=$include_investment_constraints",
             "build_seconds=$build_seconds",
             "solve_seconds=$(solution.solve_seconds)",
             "termination_status=$(termination === nothing ? "not_optimized" : string(termination))",

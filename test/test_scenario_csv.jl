@@ -544,6 +544,23 @@ function test_create_model_with_raw_csv_scenarios()
         @test length(params.sload) == 3
         @test haskey(params.genCapAvail, ("Germany", "Solar"))
         @test isfile(joinpath(dataset, "ScenarioData", "sloadRaw.csv"))
+        @test haskey(JuMP.object_dictionary(emp), :installed_cap_gen)
+
+        oos_model, _, _, _ = OpenEMPIRE.create_model(
+            joinpath(pkgdir(OpenEMPIRE), "data", "test_excel", "testrun.yaml"),
+            dataset;
+            include_investment_constraints = false,
+            input_format = :csv,
+            scenario_rng = MersenneTwister(1),
+        )
+        @test haskey(JuMP.object_dictionary(oos_model), :flow_balance)
+        @test haskey(JuMP.object_dictionary(oos_model), :gen_max_prod)
+        @test !haskey(JuMP.object_dictionary(oos_model), :installed_cap_gen)
+        @test !haskey(
+            JuMP.object_dictionary(oos_model),
+            :storage_installed_cap_en,
+        )
+        @test !haskey(JuMP.object_dictionary(oos_model), :trans_track_cap)
     end
 end
 
