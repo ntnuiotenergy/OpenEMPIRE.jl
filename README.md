@@ -282,7 +282,7 @@ prove `optimize=true` and `OPTIMAL`; these are explicitly labelled
 
 ### Preparing chronological full-year OOS
 
-Prepare one OOS tree for each selected complete non-leap historical year:
+Prepare one 24-tree OOS experiment for a complete non-leap historical year:
 
 ```bash
 julia --project=. scripts/prepare_full_year_oos_experiment.jl europe_v51 \
@@ -293,25 +293,17 @@ julia --project=. scripts/prepare_full_year_oos_experiment.jl europe_v51 \
 ```
 
 The command only prepares inputs; it does not build or solve EMPIRE. It writes
-`full_year_config.yaml`, `experiment.yaml`, and one checksummed `oos_treeN` per
-sample year. Supply the generated `full_year_config.yaml`—not the original
-representative-period config—to `prepare_oos_execution_queue.jl` and the Julia
-runner.
+`full_year_config.yaml`, `experiment.yaml`, and checksummed trees
+`oos_tree1`–`oos_tree24`. Supply the generated config—not the original
+representative-period config—to `prepare_oos_execution_queue.jl`.
 
-Each strategic period receives the same selected historical profile as one
-ordered 8760-hour operational scenario. The time structure contains one
-regular period, one scenario, no dummy peak, and one storage cycle boundary at
-the end of the year. `operational_hours_per_year: 8760` makes every modeled
-hour's representative multiplicity exactly one. All required raw files must
-contain exactly the same gap-free hourly non-leap year; source rows are sorted
-by parsed timestamp before output because some historical files are stored in
-a non-chronological row order.
-
-This intentionally differs from InternalEMPIRE's current 24 independent
-365-hour runs. In Julia, placing a 365-hour block inside
-`RepresentativePeriods(8760, ...)` scales that block to a representative year,
-and independent blocks also reset cyclic storage 24 times. Those semantics are
-not a continuous chronological full-year evaluation.
+This matches InternalEMPIRE's full-year evaluation: the selected 8,760 input
+rows are split, in source row order, into 24 independently solved 365-hour
+chunks. Each chunk has one `winter` operational scenario and the required dummy
+peak hour. Aggregation ignores the dummy-peak output and concatenates the 24
+validated chunks as chronological hours 1–8,760. Every required raw table must
+contain exactly one complete, gap-free non-leap year; duplicate or missing
+timestamps are rejected without reordering the source rows.
 
 Forecast horizon, investment-period length, North Sea mode, emission-cap mode,
 discount rate, WACC, and load-change mode must match the investment run.
