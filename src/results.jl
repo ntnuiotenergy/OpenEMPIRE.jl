@@ -250,6 +250,9 @@ const SCENARIO_ARTIFACT_CONFIG_KEYS = (
     "len_peak_season",
     "length_of_regular_season",
     "time_format",
+    "filter_make",
+    "filter_use",
+    "n_cluster",
 )
 
 function _insert_if_not_nothing!(dict, key::AbstractString, value)
@@ -261,11 +264,13 @@ end
 """
     write_scenario_artifacts(result_dir, data_folder, config; kwargs...)
 
-Archive the scenario sampling key and run metadata under
-`joinpath(result_dir, "Input")` when scenario generation is enabled.
+Archive the scenario sampling key, optional scenario filter, and run metadata
+under `joinpath(result_dir, "Input")` when scenario generation is enabled.
 
 The archived `Input/ScenarioData/sampling_key.csv` is enough to replay the
 exact sampled scenario tree together with the run config and original dataset.
+When filtering is enabled and `filter_result.csv` exists, the exact candidate
+catalog is archived beside the sampling key.
 Returns the archived sampling-key path, or `nothing` when no sampling key is
 available or scenario generation is disabled.
 """
@@ -290,6 +295,17 @@ function write_scenario_artifacts(
     archived_key = joinpath(scenario_dir, "sampling_key.csv")
     cp(source_key, archived_key; force = true)
 
+    source_filter = joinpath(data_folder, "ScenarioData", "filter_result.csv")
+    filter_enabled =
+        get(config, "filter_make", false) || get(config, "filter_use", false)
+    archived_filter = if filter_enabled && isfile(source_filter)
+        destination = joinpath(scenario_dir, "filter_result.csv")
+        cp(source_filter, destination; force = true)
+        destination
+    else
+        nothing
+    end
+
     if config_file !== nothing && isfile(config_file)
         cp(config_file, joinpath(input_dir, "config.yaml"); force = true)
     end
@@ -310,6 +326,10 @@ function write_scenario_artifacts(
     _insert_if_not_nothing!(metadata, "config_file", config_file)
     _insert_if_not_nothing!(metadata, "input_format", input_format === nothing ? nothing : string(input_format))
     _insert_if_not_nothing!(metadata, "seed", seed)
+    if archived_filter !== nothing
+        metadata["source_filter_result"] = source_filter
+        metadata["archived_filter_result"] = relpath(archived_filter, result_dir)
+    end
     for key in SCENARIO_ARTIFACT_CONFIG_KEYS
         haskey(config, key) && (metadata[key] = config[key])
     end

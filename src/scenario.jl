@@ -380,13 +380,17 @@ function _filter_metric_rows(
     table::RawScenarioTable,
     seasons,
     regular_hours::Int,
+    sample_years::AbstractVector{<:Integer},
 )
     regular_hours > 0 || throw(ArgumentError(
         "length_of_regular_season must be positive when making a scenario filter",
     ))
 
     totals = _total_scenario_values(table)
-    years = sort!(unique(table.years))
+    years = sort!(unique(Int.(sample_years)))
+    isempty(years) && throw(ArgumentError(
+        "Scenario filter requires at least one common sample year",
+    ))
     rows = FilterMetricRow[]
     sample_values = Vector{Float64}(undef, regular_hours)
 
@@ -518,12 +522,78 @@ function _make_filter_result!(
     seasons,
     regular_hours::Int,
     n_cluster::Int,
+    sample_years::AbstractVector{<:Integer},
     rng,
 )
-    metrics = _filter_metric_rows(load_table, seasons, regular_hours)
+    metrics = _filter_metric_rows(load_table, seasons, regular_hours, sample_years)
     rows = _cluster_filter_rows(metrics, seasons, n_cluster, rng)
     CSV.write(joinpath(scenario_dir, "filter_result.csv"), rows)
     return rows
+end
+
+function _invalid_filter_value(
+    path::AbstractString,
+    row_number::Int,
+    column::AbstractString,
+    value,
+)
+    throw(ArgumentError(
+        "Scenario filter $path row $row_number has an invalid $column value: $(repr(value))",
+    ))
+end
+
+function _parse_filter_integer(
+    value,
+    path::AbstractString,
+    row_number::Int,
+    column::AbstractString,
+)
+    parsed = if value isa Integer && !(value isa Bool)
+        try
+            Int(value)
+        catch
+            nothing
+        end
+    elseif value isa AbstractFloat
+        if isfinite(value) && isinteger(value)
+            try
+                Int(value)
+            catch
+                nothing
+            end
+        end
+    elseif value isa AbstractString
+        tryparse(Int, strip(value))
+    end
+    parsed === nothing && _invalid_filter_value(path, row_number, column, value)
+    return parsed
+end
+
+function _parse_filter_float(
+    value,
+    path::AbstractString,
+    row_number::Int,
+    column::AbstractString,
+)
+    parsed = if value isa Real && !(value isa Bool)
+        try
+            Float64(value)
+        catch
+            nothing
+        end
+    elseif value isa AbstractString
+        tryparse(Float64, strip(value))
+    end
+    parsed === nothing && _invalid_filter_value(path, row_number, column, value)
+    return parsed
+end
+
+function _parse_filter_season(value, path::AbstractString, row_number::Int)
+    value isa AbstractString ||
+        _invalid_filter_value(path, row_number, "Season", value)
+    season = strip(String(value))
+    isempty(season) && _invalid_filter_value(path, row_number, "Season", value)
+    return season
 end
 
 function _filter_candidate_groups(
@@ -532,6 +602,7 @@ function _filter_candidate_groups(
     n_cluster::Int,
     load_table::RawScenarioTable,
     regular_hours::Int,
+    sample_years::AbstractVector{<:Integer},
 )
     n_cluster > 0 || throw(ArgumentError("n_cluster must be positive"))
     path = joinpath(scenario_dir, "filter_result.csv")
@@ -539,48 +610,79 @@ function _filter_candidate_groups(
         "filter_use is true, but scenario filter not found: $path",
     ))
 
-    file = CSV.File(path; normalizenames = false)
+    file = try
+        CSV.File(path; normalizenames = false)
+    catch err
+        throw(ArgumentError(
+            "Could not read scenario filter $path: $(sprint(showerror, err))",
+        ))
+    end
     required_columns = ["Year", "Season", "SampleIndex", "Value", "Value2", "ClusterGroup"]
     names = string.(propertynames(file))
     missing_columns = setdiff(required_columns, names)
     isempty(missing_columns) || throw(ArgumentError(
-        "Scenario filter is missing column(s): $(join(missing_columns, ", "))",
+        "Scenario filter $path is missing column(s): $(join(missing_columns, ", "))",
     ))
 
     requested_seasons = Set(String.(seasons))
+    allowed_years = sort!(unique(Int.(sample_years)))
+    isempty(allowed_years) && throw(ArgumentError(
+        "Scenario filter $path cannot be used without a common sample year",
+    ))
+    allowed_year_set = Set(allowed_years)
     groups = Dict{Tuple{String, Int}, Vector{FilterResultRow}}()
     seen = Set{Tuple{Int, String, Int}}()
     available_hours = Dict(
         (year, String(season)) => length(_season_indices(load_table, year, season))
-        for year in unique(load_table.years), season in seasons
+        for year in allowed_years, season in seasons
     )
-    for input_row in file
+    for (data_row, input_row) in enumerate(file)
+        row_number = data_row + 1
         row = (
-            Year = Int(input_row.Year),
-            Season = String(input_row.Season),
-            SampleIndex = Int(input_row.SampleIndex),
-            Value = Float64(input_row.Value),
-            Value2 = Float64(input_row.Value2),
-            ClusterGroup = Int(input_row.ClusterGroup),
+            Year = _parse_filter_integer(input_row.Year, path, row_number, "Year"),
+            Season = _parse_filter_season(input_row.Season, path, row_number),
+            SampleIndex = _parse_filter_integer(
+                input_row.SampleIndex,
+                path,
+                row_number,
+                "SampleIndex",
+            ),
+            Value = _parse_filter_float(input_row.Value, path, row_number, "Value"),
+            Value2 = _parse_filter_float(input_row.Value2, path, row_number, "Value2"),
+            ClusterGroup = _parse_filter_integer(
+                input_row.ClusterGroup,
+                path,
+                row_number,
+                "ClusterGroup",
+            ),
         )
         row.Season in requested_seasons || continue
+        row.Year in allowed_year_set || throw(ArgumentError(
+            "Scenario filter $path row $row_number references Year=$(row.Year), " *
+            "which is not present in every raw scenario input; allowed years: " *
+            join(allowed_years, ", "),
+        ))
         row.SampleIndex >= 0 || throw(ArgumentError(
-            "Scenario filter contains a negative SampleIndex for $(row.Season) $(row.Year)",
+            "Scenario filter $path row $row_number contains a negative SampleIndex " *
+            "for $(row.Season) $(row.Year)",
         ))
         isfinite(row.Value) && isfinite(row.Value2) || throw(ArgumentError(
-            "Scenario filter contains a non-finite metric for $(row.Season) $(row.Year)",
+            "Scenario filter $path row $row_number contains a non-finite metric " *
+            "for $(row.Season) $(row.Year)",
         ))
         0 <= row.ClusterGroup < n_cluster || throw(ArgumentError(
-            "Scenario filter ClusterGroup $(row.ClusterGroup) is outside 0:$(n_cluster - 1)",
+            "Scenario filter $path row $row_number has ClusterGroup " *
+            "$(row.ClusterGroup) outside 0:$(n_cluster - 1)",
         ))
         key = (row.Year, row.Season, row.SampleIndex)
         key in seen && throw(ArgumentError(
-            "Scenario filter contains duplicate candidate $key",
+            "Scenario filter $path row $row_number contains duplicate candidate $key",
         ))
         push!(seen, key)
         hours = get(available_hours, (row.Year, row.Season), 0)
-        row.SampleIndex + regular_hours <= hours || throw(ArgumentError(
-            "Scenario filter candidate $(row.Season) $(row.Year) hour " *
+        row.SampleIndex <= hours - regular_hours || throw(ArgumentError(
+            "Scenario filter $path row $row_number candidate $(row.Season) " *
+            "$(row.Year) hour " *
             "$(row.SampleIndex) exceeds the $hours available rows",
         ))
         push!(get!(groups, (row.Season, row.ClusterGroup), FilterResultRow[]), row)
@@ -589,7 +691,8 @@ function _filter_candidate_groups(
     for season in seasons, cluster in 0:(n_cluster - 1)
         isempty(get(groups, (String(season), cluster), FilterResultRow[])) &&
             throw(ArgumentError(
-                "Scenario filter has no candidates for season $season and ClusterGroup $cluster",
+                "Scenario filter $path has no candidates for season $season " *
+                "and ClusterGroup $cluster",
             ))
     end
     return groups
@@ -867,6 +970,7 @@ function generate_scenario_csv!(data_folder, periods, params::EmpireParams, sets
             regular_seasons,
             regular_hours,
             n_cluster,
+            sample_years,
             rng,
         )
     end
@@ -877,6 +981,7 @@ function generate_scenario_csv!(data_folder, periods, params::EmpireParams, sets
             n_cluster,
             load_table,
             regular_hours,
+            sample_years,
         )
     else
         nothing
