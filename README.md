@@ -200,6 +200,9 @@ both sources, copies the scenario inputs and eight strategic-capacity tables
 under the new run's `Input/` directory, and modifies only the staged config to
 read the supplied scenario tree. The shared dataset, original config, scenario
 tree, and investment result are not modified.
+When the tree contains `metadata.yaml`, the runner verifies its file checksums,
+stages the metadata, and records the tree seed, full provenance, and base
+investment run in `run_manifest.yaml`.
 
 ### North Sea / offshore transmission cap
 

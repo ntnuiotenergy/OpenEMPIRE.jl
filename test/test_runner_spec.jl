@@ -138,6 +138,21 @@ function test_resolve_single_tree_oos_run_spec()
             joinpath(tree_scenario_dir, "sampling_key.csv"),
             "tree sampling key\n",
         )
+        tree_files = Dict{String, Any}(
+            filename => Dict(
+                "sha256" => _sha256_file(
+                    joinpath(tree_scenario_dir, filename),
+                ),
+            ) for filename in _OOS_TREE_FILENAMES
+        )
+        YAML.write_file(
+            joinpath(tree_root, "metadata.yaml"),
+            Dict(
+                "tree" => "oos_tree7",
+                "seed" => 7,
+                "files" => tree_files,
+            ),
+        )
 
         fixed_result = joinpath(root, "investment_run")
         _write_runner_fixed_investment_files(joinpath(fixed_result, "output"))
@@ -162,6 +177,11 @@ function test_resolve_single_tree_oos_run_spec()
 
         @test spec.out_of_sample
         @test spec.scenario_tree == "oos_tree7"
+        @test spec.scenario_tree_metadata["seed"] == 7
+        @test spec.scenario_tree_checksums_verified
+        @test spec.scenario_tree_metadata_file ==
+              joinpath(spec.result_dir, "Input", "oos_tree_metadata.yaml")
+        @test isfile(spec.scenario_tree_metadata_file)
         @test spec.original_scenario_data_root == tree_root
         @test spec.original_fixed_investment_dir == fixed_result
         @test spec.fixed_investment_dir ==
@@ -187,11 +207,22 @@ function test_resolve_single_tree_oos_run_spec()
         manifest = _initial_manifest(spec)
         @test manifest["out_of_sample"]["enabled"] == true
         @test manifest["out_of_sample"]["scenario_tree"] == "oos_tree7"
+        @test manifest["out_of_sample"]["scenario_seed"] == 7
+        @test manifest["out_of_sample"]["scenario_checksums_verified"] == true
+        @test manifest["out_of_sample"]["scenario_metadata"]["tree"] == "oos_tree7"
+        @test manifest["out_of_sample"]["base_investment_run"] == fixed_result
         @test manifest["out_of_sample"]["investments_fixed"] == false
         @test manifest["input_staging"]["scenario_data_source"] == tree_root
         @test manifest["sampling_key"]["sha256"] == _sha256_file(
             joinpath(staged_scenario_dir, "sampling_key.csv"),
         )
+
+        tree_files["sloadRaw.csv"]["sha256"] = "incorrect"
+        YAML.write_file(
+            joinpath(tree_root, "metadata.yaml"),
+            Dict("seed" => 7, "files" => tree_files),
+        )
+        @test_throws ArgumentError _scenario_tree_metadata(tree_root)
     end
 
     return nothing

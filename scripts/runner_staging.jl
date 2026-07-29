@@ -13,6 +13,11 @@ const _OOS_SCENARIO_FILENAMES = (
     "genCapAvailStochRaw.csv",
 )
 
+const _OOS_TREE_FILENAMES = (
+    _OOS_SCENARIO_FILENAMES...,
+    "sampling_key.csv",
+)
+
 const _OOS_FIXED_INVESTMENT_FILENAMES = (
     ("genInvCap.csv",),
     ("transmissionInvCap.csv", "transmisionInvCap.csv"),
@@ -74,6 +79,7 @@ function _stage_run_inputs(
     input_dir = joinpath(result_dir, "Input")
     staged_data = joinpath(input_dir, "csv")
     staged_config = joinpath(input_dir, "config.yaml")
+    staged_scenario_metadata_file = ""
 
     mkpath(input_dir)
     cp(data_folder, staged_data)
@@ -83,6 +89,12 @@ function _stage_run_inputs(
         source_scenario_dir = _scenario_data_dir(scenario_data_root)
         staged_scenario_dir = joinpath(staged_data, "ScenarioData")
         cp(source_scenario_dir, staged_scenario_dir; force = true)
+        source_metadata_file = joinpath(scenario_data_root, "metadata.yaml")
+        if isfile(source_metadata_file)
+            staged_scenario_metadata_file =
+                joinpath(input_dir, "oos_tree_metadata.yaml")
+            cp(source_metadata_file, staged_scenario_metadata_file)
+        end
     end
 
     staged_fixed_investment_dir = ""
@@ -98,5 +110,10 @@ function _stage_run_inputs(
         end
     end
 
-    return staged_data, staged_config, staged_fixed_investment_dir
+    return (
+        staged_data,
+        staged_config,
+        staged_fixed_investment_dir,
+        staged_scenario_metadata_file,
+    )
 end
