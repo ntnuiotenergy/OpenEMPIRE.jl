@@ -577,6 +577,90 @@ function _run_generate_only(spec::JuliaRunSpec, manifest, run_start, progress)
     return spec.result_dir
 end
 
+function _extract_solver_result(objective_components::F, emp) where {F}
+    termination = JuMP.termination_status(emp)
+    primal_status = JuMP.primal_status(emp)
+    dual_status = JuMP.dual_status(emp)
+    result_count = JuMP.result_count(emp)
+    has_values = JuMP.has_values(emp)
+    solved_and_feasible = JuMP.is_solved_and_feasible(emp)
+    objective = nothing
+    components = nothing
+    if solved_and_feasible && has_values
+        objective = JuMP.objective_value(emp)
+        components = objective_components()
+    end
+    return (;
+        termination,
+        primal_status,
+        dual_status,
+        result_count,
+        has_values,
+        solved_and_feasible,
+        objective,
+        objective_components = components,
+    )
+end
+
+function _solver_result_manifest(solution, optimized::Bool)
+    return Dict{String, Any}(
+        "termination_status" =>
+            optimized ? string(solution.termination) : "not_optimized",
+        "primal_status" =>
+            optimized ? string(solution.primal_status) : "not_optimized",
+        "dual_status" =>
+            optimized ? string(solution.dual_status) : "not_optimized",
+        "result_count" => optimized ? solution.result_count : 0,
+        "has_values" => optimized ? solution.has_values : false,
+        "is_solved_and_feasible" =>
+            optimized ? solution.solved_and_feasible : false,
+        "objective_value" =>
+            optimized ? solution.objective : "not_optimized",
+        "objective_components" =>
+            solution.objective_components === nothing ?
+            nothing :
+            Dict{String, Any}(
+                string(name) => value for
+                (name, value) in pairs(solution.objective_components)
+            ),
+    )
+end
+
+function _solver_failure_message(solution)
+    return "Model optimization did not produce a feasible solution: " *
+           "termination=$(solution.termination), " *
+           "primal_status=$(solution.primal_status), " *
+           "dual_status=$(solution.dual_status), " *
+           "result_count=$(solution.result_count)"
+end
+
+function _solver_run_state(solution, optimized::Bool)
+    succeeded = !optimized || solution.solved_and_feasible
+    return succeeded, succeeded ? nothing : _solver_failure_message(solution)
+end
+
+function _finalize_run_manifest!(
+    manifest,
+    solution,
+    optimized::Bool;
+    summary_path,
+    scenario_artifact,
+    perf_enabled::Bool,
+    wall_seconds::Real,
+    end_time = now(),
+)
+    succeeded, run_error = _solver_run_state(solution, optimized)
+    manifest["solution"] = _solver_result_manifest(solution, optimized)
+    manifest["status"] = succeeded ? "complete" : "failed"
+    manifest["error"] = run_error
+    manifest["end_time"] = string(end_time)
+    manifest["timings"]["wall_seconds"] = round(wall_seconds; digits = 3)
+    manifest["summary_path"] = summary_path
+    manifest["scenario_artifact"] = scenario_artifact
+    manifest["perf_enabled"] = perf_enabled
+    return succeeded, run_error
+end
+
 function _solve_model!(
     spec::JuliaRunSpec,
     manifest,
@@ -602,25 +686,32 @@ function _solve_model!(
     )
     manifest["timings"]["solve_seconds"] = solve_seconds
     progress("Solver optimization finished in $(round(solve_seconds; digits = 2)) seconds")
-    termination = JuMP.termination_status(emp)
-    objective = JuMP.objective_value(emp)
-    progress("Computing objective component diagnostics")
-    objective_components = OpenEMPIRE.objective_component_values(
-        emp,
-        sets,
-        params,
-        periods,
-        Discounter(OpenEMPIRE.discount_rate(params), 1, periods),
-    )
+    solution = _extract_solver_result(emp) do
+        progress("Computing objective component diagnostics")
+        OpenEMPIRE.objective_component_values(
+            emp,
+            sets,
+            params,
+            periods,
+            Discounter(OpenEMPIRE.discount_rate(params), 1, periods),
+        )
+    end
     println("Solve seconds: $(round(solve_seconds; digits = 2))")
-    println("Termination status: $termination")
-    println("Objective value: $objective")
-    println("Objective components:")
-    for (name, value) in pairs(objective_components)
-        println("  $name: $value")
+    println("Termination status: $(solution.termination)")
+    println("Primal status: $(solution.primal_status)")
+    println("Dual status: $(solution.dual_status)")
+    println("Result count: $(solution.result_count)")
+    if solution.objective === nothing
+        println("Objective value: unavailable (no feasible solution)")
+    else
+        println("Objective value: $(solution.objective)")
+        println("Objective components:")
+        for (name, value) in pairs(solution.objective_components)
+            println("  $name: $value")
+        end
     end
     flush(stdout)
-    if JuMP.is_solved_and_feasible(emp)
+    if solution.solved_and_feasible
         progress("Writing solution CSV tables")
         results_stats =
             @timed OpenEMPIRE.write_solution_tables(
@@ -647,7 +738,7 @@ function _solve_model!(
         println("Solution CSVs skipped because the solved model is not feasible.")
         flush(stdout)
     end
-    return (; termination, objective, objective_components, solve_seconds)
+    return merge(solution, (; solve_seconds))
 end
 
 function _write_perf_report(
@@ -754,20 +845,26 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
     solution = if spec.optimize
         _solve_model!(spec, manifest, perf_phases, emp, sets, params, periods, progress)
     else
-        (termination = nothing, objective = nothing, objective_components = nothing, solve_seconds = 0.0)
+        (
+            termination = nothing,
+            primal_status = nothing,
+            dual_status = nothing,
+            result_count = 0,
+            has_values = false,
+            solved_and_feasible = false,
+            objective = nothing,
+            objective_components = nothing,
+            solve_seconds = 0.0,
+        )
     end
     termination = solution.termination
     objective = solution.objective
     objective_components = solution.objective_components
-    manifest["solution"] = Dict{String, Any}(
-        "termination_status" => termination === nothing ? "not_optimized" : string(termination),
-        "objective_value" => objective === nothing ? "not_optimized" : objective,
-        "objective_components" => objective_components === nothing ? nothing :
-            Dict{String, Any}(string(name) => value for (name, value) in pairs(objective_components)),
-    )
+    run_succeeded, run_error = _solver_run_state(solution, spec.optimize)
 
     component_lines = if objective_components === nothing
-        ["objective_component_$name=not_optimized" for name in (
+        component_value = spec.optimize ? "unavailable" : "not_optimized"
+        ["objective_component_$name=$component_value" for name in (
             :generator_investment,
             :storage_investment,
             :transmission_investment,
@@ -778,6 +875,7 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
         ["objective_component_$name=$value" for (name, value) in pairs(objective_components)]
     end
     progress("Writing run summary")
+    run_ended_at = now()
     summary_path = _write_summary(
         joinpath(spec.result_dir, "summary.txt"),
         vcat([
@@ -803,17 +901,26 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
             "build_seconds=$build_seconds",
             "solve_seconds=$(solution.solve_seconds)",
             "termination_status=$(termination === nothing ? "not_optimized" : string(termination))",
-            "objective_value=$(objective === nothing ? "not_optimized" : string(objective))",
-            "end_time=$(now())",
+            "primal_status=$(spec.optimize ? string(solution.primal_status) : "not_optimized")",
+            "dual_status=$(spec.optimize ? string(solution.dual_status) : "not_optimized")",
+            "result_count=$(solution.result_count)",
+            "objective_value=$(objective === nothing ? (spec.optimize ? "unavailable" : "not_optimized") : string(objective))",
+            "run_status=$(run_succeeded ? "complete" : "failed")",
+            "error=$(something(run_error, "none"))",
+            "end_time=$run_ended_at",
         ], component_lines),
     )
     println("Summary written to: $summary_path")
-    manifest["status"] = "complete"
-    manifest["end_time"] = string(now())
-    manifest["timings"]["wall_seconds"] = round(time() - run_start; digits = 3)
-    manifest["summary_path"] = summary_path
-    manifest["scenario_artifact"] = scenario_artifact
-    manifest["perf_enabled"] = spec.perf_enabled
+    _finalize_run_manifest!(
+        manifest,
+        solution,
+        spec.optimize;
+        summary_path,
+        scenario_artifact,
+        perf_enabled = spec.perf_enabled,
+        wall_seconds = time() - run_start,
+        end_time = run_ended_at,
+    )
     _write_run_manifest(spec.manifest_path, manifest)
     println("Run manifest written to: $(spec.manifest_path)")
 
@@ -822,7 +929,9 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
 
     println("End time: $(now())")
     flush(stdout)
-    progress("Run complete")
+    progress(run_succeeded ? "Run complete" : "Run failed")
+
+    run_succeeded || error(run_error)
 
     return termination
 end
