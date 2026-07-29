@@ -15,6 +15,7 @@ include("test_csv.jl")
 include("test_scenario_csv.jl")
 include("test_out_of_sample.jl")
 include("test_runner_performance.jl")
+include("test_runner_manifest.jl")
 #include("test_interface.jl")
 include("test_timestruct.jl")
 include("test_solve.jl")
@@ -54,6 +55,10 @@ end
 
 @testset "Runner performance" begin
     test_runner_performance_helpers()
+end
+
+@testset "Runner manifest" begin
+    test_runner_manifest_helpers()
 end
 
 @testset "Validate" begin
