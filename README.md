@@ -180,6 +180,27 @@ and scenario settings used to generate it. Internally, the script reuses
 `data/<dataset>/ScenarioData` and then copied into the corresponding
 `OutOfSample/<dataset>/oos_treeN/ScenarioData` folder.
 
+### Running one out-of-sample scenario tree
+
+Use the standard Julia runner with a completed investment run and one external
+scenario-tree directory:
+
+```bash
+julia --project=. scripts/run_julia_empire.jl test \
+  --config=config/testrun.yaml \
+  --out-of-sample=true \
+  --fixed-investment-dir=results/julia_runs/<investment-run> \
+  --scenario-data-root=OutOfSample/test/oos_tree1
+```
+
+The scenario-tree directory must contain `ScenarioData/sloadRaw.csv`,
+`maxRegHydroGenRaw.csv`, and `genCapAvailStochRaw.csv`. The investment directory
+may be a run directory or its `Output`/`output` directory. The runner validates
+both sources, copies the scenario inputs and eight strategic-capacity tables
+under the new run's `Input/` directory, and modifies only the staged config to
+read the supplied scenario tree. The shared dataset, original config, scenario
+tree, and investment result are not modified.
+
 ### North Sea / offshore transmission cap
 
 The Python reference model has an optional North Sea transmission cap, and the

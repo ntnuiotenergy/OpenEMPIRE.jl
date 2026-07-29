@@ -16,10 +16,12 @@ function test_stage_run_inputs_copies_without_mutating_source()
         write(config_file, "use_scenario_generation: true\n")
 
         result_dir = joinpath(root, "result")
-        staged_data, staged_config = _stage_run_inputs(result_dir, source, config_file)
+        staged_data, staged_config, staged_fixed_investments =
+            _stage_run_inputs(result_dir, source, config_file)
 
         @test staged_data == joinpath(result_dir, "Input", "csv")
         @test staged_config == joinpath(result_dir, "Input", "config.yaml")
+        @test isempty(staged_fixed_investments)
         @test read(joinpath(staged_data, "ScenarioData", "sampling_key.csv"), String) == read(source_key, String)
         @test read(staged_config, String) == read(config_file, String)
 

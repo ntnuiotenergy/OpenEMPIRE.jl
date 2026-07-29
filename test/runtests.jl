@@ -86,6 +86,8 @@ end
 
 @testset "Runner spec" begin
     test_resolve_julia_run_spec()
+    test_resolve_single_tree_oos_run_spec()
+    test_reject_incomplete_oos_runner_options()
 end
 
 @testset "Validate" begin
