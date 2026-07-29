@@ -17,6 +17,7 @@ include("test_out_of_sample.jl")
 include("test_runner_performance.jl")
 include("test_runner_manifest.jl")
 include("test_runner_staging.jl")
+include("test_runner_spec.jl")
 #include("test_interface.jl")
 include("test_timestruct.jl")
 include("test_solve.jl")
@@ -64,6 +65,10 @@ end
 
 @testset "Runner staging" begin
     test_stage_run_inputs_copies_without_mutating_source()
+end
+
+@testset "Runner spec" begin
+    test_resolve_julia_run_spec()
 end
 
 @testset "Validate" begin
