@@ -323,6 +323,180 @@ function _get_fixed_sample(key, period::Int, scenario::Int, season::AbstractStri
     return sample
 end
 
+# ===== Copula-cluster scenario generation reduction (SGR) =====
+#
+# Stratifies regular-season sampling by clustering candidate (year, hour-window)
+# combinations on the empirical copula (rank-transformed, uniform-margin) of one
+# or more input variables across all their nodes, via k-means. Sampling then
+# round-robins through the clusters instead of sampling purely at random, so
+# scenarios are pulled from all regimes (e.g. low-load vs. high-load weeks).
+
+const COPULA_VARIABLE_NAMES = ("electricload", "hydroseasonal", "solar", "windonshore", "windoffshore", "hydroror")
+
+const CopulaClusterRow = NamedTuple{
+    (:Season, :Year, :SampleIndex, :ClusterGroup),
+    Tuple{String, Int, Int, Int},
+}
+
+_copula_cluster_path(data_folder) = joinpath(data_folder, "Copulas", "CopulaClusters", "copula_clusters.csv")
+
+function _copula_source_table(name::AbstractString, load_table::RawScenarioTable, hydro_table::RawScenarioTable, generator_sources)
+    name == "electricload" && return load_table
+    name == "hydroseasonal" && return hydro_table
+    for (gen_name, table) in generator_sources
+        name == "solar" && gen_name == "Solar" && return table
+        name == "windonshore" && gen_name == "Windonshore" && return table
+        name == "hydroror" && gen_name == "Hydrorun-of-the-river" && return table
+        name == "windoffshore" && startswith(gen_name, "Windoffshore") && return table
+    end
+    return nothing
+end
+
+function _copula_source_tables(copulas_to_use, load_table::RawScenarioTable, hydro_table::RawScenarioTable, generator_sources)
+    isempty(copulas_to_use) && throw(ArgumentError("copulas_to_use must contain at least one variable"))
+    tables = Tuple{String, RawScenarioTable}[]
+    for name in copulas_to_use
+        table = _copula_source_table(String(name), load_table, hydro_table, generator_sources)
+        table === nothing && throw(ArgumentError(
+            "Unknown copula variable \"$name\" in copulas_to_use. Valid options: " *
+            join(COPULA_VARIABLE_NAMES, ", "),
+        ))
+        push!(tables, (String(name), table))
+    end
+    return tables
+end
+
+function _copula_max_start(table::RawScenarioTable, year::Int, season::AbstractString, regular_hours::Int)
+    indices = _season_indices(table, year, season)
+    return length(indices) - regular_hours
+end
+
+function _copula_candidate_windows(tables, years, season::AbstractString, regular_hours::Int)
+    candidates = Tuple{Int, Int}[]
+    for year in years
+        max_start = minimum(_copula_max_start(table, year, season, regular_hours) for table in tables)
+        max_start < 0 && continue
+        for offset in 0:max_start
+            push!(candidates, (year, offset))
+        end
+    end
+    isempty(candidates) && throw(ArgumentError(
+        "No candidate $season windows available for copula clustering in years $years",
+    ))
+    return candidates
+end
+
+function _copula_window_mean(table::RawScenarioTable, col::String, year::Int, season::AbstractString, offset::Int, regular_hours::Int)
+    indices = _sample_regular_indices(table, year, season, offset, regular_hours)
+    return mean(view(table.values[col], indices))
+end
+
+# Ordinal rank (ties broken by order of appearance, matching pandas' rank(method="first"))
+# divided by N, transforming to a uniform-margin empirical copula.
+function _rank_transform(values::Vector{Float64})
+    n = length(values)
+    order = sortperm(values; alg = Base.Sort.MergeSort)
+    ranks = Vector{Float64}(undef, n)
+    for (rank, idx) in enumerate(order)
+        ranks[idx] = rank
+    end
+    return ranks ./ n
+end
+
+# Runs k-means `n_init` times with k-means++ initialization (matching sklearn's
+# default) and keeps the lowest-cost run, since Clustering.jl has no built-in
+# multi-restart option. Returns 0-indexed cluster assignments.
+function _best_kmeans(X::Matrix{Float64}, k::Int; n_init::Int = 100)
+    best = nothing
+    for _ in 1:n_init
+        result = Clustering.kmeans(X, k; init = :kmpp)
+        if best === nothing || result.totalcost < best.totalcost
+            best = result
+        end
+    end
+    return Clustering.assignments(best) .- 1
+end
+
+"""
+    make_copula_clusters(data_folder, regular_seasons, regular_hours, copulas_to_use, n_cluster,
+                          load_table, hydro_table, generator_sources; n_init=100)
+
+Cluster candidate regular-season sampling windows by the empirical copula of
+`copulas_to_use` across all of their nodes, and write the result to
+`Copulas/CopulaClusters/copula_clusters.csv` under `data_folder`.
+"""
+function make_copula_clusters(
+    data_folder,
+    regular_seasons,
+    regular_hours::Int,
+    copulas_to_use,
+    n_cluster::Int,
+    load_table::RawScenarioTable,
+    hydro_table::RawScenarioTable,
+    generator_sources;
+    n_init::Int = 100,
+)
+    source_tables = _copula_source_tables(copulas_to_use, load_table, hydro_table, generator_sources)
+    years = _sample_years((table for (_, table) in source_tables)...)
+
+    rows = CopulaClusterRow[]
+    for season in regular_seasons
+        candidates = _copula_candidate_windows((table for (_, table) in source_tables), years, season, regular_hours)
+        n_candidates = length(candidates)
+        n_cluster <= n_candidates || throw(ArgumentError(
+            "n_cluster=$n_cluster exceeds the number of candidate $season windows " *
+            "($n_candidates) available for copula clustering",
+        ))
+
+        dims = Vector{Float64}[]
+        for (_, table) in source_tables, col in table.columns
+            means = [_copula_window_mean(table, col, year, season, offset, regular_hours) for (year, offset) in candidates]
+            push!(dims, _rank_transform(means))
+        end
+
+        X = permutedims(reduce(hcat, dims))
+        cluster_of = _best_kmeans(X, n_cluster; n_init)
+
+        for (i, (year, offset)) in enumerate(candidates)
+            push!(rows, (Season = String(season), Year = year, SampleIndex = offset, ClusterGroup = cluster_of[i]))
+        end
+    end
+
+    path = _copula_cluster_path(data_folder)
+    mkpath(dirname(path))
+    CSV.write(path, rows)
+    return rows
+end
+
+function _read_copula_clusters(data_folder)
+    path = _copula_cluster_path(data_folder)
+    isfile(path) || throw(ArgumentError(
+        "copula_clusters_use is true, but no copula cluster file found at $path. " *
+        "Set copula_clusters_make=true first to build it.",
+    ))
+    rows = CopulaClusterRow[]
+    for row in CSV.File(path; normalizenames = false)
+        push!(rows, (
+            Season = String(row.Season),
+            Year = Int(row.Year),
+            SampleIndex = Int(row.SampleIndex),
+            ClusterGroup = Int(row.ClusterGroup),
+        ))
+    end
+    return rows
+end
+
+function _pick_copula_cluster_sample(rng, clusters::Vector{CopulaClusterRow}, season::AbstractString, cluster::Int)
+    matches = filter(r -> r.Season == season && r.ClusterGroup == cluster, clusters)
+    isempty(matches) && throw(ArgumentError(
+        "No candidate windows found for season=$season, cluster=$cluster in copula_clusters.csv",
+    ))
+    year = rand(rng, unique(r.Year for r in matches))
+    year_matches = filter(r -> r.Year == year, matches)
+    sample_hour = rand(rng, [r.SampleIndex for r in year_matches])
+    return year, sample_hour
+end
+
 _scenario_name(scenario_index::Int) = "scenario$scenario_index"
 _normalized_scenario_value(value) = value <= 0.001 ? 0.0 : value
 
@@ -546,6 +720,27 @@ function generate_scenario_csv!(data_folder, periods, params::EmpireParams, sets
     generator_sources = _raw_generator_sources(data_folder, dateformat, sets)
     sample_years = _sample_years(load_table, hydro_table, (source[2] for source in generator_sources)...)
 
+    copula_clusters_make = get(config, "copula_clusters_make", false)
+    copula_clusters_use = get(config, "copula_clusters_use", false)
+    n_cluster = Int(get(config, "n_cluster", 10))
+    copulas_to_use = get(config, "copulas_to_use", ["electricload"])
+
+    if copula_clusters_make
+        @info "Making copula clusters..."
+        make_copula_clusters(
+            data_folder,
+            regular_seasons,
+            regular_hours,
+            copulas_to_use,
+            n_cluster,
+            load_table,
+            hydro_table,
+            generator_sources,
+        )
+    end
+    copula_clusters = copula_clusters_use ? _read_copula_clusters(data_folder) : nothing
+    cluster_state = Ref(n_cluster - 1)
+
     load_columns = _node_columns(load_table, sets)
     hydro_columns = _node_columns(hydro_table, sets)
     generator_columns = Dict(g => _generator_columns(table, g, sets) for (g, table) in generator_sources)
@@ -565,6 +760,9 @@ function generate_scenario_csv!(data_folder, periods, params::EmpireParams, sets
                 season_index > length(representative_periods) && break
                 if fixed_sample
                     year, sample_hour = _get_fixed_sample(sample_key, strategic_index, scenario_index, season)
+                elseif copula_clusters_use
+                    cluster_state[] = mod(cluster_state[] + 1, n_cluster)
+                    year, sample_hour = _pick_copula_cluster_sample(rng, copula_clusters, season, cluster_state[])
                 else
                     year = rand(rng, sample_years)
                     sample_hour = _random_regular_sample(rng, load_table, year, season, regular_hours)

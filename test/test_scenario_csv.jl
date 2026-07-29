@@ -82,6 +82,48 @@ Period,Scenario,Season,Year,Month,Hour
     )
 end
 
+function _copula_cluster_time_rows()
+    starts = DateTime[
+        DateTime(2020, 1, 1), DateTime(2020, 4, 1), DateTime(2020, 7, 1), DateTime(2020, 10, 1),
+        DateTime(2021, 1, 1), DateTime(2021, 4, 1), DateTime(2021, 7, 1), DateTime(2021, 10, 1),
+    ]
+    rows = String[]
+    for start in starts
+        for h in 0:39
+            timestamp = Dates.format(start + Dates.Hour(h), dateformat"dd/mm/yyyy HH:MM")
+            value = h < 20 ? 10.0 + h * 0.1 : 1000.0 + h * 0.1
+            push!(rows, "$timestamp,$value")
+        end
+    end
+    return rows
+end
+
+# Two years of data, each regular season made of a "low" block of 20 hours
+# followed by a "high" block of 20 hours, so copula clustering (k=2) has a
+# clearly separable candidate space to work with.
+function _write_copula_cluster_scenario_data(root)
+    scenario_dir = joinpath(root, "ScenarioData")
+    rows = _copula_cluster_time_rows()
+    _write_raw_scenario_file(joinpath(scenario_dir, "electricload.csv"), rows)
+    _write_raw_scenario_file(joinpath(scenario_dir, "hydroseasonal.csv"), rows; scale = 10.0)
+    _write_raw_scenario_file(joinpath(scenario_dir, "solar.csv"), rows; scale = 0.01)
+    _write_raw_scenario_file(joinpath(scenario_dir, "windonshore.csv"), rows; scale = 0.02)
+    _write_raw_scenario_file(joinpath(scenario_dir, "windoffshore.csv"), rows; scale = 0.03)
+    _write_raw_scenario_file(joinpath(scenario_dir, "hydroror.csv"), rows; scale = 0.04)
+    return scenario_dir
+end
+
+function _copula_test_empire_params()
+    return OpenEMPIRE.EmpireParams(
+        genCapAvailType = Dict(
+            "Solar" => 0.0,
+            "Windonshore" => 0.0,
+            "Windoffshore" => 0.0,
+            "Hydrorun-of-the-river" => 0.0,
+        ),
+    )
+end
+
 function _parity_time_rows()
     starts = DateTime[
         DateTime(2020, 1, 1),
@@ -427,6 +469,135 @@ function test_fixed_sample_raw_csv_scenarios()
         @test params.maxRegHydroGenRaw["A"][sc_winter[1]] == 20.0
         @test params.genCapAvail[("A", "Solar")][sc_winter[1]] == 0.02
         @test params.genCapAvail[("A", "Windoffshore")][sc_spring[1]] ≈ 0.93
+    end
+end
+
+function test_copula_clusters_make_writes_csv()
+    mktempdir() do root
+        _write_copula_cluster_scenario_data(root)
+        sets = _scenario_test_sets()
+        dateformat = OpenEMPIRE._python_dateformat("%d/%m/%Y %H:%M")
+        load_table = OpenEMPIRE._read_raw_scenario_table(joinpath(root, "ScenarioData", "electricload.csv"), dateformat)
+        hydro_table = OpenEMPIRE._read_raw_scenario_table(joinpath(root, "ScenarioData", "hydroseasonal.csv"), dateformat)
+        generator_sources = OpenEMPIRE._raw_generator_sources(root, dateformat, sets)
+
+        rows = OpenEMPIRE.make_copula_clusters(
+            root,
+            OpenEMPIRE.REGULAR_SCENARIO_SEASONS,
+            4,
+            ["electricload"],
+            2,
+            load_table,
+            hydro_table,
+            generator_sources;
+            n_init = 5,
+        )
+
+        path = joinpath(root, "Copulas", "CopulaClusters", "copula_clusters.csv")
+        @test isfile(path)
+        @test !isempty(rows)
+        @test all(r -> r.ClusterGroup in (0, 1), rows)
+        @test Set(r.Season for r in rows) == Set(String.(OpenEMPIRE.REGULAR_SCENARIO_SEASONS))
+        @test length(Set(r.ClusterGroup for r in rows)) == 2
+
+        csv_rows = collect(CSV.File(path; normalizenames = false))
+        @test length(csv_rows) == length(rows)
+        @test Set(string.(propertynames(csv_rows[1]))) == Set(["Season", "Year", "SampleIndex", "ClusterGroup"])
+    end
+end
+
+function test_copula_clusters_use_samples_from_clusters()
+    mktempdir() do root
+        _write_copula_cluster_scenario_data(root)
+        sets = _scenario_test_sets()
+        dateformat = OpenEMPIRE._python_dateformat("%d/%m/%Y %H:%M")
+        load_table = OpenEMPIRE._read_raw_scenario_table(joinpath(root, "ScenarioData", "electricload.csv"), dateformat)
+        hydro_table = OpenEMPIRE._read_raw_scenario_table(joinpath(root, "ScenarioData", "hydroseasonal.csv"), dateformat)
+        generator_sources = OpenEMPIRE._raw_generator_sources(root, dateformat, sets)
+        OpenEMPIRE.make_copula_clusters(
+            root,
+            OpenEMPIRE.REGULAR_SCENARIO_SEASONS,
+            4,
+            ["electricload"],
+            2,
+            load_table,
+            hydro_table,
+            generator_sources;
+            n_init = 5,
+        )
+        clusters = OpenEMPIRE._read_copula_clusters(root)
+        clusters_by_season = Dict{String, Vector{OpenEMPIRE.CopulaClusterRow}}()
+        for c in clusters
+            push!(get!(clusters_by_season, c.Season, OpenEMPIRE.CopulaClusterRow[]), c)
+        end
+
+        params = _copula_test_empire_params()
+        cfg = Dict(
+            "time_format" => "%d/%m/%Y %H:%M",
+            "length_of_regular_season" => 4,
+            "number_of_scenarios" => 2,
+            "copula_clusters_use" => true,
+            "n_cluster" => 2,
+            "copulas_to_use" => ["electricload"],
+        )
+        periods = OpenEMPIRE.create_timestruct(1, 5, 4, 4, 2, 24, 2)
+
+        OpenEMPIRE.generate_scenario_csv!(root, periods, params, sets, cfg; rng = MersenneTwister(1))
+
+        _assert_profile_lengths(params.sloadRaw["A"], periods)
+
+        sampling_key_path = joinpath(root, "ScenarioData", "sampling_key.csv")
+        @test isfile(sampling_key_path)
+        regular_rows = [r for r in CSV.File(sampling_key_path; normalizenames = false) if String(r.Season) != "peak"]
+        @test !isempty(regular_rows)
+
+        used_clusters = Set{Int}()
+        for row in regular_rows
+            season = String(row.Season)
+            year = Int(row.Year)
+            hour = Int(row.Hour)
+            match = findfirst(c -> c.Year == year && c.SampleIndex == hour, clusters_by_season[season])
+            @test match !== nothing
+            push!(used_clusters, clusters_by_season[season][match].ClusterGroup)
+        end
+        @test used_clusters == Set([0, 1])
+    end
+end
+
+function test_copula_clusters_use_without_make_errors()
+    mktempdir() do root
+        _write_copula_cluster_scenario_data(root)
+        sets = _scenario_test_sets()
+        params = _copula_test_empire_params()
+        cfg = Dict(
+            "time_format" => "%d/%m/%Y %H:%M",
+            "length_of_regular_season" => 4,
+            "number_of_scenarios" => 1,
+            "copula_clusters_use" => true,
+            "n_cluster" => 2,
+        )
+        periods = OpenEMPIRE.create_timestruct(1, 5, 4, 4, 2, 24, 1)
+
+        @test_throws ArgumentError OpenEMPIRE.generate_scenario_csv!(root, periods, params, sets, cfg; rng = MersenneTwister(1))
+    end
+end
+
+function test_copula_clusters_invalid_copula_name_errors()
+    mktempdir() do root
+        _write_copula_cluster_scenario_data(root)
+        sets = _scenario_test_sets()
+        params = _copula_test_empire_params()
+        cfg = Dict(
+            "time_format" => "%d/%m/%Y %H:%M",
+            "length_of_regular_season" => 4,
+            "number_of_scenarios" => 1,
+            "copula_clusters_make" => true,
+            "n_cluster" => 2,
+            "copulas_to_use" => ["windpower"],
+        )
+        periods = OpenEMPIRE.create_timestruct(1, 5, 4, 4, 2, 24, 1)
+
+        @test_throws ArgumentError OpenEMPIRE.generate_scenario_csv!(root, periods, params, sets, cfg; rng = MersenneTwister(1))
     end
 end
 
