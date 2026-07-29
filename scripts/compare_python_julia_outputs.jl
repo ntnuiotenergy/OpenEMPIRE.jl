@@ -3,12 +3,14 @@
 import CSV
 using Printf
 
+# Python runs now live under Results/python_runs/<timestamp>_<dataset>/, with a
+# `latest` symlink to the most recent run (see OpenEMPIRE-csv/scripts/run.py).
 const DEFAULT_PYTHON_OUTPUT = joinpath(
     "..",
     "OpenEMPIRE-csv",
     "Results",
-    "basic_run",
-    "dataset_test",
+    "python_runs",
+    "latest",
     "Output",
 )
 
