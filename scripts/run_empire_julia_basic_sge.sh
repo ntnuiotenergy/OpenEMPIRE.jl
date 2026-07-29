@@ -24,6 +24,8 @@
 #   JULIA_OPTIMIZE  true/false, default: true
 #   JULIA_FIXED_SAMPLE  true/false, default: false. If true, pass
 #                       --fixed-sample and require ScenarioData/sampling_key.csv.
+#   EMPIRE_PERF         1/true/yes enables performance reporting, default: off
+#   EMPIRE_PERF_INTERVAL  Sampling interval in seconds, default: 1.0
 
 DATASET=${1:-test}
 CONFIG_FILE=${2:-config/testrun.yaml}
@@ -71,7 +73,7 @@ if [ -z "$JOB_ID" ]; then
 	echo "Selected node: ${BEST_NODE} (${MIN_LOAD} jobs)"
 	qsub \
 		-l hostname=${BEST_NODE} \
-		-v JULIA_CMD="$JULIA_CMD",JULIA_SOLVER="$JULIA_SOLVER",JULIA_SEED="$JULIA_SEED",JULIA_OPTIMIZE="$JULIA_OPTIMIZE",JULIA_FIXED_SAMPLE="$JULIA_FIXED_SAMPLE" \
+		-v JULIA_CMD="$JULIA_CMD",JULIA_SOLVER="$JULIA_SOLVER",JULIA_SEED="$JULIA_SEED",JULIA_OPTIMIZE="$JULIA_OPTIMIZE",JULIA_FIXED_SAMPLE="$JULIA_FIXED_SAMPLE",EMPIRE_PERF="${EMPIRE_PERF:-}",EMPIRE_PERF_INTERVAL="${EMPIRE_PERF_INTERVAL:-}" \
 		"$0" "$DATASET" "$CONFIG_FILE" "$INPUT_FORMAT"
 	echo "Job submitted to ${BEST_NODE}. Use 'qstat' to monitor status."
 	exit 0
