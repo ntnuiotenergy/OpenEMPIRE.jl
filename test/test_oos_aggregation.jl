@@ -13,15 +13,14 @@ function _write_oos_aggregation_fixture(
     mkpath(fixed_dir)
     mkpath(output_dir)
 
-    config = Dict{String, Any}(
-        "forecast_horizon_year" => 2025,
-        "leap_years_investment" => 5,
-        "regular_seasons" => ["winter", "summer"],
-        "length_of_regular_season" => 2,
-        "n_peak_seasons" => 1,
-        "len_peak_season" => 1,
-        "number_of_scenarios" => 2,
-    )
+    config = YAML.load_file(joinpath(pkgdir(OpenEMPIRE), "config", "testrun.yaml"))
+    config["forecast_horizon_year"] = 2025
+    config["leap_years_investment"] = 5
+    config["regular_seasons"] = ["winter", "summer"]
+    config["length_of_regular_season"] = 2
+    config["n_peak_seasons"] = 1
+    config["len_peak_season"] = 1
+    config["number_of_scenarios"] = 2
     config_file = joinpath(input_dir, "config.yaml")
     metadata_file = joinpath(input_dir, "oos_tree_metadata.yaml")
     YAML.write_file(config_file, config)
@@ -39,6 +38,11 @@ function _write_oos_aggregation_fixture(
         write(joinpath(fixed_dir, filename), contents)
         write(joinpath(output_dir, filename), contents)
     end
+    YAML.write_file(joinpath(fixed_dir, "source_config.yaml"), config)
+    write(
+        joinpath(fixed_dir, "summary.txt"),
+        "OpenEMPIRE.jl run summary\noptimize=true\ntermination_status=OPTIMAL\n",
+    )
     write(
         joinpath(output_dir, "loadShed.csv"),
         "Node,Period,Scenario,Season,Hour,loadShed\n" * join(shed_rows, "\n") * "\n",
