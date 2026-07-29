@@ -552,52 +552,6 @@ function prepare_oos_experiment(
     return target_experiment
 end
 
-function _oos_fixed_investment_output_dir(path::AbstractString)
-    isdir(path) || throw(ArgumentError(
-        "Fixed-investment directory does not exist: $path",
-    ))
-    for output_folder in ("Output", "output")
-        output_dir = joinpath(path, output_folder)
-        isdir(output_dir) && return output_dir
-    end
-    return path
-end
-
-function _oos_fixed_investment_source_files(path::AbstractString)
-    output_dir = _oos_fixed_investment_output_dir(path)
-    return map(_OOS_FIXED_INVESTMENT_FILENAMES) do aliases
-        source = findfirst(filename -> isfile(joinpath(output_dir, filename)), aliases)
-        source === nothing && throw(ArgumentError(
-            "Fixed-investment directory is missing one of: $(join(aliases, ", "))",
-        ))
-        joinpath(output_dir, aliases[source])
-    end
-end
-
-function _oos_fixed_investment_metadata(path::AbstractString)
-    run_dir = abspath(normpath(path))
-    output_dir = _oos_fixed_investment_output_dir(run_dir)
-    files = _oos_fixed_investment_source_files(run_dir)
-    file_metadata = [
-        Dict{String, Any}(
-            "name" => basename(file),
-            "path" => file,
-            "bytes" => filesize(file),
-            "sha256" => _oos_sha256_file(file),
-        ) for file in files
-    ]
-    digest_input = join(
-        ("$(entry["name"])\t$(entry["sha256"])" for entry in file_metadata),
-        "\n",
-    )
-    return Dict{String, Any}(
-        "run_dir" => run_dir,
-        "output_dir" => output_dir,
-        "sha256" => bytes2hex(sha256(digest_input)),
-        "files" => file_metadata,
-    )
-end
-
 function _oos_queue_input_format(value)
     value in (:auto, :csv, :xlsx) || throw(ArgumentError(
         "Unsupported input format: $value. Expected :auto, :csv, or :xlsx.",
@@ -1673,12 +1627,6 @@ const _OOS_ALLOWED_OPERATIONAL_CONFIG_DIFFERENCES = (
     "len_peak_season",
     "time_format",
 )
-
-function _oos_sha256_file(path::AbstractString)
-    open(path, "r") do io
-        return bytes2hex(sha256(io))
-    end
-end
 
 function _oos_fixed_investment_source_files(path::AbstractString)
     output_dir = _oos_output_dir(path)
