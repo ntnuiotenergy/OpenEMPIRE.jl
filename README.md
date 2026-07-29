@@ -134,6 +134,9 @@ Wasserstein/mean metrics because K-means labels are arbitrary between
 implementations. Enabled filters are archived with their sampling key under
 `results/julia_runs/<run>/Input/ScenarioData/`.
 
+See [FILTER_COMPARISON.md](FILTER_COMPARISON.md) for the reproducible
+Python–Julia metric comparison and the cluster-count sweep from 1 to 30.
+
 ### Generating out-of-sample scenario trees
 
 Use `scripts/create_out_of_sample_tree.jl` to generate one or more scenario trees
