@@ -14,6 +14,7 @@ include("test_excel.jl")
 include("test_csv.jl")
 include("test_scenario_csv.jl")
 include("test_out_of_sample.jl")
+include("test_runner_performance.jl")
 #include("test_interface.jl")
 include("test_timestruct.jl")
 include("test_solve.jl")
@@ -35,6 +36,9 @@ end
     test_read_raw_csv_scenarios()
     test_fixed_sample_raw_csv_scenarios()
     test_configurable_regular_scenario_seasons()
+    test_scenario_filter_metrics_and_clustering()
+    test_scenario_filter_make_and_use()
+    test_scenario_filter_defaults()
     test_python_fixed_sample_scenario_parity()
     test_create_model_with_raw_csv_scenarios()
     test_generate_scenarios_without_model()
@@ -53,6 +57,10 @@ end
 
 @testset "Out-of-sample" begin
     test_fix_investments_from_results()
+end
+
+@testset "Runner performance" begin
+    test_runner_performance_helpers()
 end
 
 @testset "Validate" begin

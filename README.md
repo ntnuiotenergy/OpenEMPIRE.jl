@@ -119,6 +119,24 @@ The output is **not** only `sampling_key.csv`: the key records which weather
 files are the derived stochastic inputs the model actually consumes. Both the
 key and the derived files are written deterministically from `(raw inputs, key)`.
 
+Set `filter_make: true` to cluster the possible regular-season load windows and
+write `ScenarioData/filter_result.csv`. Set `filter_use: true` to restrict
+sampling to that file, rotating through cluster groups `0:n_cluster-1`; both
+flags may be enabled to build and immediately use a new filter. The defaults are
+`filter_make: false`, `filter_use: false`, and `n_cluster: 10`. Filter candidates
+use only years shared by every sampled raw input, while the Python reference
+hard-codes 2015–2019; candidate-key parity therefore applies when those year
+sets coincide. Filter creation consumes the scenario RNG, so a fixed seed
+reproduces a run in the same mode, but make-and-use and reuse-only runs may
+produce different sampling keys. Fixed sampling takes precedence over
+`filter_use`. Python parity compares candidate identity and numerical
+Wasserstein/mean metrics because K-means labels are arbitrary between
+implementations. Enabled filters are archived with their sampling key under
+`results/julia_runs/<run>/Input/ScenarioData/`.
+
+See [FILTER_COMPARISON.md](FILTER_COMPARISON.md) for the reproducible
+Python–Julia metric comparison and the cluster-count sweep from 1 to 30.
+
 ### Generating out-of-sample scenario trees
 
 Use `scripts/create_out_of_sample_tree.jl` to generate one or more scenario trees

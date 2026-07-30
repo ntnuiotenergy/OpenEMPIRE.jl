@@ -9,6 +9,8 @@ using Random
 using TimeStruct
 using YAML
 
+include(joinpath(@__DIR__, "runner_performance.jl"))
+
 function _parse_args(args)
     options = Dict{String, String}(
         "dataset" => "test",
@@ -261,9 +263,10 @@ function main(args = ARGS)
         return result_dir
     end
 
-    build_start = time()
+    perf_phases = JObj[]
+    run_start = time()
     progress("Starting model build")
-    emp, periods, sets, params = OpenEMPIRE.create_model(
+    build_stats = @timed OpenEMPIRE.create_model(
         config_file,
         data_folder;
         optimizer,
@@ -272,10 +275,21 @@ function main(args = ARGS)
         scenario_rng = MersenneTwister(seed),
         progress,
     )
-    build_seconds = time() - build_start
+    emp, periods, sets, params = build_stats.value
+    build_seconds = build_stats.time
+    push!(
+        perf_phases,
+        _perf_phase(
+            "build",
+            build_seconds;
+            alloc_bytes = build_stats.bytes,
+            gc_seconds = build_stats.gctime,
+        ),
+    )
     println("Model build seconds: $(round(build_seconds; digits = 2))")
     println("Variables: $(JuMP.num_variables(emp))")
     println("Constraints: $(JuMP.num_constraints(emp; count_variable_in_set_constraints = false))")
+    report_constraint_family_counts(emp)
     flush(stdout)
     progress("Model build finished in $(round(build_seconds; digits = 2)) seconds")
     scenario_artifact = OpenEMPIRE.write_scenario_artifacts(
@@ -316,8 +330,17 @@ function main(args = ARGS)
     if optimize_model
         solve_start = time()
         progress("Starting solver optimization")
-        JuMP.optimize!(emp)
+        solve_stats = @timed JuMP.optimize!(emp)
         solve_seconds = time() - solve_start
+        push!(
+            perf_phases,
+            _perf_phase(
+                "solve",
+                solve_seconds;
+                alloc_bytes = solve_stats.bytes,
+                gc_seconds = solve_stats.gctime,
+            ),
+        )
         progress("Solver optimization finished in $(round(solve_seconds; digits = 2)) seconds")
         termination = JuMP.termination_status(emp)
         objective = JuMP.objective_value(emp)
@@ -339,7 +362,24 @@ function main(args = ARGS)
         flush(stdout)
         if JuMP.is_solved_and_feasible(emp)
             progress("Writing solution CSV tables")
-            output_dir = OpenEMPIRE.write_solution_tables(result_dir, emp, sets, params, periods)
+            results_stats =
+                @timed OpenEMPIRE.write_solution_tables(
+                    result_dir,
+                    emp,
+                    sets,
+                    params,
+                    periods,
+                )
+            output_dir = results_stats.value
+            push!(
+                perf_phases,
+                _perf_phase(
+                    "results",
+                    results_stats.time;
+                    alloc_bytes = results_stats.bytes,
+                    gc_seconds = results_stats.gctime,
+                ),
+            )
             println("Solution CSVs written to: $output_dir")
             flush(stdout)
             progress("Solution CSV tables written to $output_dir")
@@ -386,6 +426,53 @@ function main(args = ARGS)
         ], component_lines),
     )
     println("Summary written to: $summary_path")
+
+    if _perf_enabled()
+        solver_threads = nothing
+        for (name, value) in optimizer_attributes
+            name == "Threads" && (solver_threads = value)
+        end
+        perf = JObj([
+            "runtime" => "julia",
+            "host" => gethostname(),
+            "cpu_threads" => Sys.CPU_THREADS,
+            "solver_threads" => solver_threads === nothing ? nothing : Int(solver_threads),
+            "datetime" => string(now()),
+            "dataset" => dataset,
+            "config" => config_file,
+            "seed" => seed,
+            "versions" => JObj([
+                "julia" => string(VERSION),
+                "jump" => _pkgversion_str(JuMP),
+                "gurobi_jl" => _pkgversion_str(Gurobi),
+            ]),
+            "solver" => solver_name,
+            "solver_attributes" => JObj(
+                Pair{String, Any}[
+                    string(name) => value for
+                    (name, value) in optimizer_attributes
+                ],
+            ),
+            "model" => JObj([
+                "variables" => JuMP.num_variables(emp),
+                "constraints" => JuMP.num_constraints(
+                    emp;
+                    count_variable_in_set_constraints = false,
+                ),
+            ]),
+            "phases" => perf_phases,
+            "totals" => JObj([
+                "wall_seconds" => round(time() - run_start; digits = 3),
+                "peak_rss_bytes" => Int(Sys.maxrss()),
+                "peak_rss_source" => "Sys.maxrss",
+            ]),
+            "objective_value" => objective,
+            "termination_status" => termination === nothing ? nothing : string(termination),
+        ])
+        perf_path = _write_perf_json(joinpath(result_dir, "perf.json"), perf)
+        println("Perf JSON written to: $perf_path")
+    end
+
     println("End time: $(now())")
     flush(stdout)
     progress("Run complete")
@@ -393,4 +480,6 @@ function main(args = ARGS)
     return termination
 end
 
-main()
+if abspath(PROGRAM_FILE) == @__FILE__
+    main()
+end
