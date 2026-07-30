@@ -85,6 +85,40 @@ function _foreach_operational_context(f, par::EmpireParams, periods::TimeStructu
     return nothing
 end
 
+function _foreach_natural_gas_operational_context(
+    f,
+    par::EmpireParams,
+    periods::TimeStructure,
+)
+    gas_scenarios = par.NaturalGas.gasScenarioCount
+    _foreach_operational_context(
+        (
+            period,
+            strategic_period,
+            combined_scenario,
+            representative,
+            season,
+            hour,
+            operational_period,
+        ) -> begin
+        f(
+            period,
+            strategic_period,
+            combined_scenario,
+            weather_scenario_index(combined_scenario, gas_scenarios),
+            gas_scenario_index(combined_scenario, gas_scenarios),
+            representative,
+            season,
+            hour,
+            operational_period,
+        )
+        end,
+        par,
+        periods,
+    )
+    return nothing
+end
+
 function _write_csv_rows(path::AbstractString, rows)
     mkpath(dirname(path))
     CSV.write(path, rows)
@@ -237,14 +271,503 @@ function write_solution_tables(result_dir::AbstractString, emp::JuMP.Model, sets
     write_investment_csvs(output_dir, emp, sets, periods)
     write_operational_csvs(output_dir, emp, sets, par, periods)
     write_report_csvs(output_dir, emp, sets, par, periods)
+    has_natural_gas(sets) &&
+        haskey(JuMP.object_dictionary(emp), :ngTerminalImport) &&
+        write_natural_gas_csvs(output_dir, emp, sets, par, periods)
 
     return output_dir
+end
+
+function _write_natural_gas_table(
+    output_dir,
+    filenames,
+    header,
+    write_rows,
+)
+    for filename in filenames
+        _write_csv_table(joinpath(output_dir, filename), header, write_rows)
+    end
+    return output_dir
+end
+
+function write_natural_gas_csvs(
+    output_dir::AbstractString,
+    emp::JuMP.Model,
+    sets,
+    par::EmpireParams,
+    periods::TimeStructure,
+)
+    terminal_import = emp[:ngTerminalImport]
+    transmission = emp[:ngTransmission]
+    for_power = emp[:ngForPower]
+    storage = emp[:ngStorageOperational]
+    charge = emp[:ngStorageCharge]
+    discharge = emp[:ngStorageDischarge]
+    transport_met = emp[:transportNaturalGasDemandMet]
+    transport_shed = emp[:transportNaturalGasDemandShed]
+    gas = par.NaturalGas
+    common = [
+        "Period",
+        "Scenario",
+        "WeatherScenario",
+        "GasScenario",
+        "Season",
+        "Hour",
+    ]
+
+    terminal_header = vcat(
+        ["Node", "Terminal"],
+        common,
+        ["TerminalImport_ton", "TerminalCapacity_ton_per_h", "TerminalCost_EUR_per_ton"],
+    )
+    write_terminal_rows = function (io)
+        _foreach_natural_gas_operational_context(
+            (
+                period,
+                strategic_period,
+                scenario,
+                weather,
+                gas_scenario,
+                representative,
+                season,
+                hour,
+                operational_period,
+            ) -> begin
+            for (node, terminal) in natural_gas_terminal_nodes(sets)
+                _write_csv_row(
+                    io,
+                    [
+                        node,
+                        terminal,
+                        period,
+                        scenario,
+                        weather,
+                        gas_scenario,
+                        season,
+                        hour,
+                        _solution_value(
+                            terminal_import[node, terminal, operational_period],
+                        ),
+                        natural_gas_terminal_capacity(par, node, terminal, period),
+                        natural_gas_terminal_cost(
+                            par,
+                            node,
+                            terminal,
+                            period,
+                            gas_scenario,
+                        ),
+                    ],
+                )
+            end
+            end,
+            par,
+            periods,
+        )
+    end
+    _write_natural_gas_table(
+        output_dir,
+        ("ngTerminalImport.csv", "results_natural_gas_terminals.csv"),
+        terminal_header,
+        write_terminal_rows,
+    )
+
+    pipeline_header = vcat(
+        ["FromNode", "ToNode"],
+        common,
+        ["PipelineFlow_ton", "PipelineCapacity_ton_per_h", "ElectricityUse_MWh"],
+    )
+    write_pipeline_rows = function (io)
+        _foreach_natural_gas_operational_context(
+            (
+                period,
+                strategic_period,
+                scenario,
+                weather,
+                gas_scenario,
+                representative,
+                season,
+                hour,
+                operational_period,
+            ) -> begin
+            for (from, to) in natural_gas_links(sets)
+                flow = _solution_value(transmission[from, to, operational_period])
+                _write_csv_row(
+                    io,
+                    [
+                        from,
+                        to,
+                        period,
+                        scenario,
+                        weather,
+                        gas_scenario,
+                        season,
+                        hour,
+                        flow,
+                        natural_gas_pipeline_capacity(par, from, to),
+                        gas.pipelinePowerDemandPerTon * flow,
+                    ],
+                )
+            end
+            end,
+            par,
+            periods,
+        )
+    end
+    _write_natural_gas_table(
+        output_dir,
+        ("ngTransmission.csv", "results_natural_gas_pipeline.csv"),
+        pipeline_header,
+        write_pipeline_rows,
+    )
+
+    power_header = vcat(
+        ["Node", "Generator"],
+        common,
+        ["NaturalGasForPower_ton", "Generation_MWh", "Efficiency"],
+    )
+    write_power_rows = function (io)
+        _foreach_natural_gas_operational_context(
+            (
+                period,
+                strategic_period,
+                scenario,
+                weather,
+                gas_scenario,
+                representative,
+                season,
+                hour,
+                operational_period,
+            ) -> begin
+            for (node, generator) in _natural_gas_node_generators(sets)
+                _write_csv_row(
+                    io,
+                    [
+                        node,
+                        generator,
+                        period,
+                        scenario,
+                        weather,
+                        gas_scenario,
+                        season,
+                        hour,
+                        _solution_value(for_power[node, generator, operational_period]),
+                        _solution_value(
+                            emp[:genOperational][node, generator, operational_period],
+                        ),
+                        par.genEfficiency[generator][operational_period],
+                    ],
+                )
+            end
+            end,
+            par,
+            periods,
+        )
+    end
+    _write_natural_gas_table(
+        output_dir,
+        ("ngForPower.csv", "results_natural_gas_for_power.csv"),
+        power_header,
+        write_power_rows,
+    )
+
+    storage_header = vcat(
+        ["Node"],
+        common,
+        [
+            "StorageLevel_ton",
+            "StorageCharge_ton",
+            "StorageDischarge_ton",
+            "StorageCapacity_ton",
+        ],
+    )
+    write_storage_rows = function (io)
+        _foreach_natural_gas_operational_context(
+            (
+                period,
+                strategic_period,
+                scenario,
+                weather,
+                gas_scenario,
+                representative,
+                season,
+                hour,
+                operational_period,
+            ) -> begin
+            for node in natural_gas_nodes(sets)
+                _write_csv_row(
+                    io,
+                    [
+                        node,
+                        period,
+                        scenario,
+                        weather,
+                        gas_scenario,
+                        season,
+                        hour,
+                        _solution_value(storage[node, operational_period]),
+                        _solution_value(charge[node, operational_period]),
+                        _solution_value(discharge[node, operational_period]),
+                        natural_gas_storage_capacity(par, node),
+                    ],
+                )
+            end
+            end,
+            par,
+            periods,
+        )
+    end
+    _write_natural_gas_table(
+        output_dir,
+        ("ngStorage.csv", "results_natural_gas_storage.csv"),
+        storage_header,
+        write_storage_rows,
+    )
+
+    transport_header = vcat(
+        ["Node"],
+        common,
+        ["DemandMet_ton", "DemandShed_ton", "AnnualDemand_MWh"],
+    )
+    write_transport_rows = function (io)
+        _foreach_natural_gas_operational_context(
+            (
+                period,
+                strategic_period,
+                scenario,
+                weather,
+                gas_scenario,
+                representative,
+                season,
+                hour,
+                operational_period,
+            ) -> begin
+            for node in _natural_gas_onshore_nodes(sets)
+                _write_csv_row(
+                    io,
+                    [
+                        node,
+                        period,
+                        scenario,
+                        weather,
+                        gas_scenario,
+                        season,
+                        hour,
+                        _solution_value(transport_met[node, operational_period]),
+                        _solution_value(transport_shed[node, operational_period]),
+                        natural_gas_transport_demand(par, node, period),
+                    ],
+                )
+            end
+            end,
+            par,
+            periods,
+        )
+    end
+    _write_natural_gas_table(
+        output_dir,
+        (
+            "transportNaturalGas.csv",
+            "results_transport_naturalGas_operations.csv",
+        ),
+        transport_header,
+        write_transport_rows,
+    )
+
+    balance_header = vcat(
+        ["Node"],
+        common,
+        [
+            "TerminalImport_ton",
+            "PipelineIn_ton",
+            "PipelineOut_ton",
+            "NaturalGasForPower_ton",
+            "StorageCharge_ton",
+            "StorageDischarge_ton",
+            "TransportDemandMet_ton",
+            "BalanceResidual_ton",
+        ],
+    )
+    write_balance_rows = function (io)
+        _foreach_natural_gas_operational_context(
+            (
+                period,
+                strategic_period,
+                scenario,
+                weather,
+                gas_scenario,
+                representative,
+                season,
+                hour,
+                operational_period,
+            ) -> begin
+            for node in natural_gas_nodes(sets)
+                imports = sum(
+                    _value_or_zero(
+                        terminal_import,
+                        node,
+                        terminal,
+                        operational_period,
+                    )
+                    for terminal in natural_gas_terminals(sets, node);
+                    init = 0.0,
+                )
+                pipeline_in = sum(
+                    _value_or_zero(transmission, source, node, operational_period)
+                    for source in natural_gas_incoming(sets, node);
+                    init = 0.0,
+                )
+                pipeline_out = sum(
+                    _value_or_zero(
+                        transmission,
+                        node,
+                        destination,
+                        operational_period,
+                    )
+                    for destination in natural_gas_outgoing(sets, node);
+                    init = 0.0,
+                )
+                power = sum(
+                    _value_or_zero(for_power, node, generator, operational_period)
+                    for generator in generators(sets, node)
+                    if generator in natural_gas_generators(sets);
+                    init = 0.0,
+                )
+                storage_charge = _solution_value(charge[node, operational_period])
+                storage_discharge =
+                    gas.storageDischargeEfficiency *
+                    _solution_value(discharge[node, operational_period])
+                transport = node in natural_gas_onshore_nodes(sets) ?
+                            _solution_value(
+                    transport_met[node, operational_period],
+                ) : 0.0
+                residual =
+                    imports + pipeline_in + storage_discharge -
+                    power - pipeline_out - storage_charge - transport
+                _write_csv_row(
+                    io,
+                    [
+                        node,
+                        period,
+                        scenario,
+                        weather,
+                        gas_scenario,
+                        season,
+                        hour,
+                        imports,
+                        pipeline_in,
+                        pipeline_out,
+                        power,
+                        storage_charge,
+                        storage_discharge,
+                        transport,
+                        residual,
+                    ],
+                )
+            end
+            end,
+            par,
+            periods,
+        )
+    end
+    _write_natural_gas_table(
+        output_dir,
+        ("naturalGasBalance.csv", "results_natural_gas_balance.csv"),
+        balance_header,
+        write_balance_rows,
+    )
+
+    JuMP.has_duals(emp) &&
+        write_natural_gas_dual_csvs(output_dir, emp, sets, par, periods)
+    return output_dir
+end
+
+function write_natural_gas_dual_csvs(
+    output_dir::AbstractString,
+    emp::JuMP.Model,
+    sets,
+    par::EmpireParams,
+    periods::TimeStructure,
+)
+    discounter = Discounter(discount_rate(par), 1, periods)
+    period_type = eltype(periods)
+    predecessor_type = Tuple{Union{Nothing, period_type}, period_type}
+    storage_predecessor = Dict{period_type, predecessor_type}()
+    for strategic_period in strat_periods(periods)
+        for predecessor in withprev(strategic_period)
+            storage_predecessor[last(predecessor)] = predecessor
+        end
+    end
+    header = [
+        "Node",
+        "Period",
+        "Scenario",
+        "WeatherScenario",
+        "GasScenario",
+        "Season",
+        "Hour",
+        "GasPrice_EUR_per_ton",
+        "StorageBalanceDual_EUR_per_ton",
+    ]
+    return _write_csv_table(
+        joinpath(output_dir, "naturalGasOperationalDuals.csv"),
+        header,
+    ) do io
+        _foreach_natural_gas_operational_context(
+            (
+                period,
+                strategic_period,
+                scenario,
+                weather,
+                gas_scenario,
+                representative,
+                season,
+                hour,
+                operational_period,
+            ) -> begin
+            weight =
+                objective_weight(operational_period, discounter; type = "avg_year")
+            for node in natural_gas_nodes(sets)
+                gas_price =
+                    _dual_or_nan(
+                    emp[:natural_gas_flow_balance],
+                    node,
+                    operational_period,
+                ) / weight
+                storage_dual =
+                    _dual_or_nan(
+                    emp[:natural_gas_storage_balance],
+                    node,
+                    strategic_period,
+                    storage_predecessor[operational_period],
+                ) / weight
+                _write_csv_row(
+                    io,
+                    [
+                        node,
+                        period,
+                        scenario,
+                        weather,
+                        gas_scenario,
+                        season,
+                        hour,
+                        gas_price,
+                        storage_dual,
+                    ],
+                )
+            end
+            end,
+            par,
+            periods,
+        )
+    end
 end
 
 const SCENARIO_ARTIFACT_CONFIG_KEYS = (
     "use_scenario_generation",
     "use_fixed_sample",
     "number_of_scenarios",
+    "natural_gas",
+    "number_of_gas_scenarios",
     "regular_seasons",
     "n_peak_seasons",
     "len_peak_season",

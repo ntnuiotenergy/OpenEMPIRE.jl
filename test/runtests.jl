@@ -13,6 +13,7 @@ using YAML
 include("test_excel.jl")
 include("test_csv.jl")
 include("test_scenario_csv.jl")
+include("test_natural_gas.jl")
 include("test_out_of_sample.jl")
 include("test_runner_performance.jl")
 #include("test_interface.jl")
@@ -50,6 +51,13 @@ end
     test_emission_constraints_match_python_formulation()
     test_native_dual_weight_normalization()
     test_create_model_respects_emission_cap_config()
+end
+
+@testset "Natural gas" begin
+    test_natural_gas_csv_loading_and_validation()
+    test_natural_gas_scenario_mapping_and_costs()
+    test_weather_profiles_replicate_across_gas_scenarios()
+    test_natural_gas_model_and_results()
 end
 
 @testset "Out-of-sample" begin
