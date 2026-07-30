@@ -41,6 +41,24 @@ sampler.
    Python's narrower range to support its candidate-key parity claim, yielding
    40,444 keys where copula clustering yields 40,484 on the same input.
 
+   Python's cutoff makes the last two hours of every season structurally
+   unsampleable. For winter 2015 (2,160 hours, 168-hour seasons) its final
+   candidate covers hours 1,991–2,158, so hours 2,159 and 2,160 appear in no
+   candidate window at all; the inclusive range covers 1–2,160. Across five
+   years and four seasons that is 40 hours of input data Python cannot select,
+   with no modelling rationale distinguishing them — the narrower bound reads as
+   index arithmetic that overshot rather than a deliberate exclusion.
+
+   The counter-argument is cross-feature consistency: a maintainer comparing the
+   two clustering paths will find the difference surprising, and it forecloses a
+   candidate-key parity study for copula clustering later. That tradeoff was
+   accepted because parity is already unattainable here — departure 2 changes the
+   feature dimensions, so no cluster-for-cluster comparison against Python is
+   possible regardless, and replicating the off-by-one would inherit its cost
+   without buying a parity claim. At 0.093 % of season hours the practical effect
+   on results is negligible either way; the choice is about not reproducing a
+   defect gratuitously, not about materially different outcomes.
+
 ### Precedence and RNG
 
 Fixed sampling takes precedence over `filter_use`, which takes precedence over

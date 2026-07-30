@@ -150,35 +150,33 @@ unknown entry raises an error listing the valid options.
 
 Where the scenario filter clusters two load metrics, copula clustering
 rank-transforms each `(variable, node)` series to uniform margins and clusters
-the resulting joint distribution, so candidates are grouped by how the variables
-co-move across nodes rather than by magnitude alone. One feature dimension is
-built per `(variable, node)` pair, so `copulas_to_use` entries multiply the
-dimensionality by their own node count.
+the resulting joint distribution, so candidates are grouped by how the selected
+variables co-move across nodes rather than by magnitude alone. One feature
+dimension is built per `(variable, node)` pair, so each `copulas_to_use` entry
+adds as many dimensions as it has nodes — which drives clustering runtime more
+than `n_cluster` does. On `europe_v51`, `["electricload"]` alone yields 35
+dimensions and takes several minutes to cluster all four seasons; this is a
+one-time cost per `copula_clusters_make` run, not per scenario.
 
-Two deliberate departures from the Python reference:
+Candidates are drawn from every year the selected inputs have in common, and
+offsets cover every window that fits inside the season — the same range
+unstratified sampling draws from, so enabling clustering changes which windows
+are *preferred*, never which windows *exist*. Feature dimensions come from each
+selected variable's own node columns, so any of the six variables above may be
+clustered on, including `windoffshore` and `hydroror` whose files use different
+node sets than the rest.
 
-- Candidates use only years shared by every selected copula input, while Python
-  hard-codes 2015–2019, matching the filter's behaviour above.
-- Feature dimensions come from each selected variable's own columns, while
-  Python always takes `solar.csv`'s columns. Python therefore raises `KeyError`
-  for `copulas_to_use` entries whose files use different columns; on
-  `europe_v51` that is `windoffshore` (offshore zone codes, not country codes)
-  and `hydroror` (no `BA`).
-
-Fixed sampling takes precedence over `filter_use`, which in turn takes
-precedence over `copula_clusters_use`, matching Python's `if filter_use: ...
-elif copula_clusters_use: ...` ordering. Note that Python still advances its
-cluster counter and consumes RNG draws under `use_fixed_sample: true` before
-overwriting them from the key, whereas Julia skips those branches; the sampled
-regular seasons agree either way, but the downstream RNG stream — and therefore
-peak-season selection — can differ in that combination. Clustering consumes the
-scenario RNG and canonicalizes cluster labels by sorted centers, so a fixed seed
-reproduces the same catalog including its `ClusterGroup` numbering. Enabled
+When several sampling modes are configured, `use_fixed_sample` wins over
+`filter_use`, which wins over `copula_clusters_use`. Clustering consumes the
+scenario RNG and cluster labels are canonicalised by sorted centers, so a fixed
+seed reproduces the same catalog including its `ClusterGroup` numbering. Enabled
 catalogs are archived with the sampling key under
-`results/julia_runs/<run>/Input/ScenarioData/`.
+`results/julia_runs/<run>/Input/ScenarioData/`, which is enough to audit or
+replay exactly which cluster assignment produced a given result.
 
-See [COPULA_COMPARISON.md](COPULA_COMPARISON.md) for the full-scale
-`europe_v51` clustering profile and a solved baseline-versus-copula comparison.
+See [COPULA_COMPARISON.md](COPULA_COMPARISON.md) for the full-scale `europe_v51`
+clustering profile, a solved baseline-versus-copula comparison, and notes on how
+this implementation relates to the original Python routine.
 
 ### Generating out-of-sample scenario trees
 
