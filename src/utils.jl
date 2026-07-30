@@ -12,9 +12,14 @@ function present_value(cost, discount_rate, years; at_start = true)
     return pv
 end
 
-function preprocess_params(params::EmpireParams, sets, periods)
+function preprocess_params(
+    params::EmpireParams,
+    sets,
+    periods;
+    natural_gas::Bool = false,
+)
     preprocess_invest_cost(params, sets, periods)
-    preprocess_operational_cost(params, sets, periods)
+    preprocess_operational_cost(params, sets, periods; natural_gas)
     preprocess_initcap_gen(params, sets, periods)
     preprocess_stoch_load(params, sets, periods)
     preprocess_max_installed_cap(params, sets, periods)
@@ -159,7 +164,12 @@ end
 
 # Find the marginal cost of generation for each generator and strategic period
 # including fuel cost, variable O&M cost and CO2 cost
-function preprocess_operational_cost(params::EmpireParams, sets, periods)
+function preprocess_operational_cost(
+    params::EmpireParams,
+    sets,
+    periods;
+    natural_gas::Bool = false,
+)
     params.genMargCost = Dict{String, StrategicProfile}()
     for g in sets.Generator
         # Without an efficiency profile there is no marginal-cost basis, so the
@@ -177,7 +187,6 @@ function preprocess_operational_cost(params::EmpireParams, sets, periods)
             "Add its fuel cost, or use a dataset whose fuels are all priced in " *
             "genFuelCost.",
         ))
-
         values = Float64[]
         for sp in strat_periods(periods)
             # Variable cost in €/MWh
@@ -190,9 +199,16 @@ function preprocess_operational_cost(params::EmpireParams, sets, periods)
                 carbon_cost = co2_price(params, sp) * co2_content(params, g)
             end
 
-            # Convert fuel cost from €/GJ to €/MWh and add variable O&M cost and CO2 cost
-            cost_per_energy = (3.6 / params.genEfficiency[g][sp]) * (params.genFuelCost[g][sp] +
-                carbon_cost) + get(params.genVariableOMCost, g, 0.0) # in €/MWh
+            # Gas fuel is purchased through terminal imports when the module is
+            # active. Keep variable O&M and carbon costs here, but do not charge
+            # the ordinary generator fuel price a second time.
+            fuel_cost =
+                natural_gas && g in natural_gas_generators(sets) ?
+                0.0 : params.genFuelCost[g][sp]
+            cost_per_energy =
+                (3.6 / params.genEfficiency[g][sp]) *
+                (fuel_cost + carbon_cost) +
+                get(params.genVariableOMCost, g, 0.0) # in €/MWh
 
             push!(values, cost_per_energy)
         end

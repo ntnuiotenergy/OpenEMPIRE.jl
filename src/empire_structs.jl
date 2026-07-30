@@ -1,3 +1,34 @@
+const NaturalGasTerminalPeriod = Tuple{String, String, Int}
+const NaturalGasTerminalScenario = Tuple{String, String, Int, Int}
+const NaturalGasNodePeriod = Tuple{String, Int}
+
+"""
+    NaturalGasParams
+
+Numeric natural-gas inputs. The defaults reproduce InternalEMPIRE's fixed
+conversion and storage assumptions; all table-backed fields default empty.
+"""
+Base.@kwdef mutable struct NaturalGasParams
+    pipelineCapacity::Dict{Tuple{String, String}, Float64} =
+        Dict{Tuple{String, String}, Float64}()
+    pipelinePowerDemandPerTon::Float64 = 0.0
+    terminalCost::Dict{NaturalGasTerminalScenario, Float64} =
+        Dict{NaturalGasTerminalScenario, Float64}()
+    terminalCapacity::Dict{NaturalGasTerminalPeriod, Float64} =
+        Dict{NaturalGasTerminalPeriod, Float64}()
+    storageCapacity::Dict{String, Float64} = Dict{String, Float64}()
+    reserves::Dict{String, Float64} = Dict{String, Float64}()
+    transportDemand::Dict{NaturalGasNodePeriod, Float64} =
+        Dict{NaturalGasNodePeriod, Float64}()
+    transportCurtailCost::Float64 = 10000.0
+    mwhPerTon::Float64 = 13.9
+    storageInitialFraction::Float64 = 0.5
+    storageChargeEfficiency::Float64 = 1.0
+    storageDischargeEfficiency::Float64 = 1.0
+    weatherScenarioCount::Int = 1
+    gasScenarioCount::Int = 1
+end
+
 """
     EmpireParams
 
@@ -94,6 +125,9 @@ Base.@kwdef mutable struct EmpireParams
     storPWInvCost::Dict{String, TimeProfile}                      = Dict{String, TimeProfile}()
     transmissionInvCost::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
     genMargCost::Dict{String, TimeProfile}                        = Dict{String, TimeProfile}()
+
+    # Optional sector modules
+    NaturalGas::NaturalGasParams = NaturalGasParams()
 end
 
 # Default values used by the accessor helpers below.
@@ -262,6 +296,28 @@ end
 lost_load_cost(par, n, t) = haskey(par.nodeLostLoadCost, n) ? par.nodeLostLoadCost[n][t] : DEFAULT_LOST_LOAD_COST
 sload(par, n, t) = haskey(par.sload, n) ? par.sload[n][t] : DEFAULT_LOAD
 gen_marginal_cost(par, g, t) = haskey(par.genMargCost, g) ? par.genMargCost[g][t] : DEFAULT_GEN_MARGINAL_COST
+natural_gas_params(par::EmpireParams) = par.NaturalGas
+natural_gas_pipeline_capacity(par::EmpireParams, from, to) =
+    get(par.NaturalGas.pipelineCapacity, (from, to), 0.0)
+natural_gas_storage_capacity(par::EmpireParams, node) =
+    get(par.NaturalGas.storageCapacity, node, 0.0)
+natural_gas_reserves(par::EmpireParams, node) =
+    get(par.NaturalGas.reserves, node, 0.0)
+natural_gas_terminal_capacity(par::EmpireParams, node, terminal, period::Integer) =
+    get(par.NaturalGas.terminalCapacity, (node, terminal, Int(period)), 0.0)
+natural_gas_terminal_cost(
+    par::EmpireParams,
+    node,
+    terminal,
+    period::Integer,
+    gas_scenario::Integer,
+) = get(
+    par.NaturalGas.terminalCost,
+    (node, terminal, Int(period), Int(gas_scenario)),
+    99999.0,
+)
+natural_gas_transport_demand(par::EmpireParams, node, period::Integer) =
+    get(par.NaturalGas.transportDemand, (node, Int(period)), 0.0)
 
 # Validation
 
@@ -349,6 +405,113 @@ function _check_tuple_keys_in_sets!(
         if allowed_pairs !== nothing && !((a, b) in allowed_pairs)
             push!(errs, "$name key $(k) is not a valid ($label1, $label2) pair")
         end
+    end
+    return
+end
+
+function _check_natural_gas_params!(
+    errs::Vector{String},
+    par::EmpireParams,
+    sets::Union{Nothing, EmpireSets},
+    periods::Union{Nothing, TimeStructure},
+)
+    gas = par.NaturalGas
+    for (name, value) in (
+        ("pipelinePowerDemandPerTon", gas.pipelinePowerDemandPerTon),
+        ("transportCurtailCost", gas.transportCurtailCost),
+        ("mwhPerTon", gas.mwhPerTon),
+        ("storageInitialFraction", gas.storageInitialFraction),
+        ("storageChargeEfficiency", gas.storageChargeEfficiency),
+        ("storageDischargeEfficiency", gas.storageDischargeEfficiency),
+    )
+        isfinite(value) || push!(errs, "NaturalGas.$name must be finite")
+        value >= 0 || push!(errs, "NaturalGas.$name must be non-negative")
+    end
+    gas.mwhPerTon > 0 || push!(errs, "NaturalGas.mwhPerTon must be positive")
+    gas.storageInitialFraction <= 1 ||
+        push!(errs, "NaturalGas.storageInitialFraction must be at most 1")
+    gas.storageChargeEfficiency <= 1 ||
+        push!(errs, "NaturalGas.storageChargeEfficiency must be at most 1")
+    gas.storageDischargeEfficiency <= 1 ||
+        push!(errs, "NaturalGas.storageDischargeEfficiency must be at most 1")
+    gas.weatherScenarioCount > 0 ||
+        push!(errs, "NaturalGas.weatherScenarioCount must be positive")
+    gas.gasScenarioCount > 0 ||
+        push!(errs, "NaturalGas.gasScenarioCount must be positive")
+
+    for (name, values) in (
+        ("pipelineCapacity", gas.pipelineCapacity),
+        ("terminalCost", gas.terminalCost),
+        ("terminalCapacity", gas.terminalCapacity),
+        ("storageCapacity", gas.storageCapacity),
+        ("reserves", gas.reserves),
+        ("transportDemand", gas.transportDemand),
+    )
+        for (key, value) in values
+            isfinite(value) ||
+                push!(errs, "NaturalGas.$name[$key] must be finite")
+            value >= 0 ||
+                push!(errs, "NaturalGas.$name[$key] must be non-negative")
+        end
+    end
+
+    sets === nothing && return
+    gas_sets = natural_gas_sets(sets)
+    isempty(gas_sets.Node) && return
+    node_set = Set(gas_sets.Node)
+    link_set = Set(gas_sets.DirectionalLink)
+    terminal_pair_set = Set(gas_sets.TerminalsOfNode)
+    for key in keys(gas.pipelineCapacity)
+        key in link_set ||
+            push!(errs, "NaturalGas.pipelineCapacity has unknown link key: $key")
+    end
+    for key in keys(gas.storageCapacity)
+        key in node_set ||
+            push!(errs, "NaturalGas.storageCapacity has unknown node key: $key")
+    end
+    for key in keys(gas.reserves)
+        key in node_set ||
+            push!(errs, "NaturalGas.reserves has unknown node key: $key")
+    end
+    for key in keys(gas.terminalCapacity)
+        key[1:2] in terminal_pair_set ||
+            push!(errs, "NaturalGas.terminalCapacity has unknown terminal key: $key")
+    end
+    for key in keys(gas.terminalCost)
+        key[1:2] in terminal_pair_set ||
+            push!(errs, "NaturalGas.terminalCost has unknown terminal key: $key")
+        key[4] in 1:gas.gasScenarioCount ||
+            push!(errs, "NaturalGas.terminalCost has invalid gas scenario key: $key")
+    end
+    for key in keys(gas.transportDemand)
+        key[1] in gas_sets.OnshoreNode ||
+            push!(errs, "NaturalGas.transportDemand has unknown onshore-node key: $key")
+    end
+
+    periods === nothing && return
+    period_count = length(strat_periods(periods))
+    expected_pipeline = link_set
+    expected_terminal_capacity = Set(
+        (node, terminal, period)
+        for (node, terminal) in gas_sets.TerminalsOfNode for period in 1:period_count
+    )
+    expected_terminal_cost = Set(
+        (node, terminal, period, gas_scenario)
+        for (node, terminal) in gas_sets.TerminalsOfNode for period in 1:period_count
+        for gas_scenario in 1:gas.gasScenarioCount
+    )
+    expected_transport = Set(
+        (node, period) for node in gas_sets.OnshoreNode for period in 1:period_count
+    )
+    for (name, expected, actual) in (
+        ("pipelineCapacity", expected_pipeline, Set(keys(gas.pipelineCapacity))),
+        ("terminalCapacity", expected_terminal_capacity, Set(keys(gas.terminalCapacity))),
+        ("terminalCost", expected_terminal_cost, Set(keys(gas.terminalCost))),
+        ("transportDemand", expected_transport, Set(keys(gas.transportDemand))),
+    )
+        missing = setdiff(expected, actual)
+        isempty(missing) ||
+            push!(errs, "NaturalGas.$name is missing $(length(missing)) required key(s)")
     end
     return
 end
@@ -470,6 +633,7 @@ function validate(
     _check_profile_scalar!(errs, "CCSCostTSVariable", par.CCSCostTSVariable, periods; min = 0.0)
     _check_profile_scalar!(errs, "CO2cap", par.CO2cap, periods; min = 0.0)
     _check_profile_scalar!(errs, "CO2price", par.CO2price, periods; min = 0.0)
+    _check_natural_gas_params!(errs, par, sets, periods)
 
     # Index checks (only if a set is provided)
     if sets !== nothing
