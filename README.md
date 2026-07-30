@@ -138,45 +138,24 @@ See [FILTER_COMPARISON.md](FILTER_COMPARISON.md) for the reproducible
 Python–Julia metric comparison and the cluster-count sweep from 1 to 30.
 
 Set `copula_clusters_make: true` to cluster the possible regular-season windows
-on the *empirical copula* of `copulas_to_use` and write
+on the *empirical copula* of `copulas_to_use` — grouping candidates by how those
+variables co-move across nodes rather than by magnitude — and write
 `Copulas/CopulaClusters/copula_clusters.csv`. Set `copula_clusters_use: true` to
-restrict sampling to that catalog, rotating through cluster groups
-`0:n_cluster-1`; both flags may be enabled to build and immediately use a new
-catalog. The defaults are `copula_clusters_make: false`,
-`copula_clusters_use: false`, `copulas_to_use: ["electricload"]`, and
-`n_cluster: 10`. Valid `copulas_to_use` entries are `electricload`,
-`hydroseasonal`, `solar`, `windonshore`, `windoffshore`, and `hydroror`; an
-unknown entry raises an error listing the valid options.
+sample from that catalog, rotating through cluster groups `0:n_cluster-1`; enable
+both to build and immediately use a new catalog. The defaults are
+`copula_clusters_make: false`, `copula_clusters_use: false`,
+`copulas_to_use: ["electricload"]`, and `n_cluster: 10`; valid `copulas_to_use`
+entries are `electricload`, `hydroseasonal`, `solar`, `windonshore`,
+`windoffshore`, and `hydroror`. Clustering consumes the scenario RNG, so a fixed
+seed reproduces the catalog; it runs once per `copula_clusters_make` run and
+slows as the selected variables' node counts grow. `use_fixed_sample` takes
+precedence over `filter_use`, which takes precedence over `copula_clusters_use`.
+Enabled catalogs are archived with the sampling key under
+`results/julia_runs/<run>/Input/ScenarioData/`.
 
-Where the scenario filter clusters two load metrics, copula clustering
-rank-transforms each `(variable, node)` series to uniform margins and clusters
-the resulting joint distribution, so candidates are grouped by how the selected
-variables co-move across nodes rather than by magnitude alone. One feature
-dimension is built per `(variable, node)` pair, so each `copulas_to_use` entry
-adds as many dimensions as it has nodes — which drives clustering runtime more
-than `n_cluster` does. On `europe_v51`, `["electricload"]` alone yields 35
-dimensions and takes several minutes to cluster all four seasons; this is a
-one-time cost per `copula_clusters_make` run, not per scenario.
-
-Candidates are drawn from every year the selected inputs have in common, and
-offsets cover every window that fits inside the season — the same range
-unstratified sampling draws from, so enabling clustering changes which windows
-are *preferred*, never which windows *exist*. Feature dimensions come from each
-selected variable's own node columns, so any of the six variables above may be
-clustered on, including `windoffshore` and `hydroror` whose files use different
-node sets than the rest.
-
-When several sampling modes are configured, `use_fixed_sample` wins over
-`filter_use`, which wins over `copula_clusters_use`. Clustering consumes the
-scenario RNG and cluster labels are canonicalised by sorted centers, so a fixed
-seed reproduces the same catalog including its `ClusterGroup` numbering. Enabled
-catalogs are archived with the sampling key under
-`results/julia_runs/<run>/Input/ScenarioData/`, which is enough to audit or
-replay exactly which cluster assignment produced a given result.
-
-See [COPULA_COMPARISON.md](COPULA_COMPARISON.md) for the full-scale `europe_v51`
-clustering profile, a solved baseline-versus-copula comparison, and notes on how
-this implementation relates to the original Python routine.
+See [COPULA_COMPARISON.md](COPULA_COMPARISON.md) for the `europe_v51` clustering
+profile, a solved baseline-versus-copula comparison, and how this implementation
+relates to the original Python routine.
 
 ### Generating out-of-sample scenario trees
 
