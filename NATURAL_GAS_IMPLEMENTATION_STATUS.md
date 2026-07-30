@@ -26,7 +26,8 @@ verification milestone.
   - `c6ac80e` — reproducible full-model CSV dataset, converter, audits, config;
   - `64cbad6` — typed loading, scenario axes, gas equations, and objective;
   - `743957b` — results, OOS/full-year integration, parity, and tests;
-  - `79b87c7` — standalone converted-dataset validation.
+  - `79b87c7` — standalone converted-dataset validation;
+  - `56103df` — reserve completeness and expanded acceptance coverage.
 - Clean main-based dataset worktree:
   `/Users/torgrim/Documents/NTNU/iot/empire/OpenEMPIRE.jl-full-model-int-dataset-pr`
 - Dataset branch `torgrim/full-model-int-dataset` has been pushed.
@@ -132,11 +133,10 @@ verification and delivery preparation rather than missing core model behavior.
 
 Next immediate actions:
 
-1. Commit the final acceptance tests and live handoff checkpoint.
-2. After required runner/OOS/north-sea PRs merge, transplant the deterministic
+1. After required runner/OOS/north-sea PRs merge, transplant the deterministic
    gas implementation onto fresh `main`; do not merge this 94-commit evidence
    ancestry.
-3. Split the gas-price scenario axis into the following fresh stochastic PR.
+2. Split the gas-price scenario axis into the following fresh stochastic PR.
 
 ### Newly discovered source-data issue
 
@@ -259,12 +259,6 @@ Next immediate actions:
 
 ## Working tree summary
 
-The evidence branch is committed through `79b87c7`. The only expected
-uncommitted checkpoint is the final expanded acceptance coverage:
-
-- `scripts/validate_full_model_int_dataset.py`
-- `src/empire_structs.jl`
-- `test/test_natural_gas.jl`
-- `test/test_runner_staging.jl`
-- `test/runtests.jl`
-- this status file
+The implementation and acceptance changes are committed through `56103df`.
+After this handoff-only update is committed, the evidence worktree should be
+clean. No generated test artifact or unrelated checkout change is expected.
