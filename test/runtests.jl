@@ -46,6 +46,8 @@ end
     test_write_scenario_copula_cluster_artifacts()
     test_copula_clusters_make_writes_csv()
     test_copula_clusters_use_samples_from_clusters()
+    test_copula_clusters_multiple_variables()
+    test_filter_takes_precedence_over_copula_clusters()
     test_copula_clusters_use_without_make_errors()
     test_copula_clusters_invalid_copula_name_errors()
     test_create_model_accepts_optimizer_type()

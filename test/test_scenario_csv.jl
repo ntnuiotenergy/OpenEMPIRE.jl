@@ -674,6 +674,74 @@ function test_copula_clusters_use_samples_from_clusters()
     end
 end
 
+function test_copula_clusters_multiple_variables()
+    mktempdir() do root
+        _write_copula_cluster_scenario_data(root)
+        sets = _scenario_test_sets()
+        dateformat = OpenEMPIRE._python_dateformat("%d/%m/%Y %H:%M")
+        load_table = OpenEMPIRE._read_raw_scenario_table(joinpath(root, "ScenarioData", "electricload.csv"), dateformat)
+        hydro_table = OpenEMPIRE._read_raw_scenario_table(joinpath(root, "ScenarioData", "hydroseasonal.csv"), dateformat)
+        generator_sources = OpenEMPIRE._raw_generator_sources(root, dateformat, sets)
+
+        # Several variables at once: the joint distribution gains one dimension
+        # per (variable, node) pair, which is the case the empirical copula is for.
+        rows = OpenEMPIRE.make_copula_clusters(
+            root,
+            OpenEMPIRE.REGULAR_SCENARIO_SEASONS,
+            4,
+            ["electricload", "solar", "windoffshore"],
+            2,
+            load_table,
+            hydro_table,
+            generator_sources,
+            MersenneTwister(1);
+            n_init = 5,
+        )
+        @test !isempty(rows)
+        @test all(r -> r.ClusterGroup in (0, 1), rows)
+        @test Set(r.Season for r in rows) == Set(String.(OpenEMPIRE.REGULAR_SCENARIO_SEASONS))
+
+        # Every listed variable must resolve to a raw table.
+        for name in ("electricload", "hydroseasonal", "solar", "windonshore", "windoffshore", "hydroror")
+            @test OpenEMPIRE._copula_source_table(name, load_table, hydro_table, generator_sources) !== nothing
+        end
+    end
+end
+
+# The scenario filter outranks copula clustering, so a run driven by the filter
+# must not fail on a leftover `copula_clusters_use: true` with no catalog present.
+function test_filter_takes_precedence_over_copula_clusters()
+    mktempdir() do root
+        _write_copula_cluster_scenario_data(root)
+        sets = _scenario_test_sets()
+        params = _copula_test_empire_params()
+        cfg = Dict(
+            "time_format" => "%d/%m/%Y %H:%M",
+            "length_of_regular_season" => 4,
+            "number_of_scenarios" => 1,
+            "filter_make" => true,
+            "filter_use" => true,
+            "copula_clusters_use" => true,
+            "n_cluster" => 2,
+        )
+        periods = OpenEMPIRE.create_timestruct(1, 5, 4, 4, 2, 24, 1)
+
+        OpenEMPIRE.generate_scenario_csv!(root, periods, params, sets, cfg; rng = MersenneTwister(1))
+
+        # The filter catalog drove sampling, and no copula catalog was created.
+        @test isfile(joinpath(root, "ScenarioData", "filter_result.csv"))
+        @test !isfile(OpenEMPIRE._copula_cluster_path(root))
+        _assert_profile_lengths(params.sloadRaw["A"], periods)
+
+        filter_rows = collect(CSV.File(joinpath(root, "ScenarioData", "filter_result.csv"); normalizenames = false))
+        filter_keys = Set((String(r.Season), Int(r.Year), Int(r.SampleIndex)) for r in filter_rows)
+        for row in CSV.File(joinpath(root, "ScenarioData", "sampling_key.csv"); normalizenames = false)
+            String(row.Season) == "peak" && continue
+            @test (String(row.Season), Int(row.Year), Int(row.Hour)) in filter_keys
+        end
+    end
+end
+
 function test_copula_clusters_use_without_make_errors()
     mktempdir() do root
         _write_copula_cluster_scenario_data(root)

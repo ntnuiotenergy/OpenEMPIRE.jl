@@ -1202,7 +1202,15 @@ function generate_scenario_csv!(data_folder, periods, params::EmpireParams, sets
             rng,
         )
     end
-    copula_clusters = !fixed_sample && copula_clusters_use ? _read_copula_clusters(data_folder) : nothing
+    # Only load the catalog when copula clustering will actually drive sampling.
+    # Fixed sampling and the scenario filter both take precedence, and a stale
+    # `copula_clusters_use: true` left in a config must not fail those runs.
+    copula_clusters =
+        if !fixed_sample && copula_clusters_use && filter_groups === nothing
+            _read_copula_clusters(data_folder)
+        else
+            nothing
+        end
     cluster_state = Ref(n_cluster - 1)
 
     load_columns = _node_columns(load_table, sets)
