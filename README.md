@@ -137,25 +137,22 @@ implementations. Enabled filters are archived with their sampling key under
 See [FILTER_COMPARISON.md](FILTER_COMPARISON.md) for the reproducible
 Python–Julia metric comparison and the cluster-count sweep from 1 to 30.
 
-Set `copula_clusters_make: true` to cluster the possible regular-season windows
-on the *empirical copula* of `copulas_to_use` — grouping candidates by how those
-variables co-move across nodes rather than by magnitude — and write
-`Copulas/CopulaClusters/copula_clusters.csv`. Set `copula_clusters_use: true` to
-sample from that catalog, rotating through cluster groups `0:n_cluster-1`; enable
-both to build and immediately use a new catalog. The defaults are
-`copula_clusters_make: false`, `copula_clusters_use: false`,
-`copulas_to_use: ["electricload"]`, and `n_cluster: 10`; valid `copulas_to_use`
-entries are `electricload`, `hydroseasonal`, `solar`, `windonshore`,
-`windoffshore`, and `hydroror`. Clustering consumes the scenario RNG, so a fixed
-seed reproduces the catalog; it runs once per `copula_clusters_make` run and
-slows as the selected variables' node counts grow. `use_fixed_sample` takes
-precedence over `filter_use`, which takes precedence over `copula_clusters_use`.
-Enabled catalogs are archived with the sampling key under
-`results/julia_runs/<run>/Input/ScenarioData/`.
+Set `copula_clusters_make: true` to sort the possible regular-season windows into
+clusters and write `Copulas/CopulaClusters/copula_clusters.csv`. The clustering
+looks at how the variables in `copulas_to_use` move together across nodes, not at
+how large their values are. Set `copula_clusters_use: true` to sample from that
+file, cycling through cluster groups `0:n_cluster-1`. Turn on both flags to build
+a new file and use it in the same run.
 
-See [COPULA_COMPARISON.md](COPULA_COMPARISON.md) for the `europe_v51` clustering
-profile, a solved baseline-versus-copula comparison, and how this implementation
-relates to the original Python routine.
+The defaults are `copula_clusters_make: false`, `copula_clusters_use: false`,
+`copulas_to_use: ["electricload"]`, and `n_cluster: 10`. You can cluster on
+`electricload`, `hydroseasonal`, `solar`, `windonshore`, `windoffshore`, or
+`hydroror`. Clustering uses the scenario RNG, so the same seed gives the same
+file. It runs once per `copula_clusters_make` run, and takes longer when the
+chosen variables cover more nodes. If more than one sampling mode is on,
+`use_fixed_sample` wins over `filter_use`, and `filter_use` wins over
+`copula_clusters_use`. The file is saved with the sampling key under
+`results/julia_runs/<run>/Input/ScenarioData/`.
 
 ### Generating out-of-sample scenario trees
 
