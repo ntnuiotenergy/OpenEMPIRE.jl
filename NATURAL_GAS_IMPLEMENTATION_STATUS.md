@@ -1,6 +1,6 @@
 # Natural Gas Implementation Status
 
-Last updated: 2026-07-30 11:42 Europe/Oslo
+Last updated: 2026-07-30 14:20 Europe/Oslo
 
 ## Objective
 
@@ -126,17 +126,114 @@ verification milestone.
   full-year gas aggregation, active storage, transport shedding, zero supply,
   infeasibility, emission caps, module-off artifacts, and solved 3×3 scenarios.
 
+## Independent review, 2026-07-30
+
+An independent review of the gas implementation and of PR #30 raised one
+critical and one high finding, both since fixed on this branch. The full list
+and its disposition:
+
+### Fixed — critical
+
+**Gas generators were priced at zero marginal cost on `full_model_int`.**
+`preprocess_operational_cost` skipped any generator without a `genFuelCost`
+entry *before* reaching the branch that zeroes gas fuel. Because InternalEMPIRE
+prices gas through the gas module, the workbook has no `genFuelCost` row for
+`Gasexisting`, `GasOCGT`, `GasCCGT`, `GasCCSadv` or `GasCCS` at all, so all five
+were skipped, no `genMargCost` key was written, and `gen_marginal_cost` fell
+through to `DEFAULT_GEN_MARGINAL_COST` (zero). The intended
+"drop fuel, keep variable O&M and carbon" branch was unreachable for exactly the
+generators the module targets, and the merit order among the five gas
+technologies collapsed to a tie.
+
+`src/utils.jl` now decides `gas_fuelled` first, skips only on a missing
+efficiency profile, and raises a named `ArgumentError` when a generator has an
+efficiency but no fuel price and is not gas-fuelled. Verified on the real
+dataset with an emission cap: `GasCCGT`/`GasOCGT`/`Gasexisting` reduce exactly to
+their variable O&M (2.31 EUR/MWh), matching InternalEMPIRE's
+`prepOperationalCostGen_rule`.
+
+The previously reported reduced one-period objective `9.479417173693846e11` was
+produced with this defect active and must not be used as a baseline.
+
+### Fixed — high
+
+**PR #30 shipped a dataset that its own branch could not build.** The dataset and
+the empty-`StrategicProfile` fix were split across branches, so `create_model`
+on `full_model_int` failed with an opaque
+`BoundsError: attempt to access 0-element Vector{FixedProfile{Float64}}` from
+`validate`. PR #30 now carries the minimal standalone fix (skip on missing
+efficiency, explicit error on missing fuel price), a
+`test_read_full_model_int_dataset` smoke test, and a config comment stating that
+the dataset requires the gas module.
+
+### Fixed — medium and low
+
+- Gas input validation was advisory only, because `create_model` calls
+  `validate(...; strict = false)`, which downgrades every issue to one warning.
+  Added `validate_natural_gas`, which `create_model` now enforces as fatal
+  whenever the module is enabled.
+- Reserve and storage rows are now built scaled by `NATURAL_GAS_ROW_SCALE`
+  (`1e-3`), matching InternalEMPIRE's explicit `/1e3` conditioning. Reserves
+  reach 5.55e8 t against ~7.3e3 coefficients, so the unscaled rows had roughly
+  1e5 intra-row spread. The scaled storage-balance dual is corrected back to
+  EUR/ton when written.
+- Gas result tables were computed twice, once per alias filename, re-walking
+  every operational period and re-querying every JuMP value. They are now built
+  once and copied.
+- Dropped the redundant `duration(operational_period)` factor from the reserve
+  sum. It was a no-op only because every operational period has unit duration,
+  and it diverged from the `multiple_strat` idiom used by the emission cap.
+- Shared `FINITE_RESERVE_TERMINALS` through `is_finite_reserve_terminal` instead
+  of repeating the literal in `empire_structs.jl`.
+- Cached the operational-period context on the JuMP model, so it is built once
+  per model rather than three times.
+- Gas generators without a `genEfficiency` profile are now a validation issue
+  rather than a bare `KeyError` during constraint building.
+- `test/test_solve.jl` copies `data/test_excel` into a temporary directory before
+  building. The suite no longer rewrites the tracked sampling key, so it no
+  longer has to be restored by hand after every run.
+
+### Known difference, deliberately kept
+
+Base OpenEMPIRE adds a CCS transport-and-storage term to generator marginal cost
+(`CCSRemFrac * genCO2TypeFactor * CCSCostTSVariable`); InternalEMPIRE's
+`prepOperationalCostGen_rule` has no CCS term at all. `GasCCS` and `GasCCSadv`
+therefore sit slightly above their variable O&M in Julia. This is a pre-existing
+OpenEMPIRE-versus-InternalEMPIRE difference in the port target, not a gas-module
+behaviour, and the dataset test asserts it explicitly.
+
+### Accepted as-is
+
+- `TerminalCost.csv` versus `TerminalCost_stochastic.csv` is selected by gas
+  scenario count rather than InternalEMPIRE's `gas_stochasticity_flag`. Harmless
+  here because the stochastic sheet's repeated values agree at scenario 1.
+- Module-off runs still gain two zero-valued gas columns in the objective
+  component tuple and the OOS summary. Additive, but it will change hashes for
+  anyone diffing electricity-only OOS summaries against older runs.
+- The Pyomo parity model is an independent hand-written restatement, not
+  `InternalEMPIRE/empire.py` itself. It establishes equation-level parity, not
+  agreement with the reference implementation's own code.
+
 ## Current work in progress
 
-The implementation compiles and its focused tests pass. The remaining work is
-verification and delivery preparation rather than missing core model behavior.
+The implementation compiles, the complete suite passes, and the review findings
+above are resolved. The remaining work is delivery preparation rather than
+missing model behaviour.
 
 Next immediate actions:
 
 1. After required runner/OOS/north-sea PRs merge, transplant the deterministic
    gas implementation onto fresh `main`; do not merge this 94-commit evidence
-   ancestry.
+   ancestry. The model core (`natural_gas.jl`, `empire_sets.jl`,
+   `empire_structs.jl`, `read_csv.jl`, `model_definition.jl`, `utils.jl`,
+   `user_interface.jl`, `results.jl`, `scenario.jl`) has no OOS dependency; only
+   `out_of_sample.jl`, `oos_aggregation.jl`, `run_julia_empire.jl` and
+   `test_runner_staging.jl` do. That supports three PRs rather than two:
+   deterministic gas core, gas OOS/runner integration, then the stochastic axis.
 2. Split the gas-price scenario axis into the following fresh stochastic PR.
+3. Attribute the seven-period HiGHS `OTHER_ERROR`. The reserve and storage rows
+   are now conditioned as InternalEMPIRE conditions them, which removes the most
+   plausible cause, but the run has not been repeated.
 
 ### Newly discovered source-data issue
 
@@ -153,6 +250,13 @@ Next immediate actions:
 - `number_of_gas_scenarios: 1` by default.
 - Deliver deterministic gas first, then stochastic weather × gas scenarios.
 - Gas transport demand is part of `natural_gas` and does not depend on Hydrogen.
+- Gas-fired generators keep variable O&M and carbon costs and omit only the
+  ordinary fuel price. A dataset that omits a fuel price for a non-gas generator
+  is an error, not a silent zero.
+- Gas input validation is fatal when the module is enabled, unlike the general
+  `strict = false` parameter validation.
+- Reserve and storage rows carry InternalEMPIRE's `1e-3` conditioning scale, and
+  duals derived from them are rescaled before they are written.
 - Duplicate source terminal costs use explicitly audited last-source-row-wins
   semantics, matching Pyomo `DataPortal`.
 - Version the runnable approximately 77 MB dataset.
@@ -256,6 +360,42 @@ Next immediate actions:
   TimeStruct 21, solve 3).
 - The final suite-generated Excel sampling key was again restored byte-for-byte
   to `HEAD`.
+
+### After the 2026-07-30 review fixes
+
+- Focused natural-gas suite: 471/471 PASS, up from 139. New coverage: gas
+  marginal cost with no fuel price present (the real `full_model_int`
+  condition), the emission-capped variable-O&M-only case, the explicit error
+  when the module is off, the untouched non-gas generator, the no-efficiency
+  fallback, a dataset-level assertion over all five `full_model_int` gas
+  generators, enforced gas validation for missing reserves/terminal
+  costs/efficiency, storage-balance duals pinned to the nodal gas price, and a
+  2-period x 2-season x 2-weather x 3-gas weighting test.
+- The weighting test is the main answer to the review's parity-breadth finding.
+  The controlled Pyomo fixture has one strategic period, one representative
+  period and one scenario, so it cannot exercise strategic duration, season
+  multiplicity, scenario probability, or the gas-price axis. The new test checks
+  292 assertions against hand-computed values: one reserve row per weather x gas
+  pair, storage resets per representative period per scenario per strategic
+  period, each terminal-import objective coefficient equal to
+  `objective_weight * terminalCost` at that period's own gas scenario, each
+  reserve coefficient equal to
+  `NATURAL_GAS_ROW_SCALE * duration_strat * multiple_strat` with exactly one row
+  per variable, every reserve row reached, and uniform `1/(W*G)` probabilities.
+- Controlled Julia/Pyomo gas-only parity after the row scaling: PASS, still 26
+  keyed metrics. Maximum absolute difference `4.54747350886e-13`, maximum
+  relative difference `3.5527136788e-16`. The absolute figure moved from
+  `8.881784197e-16` because the scaled rows change LP numerics slightly; the
+  relative figure remains at machine precision.
+- Complete Julia suite: PASS. Excel 66, CSV 63, natural gas 471, CSV scenarios
+  164 plus the one pre-existing optional Python broken/skip, runner staging 94,
+  OOS 161, full-year OOS 168, aggregation 55, Solstorm SGE 69, staging 108,
+  cleanup 45, remote setup 25, submission 26, validation 16, TimeStruct 21,
+  solve 3. Total 1,555 passing.
+- `git status` is clean after a complete suite run. The tracked Excel sampling
+  key is no longer rewritten, so no manual restoration is needed.
+- PR #30 suite after its minimal fix: PASS, with CSV rising from 63 to 84
+  assertions on the new `full_model_int` dataset test.
 
 ## Working tree summary
 

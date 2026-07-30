@@ -1,8 +1,21 @@
+"""
+Terminal types whose cumulative imports are bounded by a finite reserve at the
+node. Matched case-insensitively, as InternalEMPIRE does.
+"""
 const FINITE_RESERVE_TERMINALS = Set(("domesticproduction", "pipelineimport"))
+
+# Reserve and storage rows carry tonne-scale right-hand sides (reserves reach
+# ~5.6e8 t) against ~7.3e3 coefficients. InternalEMPIRE divides both sides of
+# these rows by 1e3 for conditioning; mirroring that keeps the coefficient range
+# comparable and the feasible set identical.
+const NATURAL_GAS_ROW_SCALE = 1.0e-3
+
 const NaturalGasPeriodContext = NamedTuple{
     (:strategic, :weather, :gas),
     Tuple{Int, Int, Int},
 }
+
+is_finite_reserve_terminal(terminal) = lowercase(terminal) in FINITE_RESERVE_TERMINALS
 
 _natural_gas_onshore_nodes(sets) =
     [node for node in natural_gas_nodes(sets) if node in natural_gas_onshore_nodes(sets)]
@@ -32,6 +45,28 @@ function _natural_gas_period_maps(periods, gas_scenario_count::Int)
             end
         end
     end
+    return context
+end
+
+"""
+    _natural_gas_period_context(emp, periods, gas_scenario_count)
+
+Return the cached operational-period context for `emp`, building it on first use.
+
+Constraint building, the objective, and objective-component reporting all need
+the same map; without caching it is rebuilt three times per model (about 8 MiB
+per build at 19,440 operational periods).
+"""
+function _natural_gas_period_context(
+    emp::JuMP.Model,
+    periods,
+    gas_scenario_count::Int,
+)
+    context_type = Dict{eltype(periods), NaturalGasPeriodContext}
+    cached = get(emp.ext, :natural_gas_period_context, nothing)
+    cached isa context_type && return cached
+    context = _natural_gas_period_maps(periods, gas_scenario_count)::context_type
+    emp.ext[:natural_gas_period_context] = context
     return context
 end
 
@@ -143,7 +178,7 @@ function _create_natural_gas_reserve_constraints!(
     gas = par.NaturalGas
     constraints = JuMP.ConstraintRef[]
     for (node, terminal) in natural_gas_terminal_nodes(sets)
-        lowercase(terminal) in FINITE_RESERVE_TERMINALS || continue
+        is_finite_reserve_terminal(terminal) || continue
         for weather_scenario in 1:gas.weatherScenarioCount
             for gas_scenario in 1:gas.gasScenarioCount
                 total_import = JuMP.AffExpr(0.0)
@@ -157,10 +192,12 @@ function _create_natural_gas_reserve_constraints!(
                             combined_scenario,
                         )
                         for operational_period in scenario
+                            # LeapYearsInvestment * seasScale, matching
+                            # InternalEMPIRE's naturalGas_max_reserves_rule.
                             total_import +=
+                                NATURAL_GAS_ROW_SCALE *
                                 duration_strat(strategic_period) *
                                 multiple_strat(strategic_period, operational_period) *
-                                duration(operational_period) *
                                 terminal_import[
                                     node,
                                     terminal,
@@ -173,7 +210,8 @@ function _create_natural_gas_reserve_constraints!(
                     constraints,
                     @constraint(
                         emp,
-                        total_import <= natural_gas_reserves(par, node),
+                        total_import <=
+                        NATURAL_GAS_ROW_SCALE * natural_gas_reserves(par, node),
                     ),
                 )
             end
@@ -191,7 +229,7 @@ pipeline, transport-demand, and nodal-balance constraints.
 """
 function create_natural_gas_constraints!(emp::JuMP.Model, sets, par, periods)
     gas = par.NaturalGas
-    period_context = _natural_gas_period_maps(periods, gas.gasScenarioCount)
+    period_context = _natural_gas_period_context(emp, periods, gas.gasScenarioCount)
     gas_nodes = natural_gas_nodes(sets)
     gas_generators = _natural_gas_node_generators(sets)
     onshore_nodes = _natural_gas_onshore_nodes(sets)
@@ -239,14 +277,16 @@ function create_natural_gas_constraints!(emp::JuMP.Model, sets, par, periods)
             strategic_period in strat_periods(periods),
             (previous, operational_period) in withprev(strategic_period),
         ],
-        (
-            isnothing(previous) ?
-            gas.storageInitialFraction * natural_gas_storage_capacity(par, node) :
-            storage[node, previous]
-        ) +
-        gas.storageChargeEfficiency * charge[node, operational_period] -
-        discharge[node, operational_period] ==
-        storage[node, operational_period],
+        NATURAL_GAS_ROW_SCALE * (
+            (
+                isnothing(previous) ?
+                gas.storageInitialFraction * natural_gas_storage_capacity(par, node) :
+                storage[node, previous]
+            ) +
+            gas.storageChargeEfficiency * charge[node, operational_period] -
+            discharge[node, operational_period]
+        ) ==
+        NATURAL_GAS_ROW_SCALE * storage[node, operational_period],
     )
     @constraint(
         emp,
@@ -255,8 +295,10 @@ function create_natural_gas_constraints!(emp::JuMP.Model, sets, par, periods)
             strategic_period in strat_periods(periods),
             scenario in opscenarios(strategic_period),
         ],
-        storage[node, last(scenario)] ==
-            gas.storageInitialFraction * natural_gas_storage_capacity(par, node),
+        NATURAL_GAS_ROW_SCALE * storage[node, last(scenario)] ==
+            NATURAL_GAS_ROW_SCALE *
+            gas.storageInitialFraction *
+            natural_gas_storage_capacity(par, node),
     )
     @constraint(
         emp,
@@ -264,8 +306,8 @@ function create_natural_gas_constraints!(emp::JuMP.Model, sets, par, periods)
             node in gas_nodes,
             operational_period in periods,
         ],
-        storage[node, operational_period] <=
-            natural_gas_storage_capacity(par, node),
+        NATURAL_GAS_ROW_SCALE * storage[node, operational_period] <=
+            NATURAL_GAS_ROW_SCALE * natural_gas_storage_capacity(par, node),
     )
     @constraint(
         emp,
@@ -337,7 +379,7 @@ function natural_gas_objective_expressions(
     terminal_import = emp[:ngTerminalImport]
     transport_shed = emp[:transportNaturalGasDemandShed]
     gas = par.NaturalGas
-    period_context = _natural_gas_period_maps(periods, gas.gasScenarioCount)
+    period_context = _natural_gas_period_context(emp, periods, gas.gasScenarioCount)
 
     terminal_import_cost = sum(
         objective_weight(operational_period, discounter; type = "avg_year") *

@@ -364,6 +364,340 @@ function test_natural_gas_scenario_mapping_and_costs()
     @test parameters.genMargCost["GasCCGT"][first(periods)] ≈ 19.4
 end
 
+# InternalEMPIRE prices natural gas through the gas module, so its workbooks
+# carry no `genFuelCost` row for gas-fired generators at all. That is the real
+# shipped condition, and it must still yield variable O&M plus carbon costs
+# rather than silently falling back to DEFAULT_GEN_MARGINAL_COST.
+function test_gas_marginal_cost_without_a_fuel_price()
+    sets = OpenEMPIRE.EmpireSets(
+        Node = ["A"],
+        Generator = ["GasCCGT", "Coal"],
+        Technology = ["Gas", "Hcoal"],
+        TransmissionType = ["AC"],
+        GeneratorsOfTechnology = [("Gas", "GasCCGT"), ("Hcoal", "Coal")],
+        GeneratorsOfNode = [("A", "GasCCGT"), ("A", "Coal")],
+        NaturalGas = OpenEMPIRE.NaturalGasSets(
+            Node = ["A"],
+            Generator = ["GasCCGT"],
+        ),
+    )
+    periods = OpenEMPIRE.create_timestruct(1, 5, 1, 1, 0, 0, 1)
+
+    # No genFuelCost entry for the gas generator, exactly as in full_model_int.
+    parameters = OpenEMPIRE.EmpireParams(
+        genFuelCost = Dict("Coal" => FixedProfile(3.0)),
+        genEfficiency = Dict(
+            "GasCCGT" => FixedProfile(0.5),
+            "Coal" => FixedProfile(0.4),
+        ),
+        genVariableOMCost = Dict("GasCCGT" => 2.31, "Coal" => 1.0),
+        genCO2Content = Dict("GasCCGT" => 0.2, "Coal" => 0.35),
+        CO2price = FixedProfile(10.0),
+    )
+    OpenEMPIRE.preprocess_operational_cost(
+        parameters,
+        sets,
+        periods;
+        natural_gas = true,
+    )
+    sp = first(periods)
+    @test haskey(parameters.genMargCost, "GasCCGT")
+    # (3.6 / 0.5) * (0 fuel + 10 * 0.2) + 2.31
+    @test parameters.genMargCost["GasCCGT"][sp] ≈ 16.71
+    @test OpenEMPIRE.gen_marginal_cost(parameters, "GasCCGT", sp) ≈ 16.71
+    @test OpenEMPIRE.gen_marginal_cost(parameters, "GasCCGT", sp) !=
+          OpenEMPIRE.DEFAULT_GEN_MARGINAL_COST
+    # The non-gas generator is untouched: (3.6 / 0.4) * (3 + 10 * 0.35) + 1
+    @test parameters.genMargCost["Coal"][sp] ≈ 59.5
+
+    # Under an emission cap CO2price is cleared, leaving variable O&M only, which
+    # is what InternalEMPIRE's prepOperationalCostGen_rule produces for gas.
+    capped = OpenEMPIRE.EmpireParams(
+        genFuelCost = Dict("Coal" => FixedProfile(3.0)),
+        genEfficiency = Dict("GasCCGT" => FixedProfile(0.5)),
+        genVariableOMCost = Dict("GasCCGT" => 2.31),
+        genCO2Content = Dict("GasCCGT" => 0.2),
+        CO2price = nothing,
+    )
+    OpenEMPIRE.preprocess_operational_cost(
+        capped,
+        sets,
+        periods;
+        natural_gas = true,
+    )
+    @test capped.genMargCost["GasCCGT"][sp] ≈ 2.31
+
+    # With the module off the same input has no gas price anywhere, so it must
+    # fail loudly instead of pricing gas generation at zero.
+    off = OpenEMPIRE.EmpireParams(
+        genFuelCost = Dict("Coal" => FixedProfile(3.0)),
+        genEfficiency = Dict("GasCCGT" => FixedProfile(0.5)),
+        genVariableOMCost = Dict("GasCCGT" => 2.31),
+        genCO2Content = Dict("GasCCGT" => 0.2),
+        CO2price = FixedProfile(10.0),
+    )
+    err = try
+        OpenEMPIRE.preprocess_operational_cost(off, sets, periods; natural_gas = false)
+        nothing
+    catch caught
+        caught
+    end
+    @test err isa ArgumentError
+    @test occursin("GasCCGT", err.msg)
+    @test occursin("natural_gas", err.msg)
+
+    # A generator with no efficiency profile keeps the documented fallback.
+    bare = OpenEMPIRE.EmpireParams(
+        genFuelCost = Dict("Coal" => FixedProfile(3.0)),
+        genEfficiency = Dict("Coal" => FixedProfile(0.4)),
+        genVariableOMCost = Dict("Coal" => 1.0),
+        genCO2Content = Dict("Coal" => 0.35),
+        CO2price = FixedProfile(10.0),
+    )
+    OpenEMPIRE.preprocess_operational_cost(bare, sets, periods; natural_gas = false)
+    @test !haskey(bare.genMargCost, "GasCCGT")
+end
+
+# Dataset-level guard: the five full_model_int gas generators must all carry a
+# real marginal cost once the module is enabled.
+function test_full_model_int_gas_generators_are_priced()
+    dataset = joinpath(pkgdir(OpenEMPIRE), "data", "full_model_int")
+    isdir(dataset) || return
+    sets, parameters = OpenEMPIRE.read_data(
+        dataset;
+        format = :csv,
+        natural_gas = true,
+        weather_scenarios = 1,
+        gas_scenarios = 1,
+    )
+    periods = OpenEMPIRE.create_timestruct(7, 5, 4, 24, 2, 24, 1)
+    parameters.CO2price = nothing  # use_emission_cap: True
+    OpenEMPIRE.preprocess_operational_cost(
+        parameters,
+        sets,
+        periods;
+        natural_gas = true,
+    )
+    sp = first(strat_periods(periods))
+    gas_generators = OpenEMPIRE.natural_gas_generators(sets)
+    @test Set(gas_generators) ==
+          Set(["GasCCGT", "GasCCS", "GasCCSadv", "GasOCGT", "Gasexisting"])
+    for generator in gas_generators
+        @test haskey(parameters.genMargCost, generator)
+        cost = OpenEMPIRE.gen_marginal_cost(parameters, generator, sp)
+        @test cost > 0
+        # Non-CCS gas generators reduce exactly to variable O&M under a cap; the
+        # CCS variants additionally carry base OpenEMPIRE's CCS transport and
+        # storage term, which InternalEMPIRE does not model.
+        if ("CCS", generator) in sets.GeneratorsOfTechnology
+            @test cost > parameters.genVariableOMCost[generator]
+        else
+            @test cost ≈ parameters.genVariableOMCost[generator]
+        end
+    end
+end
+
+# Gas input problems must be fatal rather than a single warning: a missing
+# terminal cost silently becomes 99999 EUR/t and a missing capacity becomes zero.
+function test_natural_gas_validation_is_enforced()
+    sets = OpenEMPIRE.EmpireSets(
+        Node = ["A"],
+        Generator = ["GasCCGT"],
+        Technology = ["Gas"],
+        TransmissionType = ["AC"],
+        GeneratorsOfTechnology = [("Gas", "GasCCGT")],
+        GeneratorsOfNode = [("A", "GasCCGT")],
+        NaturalGas = OpenEMPIRE.NaturalGasSets(
+            Node = ["A"],
+            Terminal = ["DomesticProduction"],
+            TerminalsOfNode = [("A", "DomesticProduction")],
+            OnshoreNode = ["A"],
+            Generator = ["GasCCGT"],
+        ),
+    )
+    periods = OpenEMPIRE.create_timestruct(1, 5, 1, 1, 0, 0, 1)
+
+    complete = OpenEMPIRE.EmpireParams(
+        genEfficiency = Dict("GasCCGT" => FixedProfile(0.5)),
+        NaturalGas = OpenEMPIRE.NaturalGasParams(
+            terminalCost = Dict(("A", "DomesticProduction", 1, 1) => 100.0),
+            terminalCapacity = Dict(("A", "DomesticProduction", 1) => 50.0),
+            reserves = Dict("A" => 1000.0),
+            transportDemand = Dict(("A", 1) => 0.0),
+        ),
+    )
+    @test isempty(OpenEMPIRE.validate_natural_gas(complete, sets, periods))
+
+    # Missing reserve for a DomesticProduction terminal.
+    no_reserve = deepcopy(complete)
+    empty!(no_reserve.NaturalGas.reserves)
+    @test any(
+        contains("reserves"),
+        OpenEMPIRE.validate_natural_gas(no_reserve, sets, periods),
+    )
+
+    # Missing terminal cost for a required period/gas-scenario key.
+    no_cost = deepcopy(complete)
+    empty!(no_cost.NaturalGas.terminalCost)
+    @test any(
+        contains("terminalCost"),
+        OpenEMPIRE.validate_natural_gas(no_cost, sets, periods),
+    )
+
+    # A gas generator without an efficiency profile would otherwise surface as a
+    # bare KeyError while building the gas-to-power conversion constraint.
+    no_efficiency = deepcopy(complete)
+    empty!(no_efficiency.genEfficiency)
+    @test any(
+        contains("genEfficiency"),
+        OpenEMPIRE.validate_natural_gas(no_efficiency, sets, periods),
+    )
+end
+
+# The controlled Julia/Pyomo parity fixture has one strategic period, one
+# representative period and one scenario, so it cannot exercise strategic
+# duration, season multiplicity, scenario probability, or the gas-price axis.
+# This checks those weightings directly against hand-computed values.
+function test_natural_gas_multi_period_scenario_weighting()
+    weather_count, gas_count = 2, 3
+    strategic_count, season_count, season_hours = 2, 2, 3
+    periods = OpenEMPIRE.create_timestruct(
+        strategic_count,
+        5,
+        season_count,
+        season_hours,
+        1,
+        2,
+        weather_count * gas_count,
+    )
+    sets = OpenEMPIRE.EmpireSets(
+        Node = ["A"],
+        Generator = ["GasCCGT"],
+        Technology = ["Gas"],
+        TransmissionType = ["AC"],
+        GeneratorsOfTechnology = [("Gas", "GasCCGT")],
+        GeneratorsOfNode = [("A", "GasCCGT")],
+        NaturalGas = OpenEMPIRE.NaturalGasSets(
+            Node = ["A"],
+            Terminal = ["DomesticProduction"],
+            TerminalsOfNode = [("A", "DomesticProduction")],
+            OnshoreNode = ["A"],
+            Generator = ["GasCCGT"],
+        ),
+    )
+    # Encode (period, gas scenario) in the price so the objective coefficient
+    # identifies exactly which terminal cost was applied.
+    terminal_cost = Dict(
+        ("A", "DomesticProduction", period, gas) => 1000.0 * period + gas
+        for period in 1:strategic_count for gas in 1:gas_count
+    )
+    params = OpenEMPIRE.EmpireParams(
+        WACC = 0.05,
+        discountRate = 0.05,
+        genEfficiency = Dict("GasCCGT" => FixedProfile(0.5)),
+        genCapAvail = Dict(("A", "GasCCGT") => FixedProfile(1.0)),
+        genCO2Content = Dict("GasCCGT" => 0.0),
+        genMargCost = Dict("GasCCGT" => FixedProfile(1.0)),
+        sload = Dict("A" => FixedProfile(0.0)),
+        nodeLostLoadCost = Dict("A" => FixedProfile(1000.0)),
+        seasonNames = ["winter", "spring", "peak1"],
+        regularSeasonCount = season_count,
+        NaturalGas = OpenEMPIRE.NaturalGasParams(
+            terminalCost = terminal_cost,
+            terminalCapacity = Dict(
+                ("A", "DomesticProduction", period) => 100.0
+                for period in 1:strategic_count
+            ),
+            reserves = Dict("A" => 1.0e6),
+            transportDemand = Dict(
+                ("A", period) => 0.0 for period in 1:strategic_count
+            ),
+            weatherScenarioCount = weather_count,
+            gasScenarioCount = gas_count,
+        ),
+    )
+
+    model = JuMP.Model()
+    OpenEMPIRE.create_variables(model, sets, periods; natural_gas = true)
+    OpenEMPIRE.create_constraints(
+        model,
+        sets,
+        params,
+        periods;
+        natural_gas = true,
+        include_investment_constraints = false,
+    )
+    discounter = OpenEMPIRE.Discounter(0.05, 1, periods)
+    OpenEMPIRE.create_objective(model, sets, params, periods, discounter; natural_gas = true)
+
+    imports = model[:ngTerminalImport]
+    objective = JuMP.objective_function(model)
+
+    # One reserve row per (finite-reserve terminal, weather scenario, gas scenario).
+    @test length(model[:natural_gas_max_reserves]) == weather_count * gas_count
+
+    # Storage resets once per representative period per scenario, per strategic
+    # period -- not once per strategic period.
+    @test length(model[:natural_gas_storage_cyclic]) ==
+          strategic_count * (season_count + 1) * weather_count * gas_count
+
+    reserve_rows = model[:natural_gas_max_reserves]
+    period_context = OpenEMPIRE._natural_gas_period_maps(periods, gas_count)
+    covered = Set{Any}()
+    for strategic_period in strat_periods(periods)
+        for representative_period in repr_periods(strategic_period)
+            for (combined, scenario) in enumerate(opscenarios(representative_period))
+                gas_scenario = OpenEMPIRE.gas_scenario_index(combined, gas_count)
+                for operational_period in scenario
+                    variable = imports["A", "DomesticProduction", operational_period]
+
+                    # Objective weight embeds discounting, season multiplicity and
+                    # the 1/(W*G) scenario probability; the price must come from
+                    # this period's own gas scenario.
+                    expected_cost = OpenEMPIRE.objective_weight(
+                        operational_period,
+                        discounter;
+                        type = "avg_year",
+                    ) * terminal_cost[(
+                        "A",
+                        "DomesticProduction",
+                        period_context[operational_period].strategic,
+                        gas_scenario,
+                    )]
+                    @test JuMP.coefficient(objective, variable) ≈ expected_cost
+
+                    # Exactly one reserve row references this variable, with the
+                    # LeapYearsInvestment * seasScale weight, row-scaled.
+                    expected_reserve_coefficient =
+                        OpenEMPIRE.NATURAL_GAS_ROW_SCALE *
+                        duration_strat(strategic_period) *
+                        multiple_strat(strategic_period, operational_period)
+                    matching = [
+                        row for row in reserve_rows
+                        if !isapprox(
+                            JuMP.normalized_coefficient(row, variable),
+                            0.0;
+                            atol = 0,
+                        )
+                    ]
+                    @test length(matching) == 1
+                    @test JuMP.normalized_coefficient(only(matching), variable) ≈
+                          expected_reserve_coefficient
+                    push!(covered, only(matching))
+                end
+            end
+        end
+    end
+    # Every reserve row is reached, so no scenario is left unconstrained.
+    @test length(covered) == weather_count * gas_count
+
+    # Scenario probabilities are uniform over the weather x gas product.
+    scenario_probabilities = unique(
+        round(TimeStruct.probability(t); digits = 12) for t in periods
+    )
+    @test scenario_probabilities == [round(1 / (weather_count * gas_count); digits = 12)]
+end
+
 function test_weather_profiles_replicate_across_gas_scenarios()
     mktempdir() do root
         _write_fixed_sample_scenario_data(root)
@@ -562,6 +896,36 @@ function test_natural_gas_storage_transport_and_supply_edges()
         JuMP.value(storage_model[:ngStorageDischarge]["B", time])
         for time in storage_times
     ] ≈ [0.0, 5.0]
+
+    # Storage and reserve rows are built scaled by NATURAL_GAS_ROW_SCALE for
+    # conditioning, which inflates their duals by the reciprocal. With unit
+    # charge/discharge efficiencies and interior storage the marginal value of
+    # stored gas must equal the nodal gas price, so this pins the reported duals
+    # to EUR/ton and fails loudly if the scale correction is ever dropped.
+    mktempdir() do dual_dir
+        dual_output = OpenEMPIRE.write_solution_tables(
+            dual_dir,
+            storage_model,
+            storage_sets,
+            storage_params,
+            storage_periods,
+        )
+        dual_rows = collect(
+            CSV.File(joinpath(dual_output, "naturalGasOperationalDuals.csv")),
+        )
+        @test !isempty(dual_rows)
+        for row in dual_rows
+            gas_price = Float64(row.GasPrice_EUR_per_ton)
+            storage_dual = Float64(row.StorageBalanceDual_EUR_per_ton)
+            @test isfinite(gas_price) && isfinite(storage_dual)
+            @test storage_dual ≈ gas_price
+        end
+        # The upstream terminal price is 100 EUR/ton, so a lost 1e-3 row-scale
+        # correction would show up here as ~1e5.
+        @test all(
+            99.0 <= Float64(row.GasPrice_EUR_per_ton) <= 110.0 for row in dual_rows
+        )
+    end
     @test all(
         JuMP.value(
             storage_model[:transportNaturalGasDemandMet]["B", time],

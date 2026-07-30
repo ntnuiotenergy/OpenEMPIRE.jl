@@ -284,8 +284,12 @@ function _write_natural_gas_table(
     header,
     write_rows,
 )
-    for filename in filenames
-        _write_csv_table(joinpath(output_dir, filename), header, write_rows)
+    # Each gas family is published under a native and a Python-style name. Build
+    # the table once and copy it: `write_rows` re-walks every operational period
+    # and re-queries every JuMP value, which is the dominant cost here.
+    primary = _write_csv_table(joinpath(output_dir, first(filenames)), header, write_rows)
+    for filename in Iterators.drop(filenames, 1)
+        cp(primary, joinpath(output_dir, filename); force = true)
     end
     return output_dir
 end
@@ -733,8 +737,12 @@ function write_natural_gas_dual_csvs(
                     node,
                     operational_period,
                 ) / weight
+                # The storage balance row is built scaled by NATURAL_GAS_ROW_SCALE
+                # for conditioning, which inflates its dual by the reciprocal.
+                # Undo that so the published value stays in EUR/ton. The flow
+                # balance above is unscaled and needs no such correction.
                 storage_dual =
-                    _dual_or_nan(
+                    NATURAL_GAS_ROW_SCALE * _dual_or_nan(
                     emp[:natural_gas_storage_balance],
                     node,
                     strategic_period,

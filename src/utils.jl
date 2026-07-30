@@ -172,12 +172,26 @@ function preprocess_operational_cost(
 )
     params.genMargCost = Dict{String, StrategicProfile}()
     for g in sets.Generator
-        # Generators without a fuel or efficiency profile use the documented
-        # marginal-cost fallback. Do not create an empty StrategicProfile:
-        # validation and model evaluation cannot index one.
-        if !haskey(params.genFuelCost, g) || !haskey(params.genEfficiency, g)
-            continue
+        # Gas fuel is bought through terminal imports when the module is active, so
+        # gas-fired generators carry no ordinary fuel price and legitimately have no
+        # `genFuelCost` row. They still pay variable O&M and carbon costs, so they
+        # must not be skipped here: a missing `genMargCost` key silently falls back
+        # to `DEFAULT_GEN_MARGINAL_COST` (zero) and makes gas generation free.
+        gas_fuelled = natural_gas && g in natural_gas_generators(sets)
+
+        # Without an efficiency profile there is no marginal-cost basis at all, so
+        # the generator keeps the documented accessor fallback. Never construct an
+        # empty StrategicProfile: validation and model evaluation cannot index one.
+        haskey(params.genEfficiency, g) || continue
+
+        if !haskey(params.genFuelCost, g) && !gas_fuelled
+            throw(ArgumentError(
+                "Generator $g has a genEfficiency profile but no genFuelCost entry. " *
+                "Add its fuel cost, or enable `natural_gas` if it is gas-fired and " *
+                "priced through natural-gas terminal imports.",
+            ))
         end
+
         values = Float64[]
         for sp in strat_periods(periods)
             # Variable cost in €/MWh
