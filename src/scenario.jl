@@ -817,25 +817,46 @@ end
 
 # Runs k-means `n_init` times with k-means++ initialization (matching sklearn's
 # default) and keeps the lowest-cost run, since Clustering.jl has no built-in
-# multi-restart option. Returns 0-indexed cluster assignments.
-function _best_kmeans(X::Matrix{Float64}, k::Int; n_init::Int = 100)
+# multi-restart option. Cluster labels are canonicalized by sorting the centers
+# so that `ClusterGroup` values are deterministic rather than arbitrary, matching
+# `_cluster_filter_rows`. Returns 0-indexed cluster assignments.
+function _best_kmeans(X::Matrix{Float64}, k::Int, rng; n_init::Int = 100, season = nothing)
+    n_init > 0 || throw(ArgumentError("K-means initialization count must be positive"))
+    label = season === nothing ? "copula clustering" : "season $season"
+
     best = nothing
+    best_cost = Inf
     for _ in 1:n_init
-        result = Clustering.kmeans(X, k; init = :kmpp)
-        if best === nothing || result.totalcost < best.totalcost
+        result = Clustering.kmeans(X, k; init = :kmpp, maxiter = 300, rng)
+        if isfinite(result.totalcost) && result.totalcost < best_cost
             best = result
+            best_cost = result.totalcost
         end
     end
-    return Clustering.assignments(best) .- 1
+    best === nothing && throw(ArgumentError(
+        "K-means did not produce a finite result for $label",
+    ))
+    all(>(0), best.counts) || throw(ArgumentError(
+        "K-means produced an empty cluster for $label",
+    ))
+
+    center_order = sortperm(1:k; by = cluster -> (best.centers[:, cluster], cluster))
+    canonical_group = Vector{Int}(undef, k)
+    for (group, cluster) in enumerate(center_order)
+        canonical_group[cluster] = group - 1
+    end
+    return [canonical_group[assignment] for assignment in Clustering.assignments(best)]
 end
 
 """
     make_copula_clusters(data_folder, regular_seasons, regular_hours, copulas_to_use, n_cluster,
-                          load_table, hydro_table, generator_sources; n_init=100)
+                          load_table, hydro_table, generator_sources, rng; n_init=100)
 
 Cluster candidate regular-season sampling windows by the empirical copula of
 `copulas_to_use` across all of their nodes, and write the result to
 `Copulas/CopulaClusters/copula_clusters.csv` under `data_folder`.
+
+Clustering consumes `rng`, so a fixed seed reproduces the same cluster catalog.
 """
 function make_copula_clusters(
     data_folder,
@@ -845,7 +866,8 @@ function make_copula_clusters(
     n_cluster::Int,
     load_table::RawScenarioTable,
     hydro_table::RawScenarioTable,
-    generator_sources;
+    generator_sources,
+    rng;
     n_init::Int = 100,
 )
     source_tables = _copula_source_tables(copulas_to_use, load_table, hydro_table, generator_sources)
@@ -867,7 +889,7 @@ function make_copula_clusters(
         end
 
         X = permutedims(reduce(hcat, dims))
-        cluster_of = _best_kmeans(X, n_cluster; n_init)
+        cluster_of = _best_kmeans(X, n_cluster, rng; n_init, season)
 
         for (i, (year, offset)) in enumerate(candidates)
             push!(rows, (Season = String(season), Year = year, SampleIndex = offset, ClusterGroup = cluster_of[i]))
@@ -1177,6 +1199,7 @@ function generate_scenario_csv!(data_folder, periods, params::EmpireParams, sets
             load_table,
             hydro_table,
             generator_sources,
+            rng,
         )
     end
     copula_clusters = !fixed_sample && copula_clusters_use ? _read_copula_clusters(data_folder) : nothing

@@ -43,6 +43,7 @@ end
     test_create_model_with_raw_csv_scenarios()
     test_generate_scenarios_without_model()
     test_write_scenario_sampling_key_artifacts()
+    test_write_scenario_copula_cluster_artifacts()
     test_copula_clusters_make_writes_csv()
     test_copula_clusters_use_samples_from_clusters()
     test_copula_clusters_use_without_make_errors()

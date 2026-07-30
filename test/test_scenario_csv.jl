@@ -581,7 +581,8 @@ function test_copula_clusters_make_writes_csv()
             2,
             load_table,
             hydro_table,
-            generator_sources;
+            generator_sources,
+            MersenneTwister(1);
             n_init = 5,
         )
 
@@ -595,6 +596,22 @@ function test_copula_clusters_make_writes_csv()
         csv_rows = collect(CSV.File(path; normalizenames = false))
         @test length(csv_rows) == length(rows)
         @test Set(string.(propertynames(csv_rows[1]))) == Set(["Season", "Year", "SampleIndex", "ClusterGroup"])
+
+        # Clustering consumes the scenario RNG, so an equal seed reproduces the
+        # catalog exactly, including the canonical ClusterGroup labels.
+        repeated = OpenEMPIRE.make_copula_clusters(
+            root,
+            OpenEMPIRE.REGULAR_SCENARIO_SEASONS,
+            4,
+            ["electricload"],
+            2,
+            load_table,
+            hydro_table,
+            generator_sources,
+            MersenneTwister(1);
+            n_init = 5,
+        )
+        @test repeated == rows
     end
 end
 
@@ -614,7 +631,8 @@ function test_copula_clusters_use_samples_from_clusters()
             2,
             load_table,
             hydro_table,
-            generator_sources;
+            generator_sources,
+            MersenneTwister(1);
             n_init = 5,
         )
         clusters = OpenEMPIRE._read_copula_clusters(root)
@@ -1306,6 +1324,61 @@ Period,Scenario,Season,Year,Month,Hour
         disabled_config = merge(config, Dict("use_scenario_generation" => false))
         @test OpenEMPIRE.write_scenario_artifacts(disabled_result, dataset, disabled_config) === nothing
         @test !ispath(joinpath(disabled_result, "Input", "ScenarioData", "sampling_key.csv"))
+    end
+end
+
+function test_write_scenario_copula_cluster_artifacts()
+    mktempdir() do root
+        dataset = joinpath(root, "dataset")
+        scenario_dir = joinpath(dataset, "ScenarioData")
+        _write_csv(
+            joinpath(scenario_dir, "sampling_key.csv"),
+            """
+Period,Scenario,Season,Year,Month,Hour
+1,1,winter,2020,1,4
+""",
+        )
+        copula_clusters = _write_csv(
+            OpenEMPIRE._copula_cluster_path(dataset),
+            "Season,Year,SampleIndex,ClusterGroup\nwinter,2020,0,0\nwinter,2020,1,1\n",
+        )
+
+        config = Dict(
+            "use_scenario_generation" => true,
+            "use_fixed_sample" => false,
+            "number_of_scenarios" => 1,
+            "length_of_regular_season" => 24,
+            "regular_seasons" => ["winter"],
+            "copula_clusters_make" => true,
+            "copula_clusters_use" => true,
+            "copulas_to_use" => ["electricload"],
+            "n_cluster" => 2,
+        )
+
+        result_dir = joinpath(root, "results")
+        OpenEMPIRE.write_scenario_artifacts(result_dir, dataset, config; seed = 3)
+
+        archived_copula = joinpath(result_dir, "Input", "ScenarioData", "copula_clusters.csv")
+        @test read(archived_copula, String) == read(copula_clusters, String)
+
+        metadata = YAML.load_file(joinpath(result_dir, "Input", "scenario_metadata.yaml"))
+        @test metadata["copula_clusters_make"] == true
+        @test metadata["copula_clusters_use"] == true
+        @test metadata["copulas_to_use"] == ["electricload"]
+        @test metadata["source_copula_clusters"] == copula_clusters
+        @test metadata["archived_copula_clusters"] ==
+              joinpath("Input", "ScenarioData", "copula_clusters.csv")
+
+        # Disabled copula clustering must not archive the catalog or claim it in metadata.
+        plain_result = joinpath(root, "plain")
+        plain_config = merge(
+            config,
+            Dict("copula_clusters_make" => false, "copula_clusters_use" => false),
+        )
+        OpenEMPIRE.write_scenario_artifacts(plain_result, dataset, plain_config)
+        @test !ispath(joinpath(plain_result, "Input", "ScenarioData", "copula_clusters.csv"))
+        plain_metadata = YAML.load_file(joinpath(plain_result, "Input", "scenario_metadata.yaml"))
+        @test !haskey(plain_metadata, "archived_copula_clusters")
     end
 end
 
