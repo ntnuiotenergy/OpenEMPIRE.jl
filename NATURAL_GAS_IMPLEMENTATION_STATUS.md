@@ -231,9 +231,12 @@ Next immediate actions:
    `test_runner_staging.jl` do. That supports three PRs rather than two:
    deterministic gas core, gas OOS/runner integration, then the stochastic axis.
 2. Split the gas-price scenario axis into the following fresh stochastic PR.
-3. Attribute the seven-period HiGHS `OTHER_ERROR`. The reserve and storage rows
-   are now conditioned as InternalEMPIRE conditions them, which removes the most
-   plausible cause, but the run has not been repeated.
+3. The former seven-period HiGHS `OTHER_ERROR` has been superseded and
+   attributed. Both HiGHS and Gurobi identify the North-Sea-enabled reduced
+   model as infeasible; Gurobi's IIS contains only North Sea
+   investment/transmission constraints and bounds at HelgoländerBucht. With
+   North Sea disabled, the complete seven-period gas model solves to optimality.
+   See `docs/natural_gas_equivalence_assurance.md`.
 
 ### Newly discovered source-data issue
 
@@ -302,14 +305,13 @@ Next immediate actions:
   Solstorm/validation/time/model-solve tests). One pre-existing optional Python
   comparison was reported as broken/skipped because its temporary raw fixture
   does not contain `Sets/Generator.csv`.
-- Complete seven-period, one-weather-scenario `full_model_int` gas build:
-  299,586 variables and 371,975 constraints; build 26.72 s; approximately
-  13.08 GiB cumulative allocations and 2.30 GB maximum RSS. The attempted
-  HiGHS solve returned `OTHER_ERROR`, so this is build evidence only.
-- Reduced one-period deterministic `full_model_int` gas smoke solve: OPTIMAL
-  and FEASIBLE_POINT, objective `9.479417173693846e11`, 42,798 variables,
-  53,153 constraints, build 26.53 s, solve 0.394 s, and approximately 1.77 GB
-  maximum RSS.
+- Historical pre-review full-model evidence: a complete seven-period,
+  one-weather-scenario gas build produced 299,586 variables and 371,975
+  constraints, but its HiGHS solve returned `OTHER_ERROR`. A reduced
+  one-period solve returned objective `9.479417173693846e11`. Both results have
+  since been superseded: the former was attributed to an unrelated North Sea
+  conflict and the latter used the zero-priced-gas defect. Corrected evidence
+  is recorded under "After the 2026-07-30 review fixes" below.
 - The full-dataset smoke exposed a pre-existing empty-profile construction for
   generators without fuel/efficiency entries. `preprocess_operational_cost`
   now skips those generators before constructing a `StrategicProfile`.
@@ -396,6 +398,25 @@ Next immediate actions:
   key is no longer rewritten, so no manual restoration is needed.
 - PR #30 suite after its minimal fix: PASS, with CSV rising from 63 to 84
   assertions on the new `full_model_int` dataset test.
+- Repeated the corrected one-period `full_model_int` solve at the exact prior
+  42,798-variable/20-hour scale: HiGHS OPTIMAL and FEASIBLE_POINT, objective
+  `9.523177899833549e11`, build 26.71 s, solve 0.54 s. This replaces the invalid
+  zero-priced-gas objective.
+- Repeated the seven-period/one-weather/20-hour model with both HiGHS and
+  Gurobi. With North Sea enabled both report INFEASIBLE. Gurobi's IIS contains
+  `max_inv_tech`, `max_inst_tech`, `wind_farm_transmission_cap`,
+  `installed_cap_gen`, `trans_track_cap`, and associated bounds at
+  HelgoländerBucht; no natural-gas family appears.
+- With North Sea disabled, the seven-period gas model is OPTIMAL and
+  FEASIBLE_POINT in Gurobi: 299,586 variables, 371,975 structural constraints,
+  objective `4.753786325741043e18`, build 27.93 s, solve 2.00 s. The objective
+  is dominated by electric load shedding in the deliberately reduced temporal
+  representation and is not a calibrated planning result.
+- Added `docs/natural_gas_equivalence_assurance.md`, mapping each overlapping
+  gas equation directly to InternalEMPIRE commit
+  `14675a780129e11d03b9e9f4a03fb2649c715346`, recording the numerical evidence,
+  intentional differences, and the remaining bar for an end-to-end
+  unmodified-reference claim.
 
 ## Working tree summary
 

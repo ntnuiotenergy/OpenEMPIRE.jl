@@ -95,6 +95,10 @@ so does not exercise `preprocess_operational_cost`; gas marginal cost is covered
 by `test_gas_marginal_cost_without_a_fuel_price` and
 `test_full_model_int_gas_generators_are_priced` instead.
 
+For the direct line-by-line mapping to `InternalEMPIRE/empire.py`, corrected
+full-dataset solves, known whole-model differences, and the precise limit of
+the current equivalence claim, see `natural_gas_equivalence_assurance.md`.
+
 ## Performance diagnostics
 
 `BenchmarkTools` is kept out of the runtime dependency set. Run the
