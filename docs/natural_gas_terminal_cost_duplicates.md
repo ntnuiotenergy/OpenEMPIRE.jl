@@ -47,6 +47,19 @@ overwritten.
 This gives OpenEMPIRE.jl the same effective values as the current Python model
 while making the data decision visible and reproducible.
 
+## Validate the converted dataset
+
+Run the standard-library validator after regeneration or transfer:
+
+```bash
+python3 scripts/validate_full_model_int_dataset.py
+```
+
+It checks the complete manifest inventory, byte counts, SHA-256 hashes and CSV
+row counts; exact gas schemas; foreign keys; period coverage; uniqueness,
+finiteness and non-negativity; terminal and transport completeness; and that
+each audited selected value is the value present in the canonical CSV.
+
 ## Recommended upstream correction
 
 The source workbook should eventually contain one intentional row per key.
