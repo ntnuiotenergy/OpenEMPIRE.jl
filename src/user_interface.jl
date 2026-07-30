@@ -174,6 +174,13 @@ function create_model(
 
     _report_progress(progress, "Build 8/12: validating parameters")
     OpenEMPIRE.validate(params; sets, periods, strict = false)
+    if gas_enabled
+        gas_issues = OpenEMPIRE.validate_natural_gas(params, sets, periods)
+        isempty(gas_issues) || throw(ArgumentError(
+            "Natural-gas input validation found $(length(gas_issues)) issue(s):\n  - " *
+            join(gas_issues, "\n  - "),
+        ))
+    end
 
     _report_progress(progress, "Build 9/12: initializing JuMP model")
     emp = if isnothing(optimizer)
