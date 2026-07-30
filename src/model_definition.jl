@@ -32,7 +32,13 @@ function _report_progress(progress, message)
     return nothing
 end
 
-function create_variables(emp::JuMP.Model, sets, periods::TimeStruct.TimeStructure; progress = nothing)
+function create_variables(
+    emp::JuMP.Model,
+    sets,
+    periods::TimeStruct.TimeStructure;
+    natural_gas::Bool = false,
+    progress = nothing,
+)
 
     # Index sets
     N = nodes(sets)
@@ -110,10 +116,19 @@ function create_variables(emp::JuMP.Model, sets, periods::TimeStruct.TimeStructu
     for n in N, t in T
         unsafe_insertvar!(loadShed, n, t)
     end
+    natural_gas && create_natural_gas_variables!(emp, sets, periods)
     return
 end
 
-function create_objective(emp::JuMP.Model, sets, par, periods::TimeStructure, discounter::Discounter; progress = nothing)
+function create_objective(
+    emp::JuMP.Model,
+    sets,
+    par,
+    periods::TimeStructure,
+    discounter::Discounter;
+    natural_gas::Bool = false,
+    progress = nothing,
+)
     @info "Creating objective function"
     _report_progress(progress, "Creating objective function")
     N = nodes(sets)
@@ -126,6 +141,12 @@ function create_objective(emp::JuMP.Model, sets, par, periods::TimeStructure, di
 
     shed = emp[:loadShed]
     genOp = emp[:genOperational]
+    gas_costs = natural_gas ?
+                natural_gas_objective_expressions(emp, sets, par, periods, discounter) :
+                (
+        terminal_import = JuMP.AffExpr(0.0),
+        transport_shedding = JuMP.AffExpr(0.0),
+    )
 
     return @objective(
         emp,
@@ -143,12 +164,19 @@ function create_objective(emp::JuMP.Model, sets, par, periods::TimeStructure, di
                     sum(gen_marginal_cost(par, g, t) * genOp[n, g, t] for n in N for g in generators(sets, n); init = 0)
                 )
             for t in periods
-        )
+        ) + gas_costs.terminal_import + gas_costs.transport_shedding
     )
 end
 
 # Create all constraints in the model
-function create_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
+function create_constraints(
+    emp::JuMP.Model,
+    sets,
+    par,
+    periods::TimeStructure;
+    natural_gas::Bool = false,
+    progress = nothing,
+)
     @info "Creating constraints"
     _report_progress(progress, "Creating constraints")
 
@@ -169,13 +197,19 @@ function create_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; 
         flow_balance[n in N, t in T],
         sum(genOp[n, g, t] for g in G) + sum(discharge_eff(par, s) * storDischarge[n, s, t] - storCharge[n, s, t] for s in storages(sets, n)) +
             sum(line_eff(par, m, n) * trOp[m, n, t] for (m, n, t) in SparseVariables.select(trOp, :, n, t)) - sum(trOp[n, :, t]) +
-            shed[n, t] == load(par, n, t)
+            shed[n, t] -
+            (
+                natural_gas ?
+                natural_gas_pipeline_electricity_demand(emp, sets, par, n, t) :
+                0.0
+            ) == load(par, n, t)
     )
 
     create_generator_constraints(emp, sets, par, periods; progress)
     create_storage_constraints(emp, sets, par, periods; progress)
     create_transmission_constraints(emp, sets, par, periods; progress)
     create_emission_constraints(emp, sets, par, periods; progress)
+    natural_gas && create_natural_gas_constraints!(emp, sets, par, periods)
     return nothing
 
 end
@@ -471,6 +505,7 @@ function objective_component_expressions(emp::JuMP.Model, sets, par, periods::Ti
     storInvCapEn = emp[:storENInvCap]
     shed = emp[:loadShed]
     genOp = emp[:genOperational]
+    gas_costs = natural_gas_objective_expressions(emp, sets, par, periods, discounter)
 
     function generator_investment_expr(sp)
         total = JuMP.AffExpr(0.0)
@@ -519,6 +554,8 @@ function objective_component_expressions(emp::JuMP.Model, sets, par, periods::Ti
             objective_weight(t, discounter; type = "avg_year") * generator_operation_expr(t)
             for t in periods
         ),
+        natural_gas_terminal_import = gas_costs.terminal_import,
+        natural_gas_transport_shedding = gas_costs.transport_shedding,
     )
 end
 
