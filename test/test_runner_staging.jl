@@ -1,5 +1,56 @@
 include(joinpath(@__DIR__, "..", "scripts", "run_julia_empire.jl"))
 
+function test_natural_gas_manifest_input_provenance()
+    mktempdir() do root
+        for relative in (
+            joinpath("NaturalGas", "TerminalCost_stochastic.csv"),
+            joinpath("Sets", "NaturalGasNodes.csv"),
+            joinpath("Transport", "NaturalGasDemand.csv"),
+        )
+            path = joinpath(root, relative)
+            mkpath(dirname(path))
+            write(path, "fixture:$relative\n")
+        end
+        provenance_path = joinpath(root, "conversion_manifest.json")
+        write(provenance_path, "{\"schema_version\":1}\n")
+        config = Dict{String, Any}(
+            "natural_gas" => true,
+            "number_of_scenarios" => 2,
+            "number_of_gas_scenarios" => 3,
+        )
+        info = _natural_gas_input_info(root, config)
+        @test info["enabled"]
+        @test info["weather_scenarios"] == 2
+        @test info["gas_scenarios"] == 3
+        @test info["combined_scenarios"] == 6
+        @test [file["path"] for file in info["files"]] == [
+            joinpath("NaturalGas", "TerminalCost_stochastic.csv"),
+            joinpath("Sets", "NaturalGasNodes.csv"),
+            joinpath("Transport", "NaturalGasDemand.csv"),
+        ]
+        @test all(
+            length(file["sha256"]) == 64 for file in info["files"]
+        )
+        @test info["conversion_provenance"]["path"] == provenance_path
+        @test length(info["conversion_provenance"]["sha256"]) == 64
+
+        disabled = _natural_gas_input_info(
+            joinpath(root, "missing-gas-inputs"),
+            Dict{String, Any}(
+                "natural_gas" => false,
+                "number_of_scenarios" => 2,
+                "number_of_gas_scenarios" => 99,
+            ),
+        )
+        @test disabled == Dict{String, Any}(
+            "enabled" => false,
+            "gas_scenarios" => 1,
+            "files" => Any[],
+            "conversion_provenance" => nothing,
+        )
+    end
+end
+
 function test_stage_run_inputs_copies_without_mutating_source()
     mktempdir() do root
         source = joinpath(root, "source")

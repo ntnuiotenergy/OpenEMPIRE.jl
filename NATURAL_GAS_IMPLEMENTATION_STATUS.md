@@ -1,6 +1,6 @@
 # Natural Gas Implementation Status
 
-Last updated: 2026-07-30 11:23 Europe/Oslo
+Last updated: 2026-07-30 11:42 Europe/Oslo
 
 ## Objective
 
@@ -24,8 +24,16 @@ verification milestone.
   bounded commits to fresh main-based branches after prerequisites merge.
 - Bounded evidence commits created:
   - `c6ac80e` — reproducible full-model CSV dataset, converter, audits, config;
-  - `64cbad6` — typed loading, scenario axes, gas equations, and objective.
-  - The result/OOS/test/parity commit is being prepared next.
+  - `64cbad6` — typed loading, scenario axes, gas equations, and objective;
+  - `743957b` — results, OOS/full-year integration, parity, and tests;
+  - `79b87c7` — standalone converted-dataset validation.
+- Clean main-based dataset worktree:
+  `/Users/torgrim/Documents/NTNU/iot/empire/OpenEMPIRE.jl-full-model-int-dataset-pr`
+- Dataset branch `torgrim/full-model-int-dataset` has been pushed.
+- PR #30 is open, non-draft, mergeable, and clean against `main`:
+  <https://github.com/ntnuiotenergy/OpenEMPIRE.jl/pull/30>
+- PR #30 contains no natural-gas model, OOS, north-sea, copula, or unrelated
+  module implementation.
 - Dirty checkouts that must remain untouched:
   - `OpenEMPIRE.jl` (`torgrim/north-sea`)
   - `OpenEMPIRE.jl-workbench` (`torgrim/workbench`)
@@ -60,9 +68,12 @@ verification milestone.
   - `NaturalGas/terminal_cost_duplicate_audit.csv`;
   - `conversion_manifest.json` with hashes and row counts.
 - Added `docs/natural_gas_terminal_cost_duplicates.md`.
-- Known manifest correction already patched in the converter but not regenerated
-  yet: report 35 duplicate keys per source table (70 discarded rows total), not
-  one ambiguous total.
+- The final manifest reports 35 duplicate keys per terminal-cost table
+  (70 discarded rows total), eight conflicting deterministic keys, and one
+  conflicting reserve key.
+- Added `scripts/validate_full_model_int_dataset.py`; it checks hashes, byte and
+  row counts, exact gas schemas, foreign keys, periods, uniqueness, finiteness,
+  non-negativity, completeness, and audited selected values.
 
 ### Typed data foundation
 
@@ -109,9 +120,10 @@ verification milestone.
 - Added conditional aggregation of all six native gas output families.
 - Added full-year output mapping for 24 independently solved 365-hour chunks;
   gas rows receive `HourFullYear=1:8760` and dummy-peak rows are removed.
-- Added 105 deterministic natural-gas tests covering strict loading, scenario
+- Added 139 deterministic natural-gas tests covering strict loading, scenario
   mapping, weather replication, model equations, results, OOS compatibility,
-  and full-year gas aggregation.
+  full-year gas aggregation, active storage, transport shedding, zero supply,
+  infeasibility, emission caps, module-off artifacts, and solved 3×3 scenarios.
 
 ## Current work in progress
 
@@ -120,12 +132,11 @@ verification and delivery preparation rather than missing core model behavior.
 
 Next immediate actions:
 
-1. Reconcile the evidence branch with merged filter/performance code. The OOS
-   evidence history does not contain the scenario-filter commits even though
-   remote main does. Avoid merging while uncommitted; first reach a coherent
-   compile/test checkpoint.
-2. Split the finished evidence into bounded dataset, core-model, and
-   stochastic/OOS/test commits suitable for later transplant.
+1. Commit the final acceptance tests and live handoff checkpoint.
+2. After required runner/OOS/north-sea PRs merge, transplant the deterministic
+   gas implementation onto fresh `main`; do not merge this 94-commit evidence
+   ancestry.
+3. Split the gas-price scenario axis into the following fresh stochastic PR.
 
 ### Newly discovered source-data issue
 
@@ -227,32 +238,33 @@ Next immediate actions:
 - The suite rewrote the tracked Excel sampling key as part of scenario
   generation; it was restored exactly to `HEAD`, and there are no unrelated
   tracked test-data changes.
+- Expanded focused natural-gas suite: 139/139 PASS. New coverage includes:
+  module-off absence of gas variables/files; two-hour active storage with
+  seasonal reset; transport conversion and shedding cost; zero terminal and
+  pipeline capacity; explicitly infeasible no-shed supply; zero emission cap;
+  complete reserve requirements; solved 3×3 weather × gas scenarios; and both
+  scenario axes in result files.
+- Gas-input manifest/checksum provenance test: 9/9 PASS, including the
+  module-off missing-file bypass.
+- PR #30 standalone validator after reserve completeness: PASS for all 85
+  files, seven periods, 70 audited terminal-cost duplicates, and one audited
+  reserve duplicate.
+- Final complete Julia suite with 139 gas and 94 runner tests: PASS, exit code
+  0. All other counts remain green (Excel 66, CSV 63, scenarios 164 + one
+  pre-existing optional broken/skip, OOS 161, full-year 168, aggregation 55,
+  SGE 69, staging 108, cleanup 45, remote 25, submission 26, validation 16,
+  TimeStruct 21, solve 3).
+- The final suite-generated Excel sampling key was again restored byte-for-byte
+  to `HEAD`.
 
 ## Working tree summary
 
-Expected uncommitted areas:
+The evidence branch is committed through `79b87c7`. The only expected
+uncommitted checkpoint is the final expanded acceptance coverage:
 
-- `config/run_full_model_int.yaml`
-- `data/full_model_int/`
-- `docs/natural_gas_terminal_cost_duplicates.md`
-- `docs/natural_gas_parity.md`
-- `scripts/convert_internalempire_xlsx.py`
-- `scripts/natural_gas_parity_julia.jl`
-- `scripts/natural_gas_parity_python.py`
-- `scripts/compare_natural_gas_parity.py`
-- `scripts/benchmark_natural_gas.jl`
-- `src/empire_sets.jl`
+- `scripts/validate_full_model_int_dataset.py`
 - `src/empire_structs.jl`
-- `src/read_csv.jl`
-- `src/scenario.jl`
-- `src/natural_gas.jl`
-- `src/model_definition.jl`
-- `src/results.jl`
-- `src/out_of_sample.jl`
-- `src/oos_aggregation.jl`
-- `src/user_interface.jl`
-- `scripts/run_julia_empire.jl`
 - `test/test_natural_gas.jl`
-- `test/data/natural_gas_parity/`
+- `test/test_runner_staging.jl`
 - `test/runtests.jl`
 - this status file

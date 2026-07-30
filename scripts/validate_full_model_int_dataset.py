@@ -290,8 +290,20 @@ def validate_gas_tables(dataset: Path, manifest: dict[str, object]) -> None:
         reserve_rows,
         ("Reserves_(tons)",),
     )
-    if not {key[0] for key in reserve_keys} <= gas_nodes:
+    reserve_nodes = {key[0] for key in reserve_keys}
+    if not reserve_nodes <= gas_nodes:
         fail("NaturalGas/Reserves.csv contains an unknown node")
+    expected_reserve_nodes = {
+        node
+        for node, terminal in terminal_pairs
+        if terminal.lower() in {"domesticproduction", "pipelineimport"}
+    }
+    if reserve_nodes != expected_reserve_nodes:
+        fail(
+            "NaturalGas/Reserves.csv is incomplete or has unexpected nodes: "
+            f"missing={sorted(expected_reserve_nodes-reserve_nodes)}, "
+            f"extra={sorted(reserve_nodes-expected_reserve_nodes)}"
+        )
 
     storage_rows, storage_keys = unique_keys(
         dataset,

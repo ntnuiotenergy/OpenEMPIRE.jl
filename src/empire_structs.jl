@@ -503,11 +503,17 @@ function _check_natural_gas_params!(
     expected_transport = Set(
         (node, period) for node in gas_sets.OnshoreNode for period in 1:period_count
     )
+    expected_reserves = Set(
+        node
+        for (node, terminal) in gas_sets.TerminalsOfNode
+        if lowercase(terminal) in ("domesticproduction", "pipelineimport")
+    )
     for (name, expected, actual) in (
         ("pipelineCapacity", expected_pipeline, Set(keys(gas.pipelineCapacity))),
         ("terminalCapacity", expected_terminal_capacity, Set(keys(gas.terminalCapacity))),
         ("terminalCost", expected_terminal_cost, Set(keys(gas.terminalCost))),
         ("transportDemand", expected_transport, Set(keys(gas.transportDemand))),
+        ("reserves", expected_reserves, Set(keys(gas.reserves))),
     )
         missing = setdiff(expected, actual)
         isempty(missing) ||

@@ -45,6 +45,8 @@ end
     test_natural_gas_scenario_mapping_and_costs()
     test_weather_profiles_replicate_across_gas_scenarios()
     test_natural_gas_model_and_results()
+    test_natural_gas_storage_transport_and_supply_edges()
+    test_natural_gas_three_by_three_scenarios()
     test_natural_gas_oos_compatibility_and_full_year_streaming()
 end
 
@@ -66,6 +68,7 @@ end
 end
 
 @testset "Runner staging" begin
+    test_natural_gas_manifest_input_provenance()
     test_stage_run_inputs_copies_without_mutating_source()
     test_resolve_single_tree_oos_run_spec()
     test_reject_incomplete_oos_runner_options()

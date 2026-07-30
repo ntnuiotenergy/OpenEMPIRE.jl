@@ -73,17 +73,31 @@ function _natural_gas_solved_fixture(
     weather_scenarios::Int = 1,
     gas_scenarios::Int = 1,
     pipeline_power::Float64 = 0.024,
+    pipeline_capacity::Float64 = 100.0,
+    terminal_capacity::Float64 = 100.0,
+    storage_capacity_b::Float64 = 0.0,
+    transport_demand_b_ton_per_hour::Float64 = 0.0,
+    transport_curtail_cost::Float64 = 100000.0,
+    load_b::Vector{Float64} = [10.0],
+    generator_marginal_cost::Float64 = 0.0,
+    generator_capacity::Float64 = 100.0,
+    fix_load_shed::Bool = false,
+    natural_gas_gate::Bool = true,
+    co2_content::Float64 = 0.0,
+    co2_cap::Union{Nothing, Float64} = nothing,
 )
     combined_scenarios = weather_scenarios * gas_scenarios
+    hour_count = length(load_b)
+    hour_count > 0 || throw(ArgumentError("load_b must contain at least one hour"))
     periods = OpenEMPIRE.create_timestruct(
         1,
         5,
         1,
-        1,
+        hour_count,
         0,
         0,
         combined_scenarios;
-        operational_hours_per_year = 1,
+        operational_hours_per_year = hour_count,
     )
     gas_sets = OpenEMPIRE.NaturalGasSets(
         Node = ["A", "B"],
@@ -96,7 +110,6 @@ function _natural_gas_solved_fixture(
     sets = OpenEMPIRE.EmpireSets(
         Node = ["A", "B"],
         Generator = ["GasCCGT"],
-        ThermalGenerators = ["GasCCGT"],
         Technology = ["Gas"],
         TransmissionType = ["AC"],
         GeneratorsOfTechnology = [("Gas", "GasCCGT")],
@@ -108,16 +121,31 @@ function _natural_gas_solved_fixture(
         for scenario in 1:gas_scenarios
     )
     gas = OpenEMPIRE.NaturalGasParams(
-        pipelineCapacity = Dict(("A", "B") => 100.0),
+        pipelineCapacity = Dict(("A", "B") => pipeline_capacity),
         pipelinePowerDemandPerTon = pipeline_power,
         terminalCost = terminal_cost,
-        terminalCapacity = Dict(("A", "DomesticProduction", 1) => 100.0),
-        storageCapacity = Dict("A" => 0.0, "B" => 0.0),
+        terminalCapacity = Dict(
+            ("A", "DomesticProduction", 1) => terminal_capacity,
+        ),
+        storageCapacity = Dict("A" => 0.0, "B" => storage_capacity_b),
         reserves = Dict("A" => 1.0e9),
-        transportDemand = Dict(("A", 1) => 0.0, ("B", 1) => 0.0),
+        transportDemand = Dict(
+            ("A", 1) => 0.0,
+            ("B", 1) =>
+                transport_demand_b_ton_per_hour * 8760 * 13.9,
+        ),
+        transportCurtailCost = transport_curtail_cost,
         weatherScenarioCount = weather_scenarios,
         gasScenarioCount = gas_scenarios,
     )
+    scenario_profiles(values) = StrategicProfile([
+        RepresentativeProfile([
+            ScenarioProfile([
+                OperationalProfile(copy(values))
+                for _ in 1:combined_scenarios
+            ]),
+        ]),
+    ])
     params = OpenEMPIRE.EmpireParams(
         WACC = 0.05,
         discountRate = 0.05,
@@ -126,9 +154,15 @@ function _natural_gas_solved_fixture(
             ("A", "GasCCGT") => FixedProfile(1.0),
             ("B", "GasCCGT") => FixedProfile(1.0),
         ),
-        genCO2Content = Dict("GasCCGT" => 0.0),
-        genMargCost = Dict("GasCCGT" => FixedProfile(0.0)),
-        sload = Dict("A" => FixedProfile(0.0), "B" => FixedProfile(10.0)),
+        genCO2Content = Dict("GasCCGT" => co2_content),
+        genMargCost = Dict(
+            "GasCCGT" => FixedProfile(generator_marginal_cost),
+        ),
+        CO2cap = isnothing(co2_cap) ? nothing : FixedProfile(co2_cap),
+        sload = Dict(
+            "A" => scenario_profiles(zeros(hour_count)),
+            "B" => scenario_profiles(load_b),
+        ),
         nodeLostLoadCost = Dict(
             "A" => FixedProfile(1.0e6),
             "B" => FixedProfile(1.0e6),
@@ -140,22 +174,36 @@ function _natural_gas_solved_fixture(
 
     model = JuMP.Model(HiGHS.Optimizer)
     JuMP.set_silent(model)
-    OpenEMPIRE.create_variables(model, sets, periods; natural_gas = true)
+    OpenEMPIRE.create_variables(
+        model,
+        sets,
+        periods;
+        natural_gas = natural_gas_gate,
+    )
     OpenEMPIRE.create_constraints(
         model,
         sets,
         params,
         periods;
-        natural_gas = true,
+        natural_gas = natural_gas_gate,
         include_investment_constraints = false,
     )
     strategic_period = only(collect(strat_periods(periods)))
     for node in ("A", "B")
         JuMP.fix(
             model[:genInstalledCap][node, "GasCCGT", strategic_period],
-            100.0;
+            generator_capacity;
             force = true,
         )
+    end
+    if fix_load_shed
+        for node in ("A", "B"), operational_period in periods
+            JuMP.fix(
+                model[:loadShed][node, operational_period],
+                0.0;
+                force = true,
+            )
+        end
     end
     discounter = Discounter(0.05, 1, periods)
     OpenEMPIRE.create_objective(
@@ -164,7 +212,7 @@ function _natural_gas_solved_fixture(
         params,
         periods,
         discounter;
-        natural_gas = true,
+        natural_gas = natural_gas_gate,
     )
     JuMP.optimize!(model)
     return model, periods, sets, params, discounter
@@ -196,6 +244,18 @@ function test_natural_gas_csv_loading_and_validation()
             ("A", "DomesticProduction", 1, 2)
         ] == 200.0
         @test isempty(OpenEMPIRE.validate(params; sets, periods, strict = false))
+        empty!(params.NaturalGas.reserves)
+        reserve_error = try
+            OpenEMPIRE.validate(params; sets, periods)
+            nothing
+        catch error
+            error
+        end
+        @test reserve_error isa ArgumentError
+        @test occursin(
+            "NaturalGas.reserves is missing 1 required key",
+            sprint(showerror, reserve_error),
+        )
 
         malformed_cases = (
             (
@@ -445,6 +505,218 @@ function test_natural_gas_model_and_results()
         balance_rows = collect(CSV.File(joinpath(output_dir, "naturalGasBalance.csv")))
         @test all(abs(Float64(row.BalanceResidual_ton)) <= 1.0e-10 for row in balance_rows)
     end
+end
+
+function test_natural_gas_storage_transport_and_supply_edges()
+    module_off_model, module_off_periods, module_off_sets, module_off_params, _ =
+        _natural_gas_solved_fixture(natural_gas_gate = false)
+    @test JuMP.termination_status(module_off_model) == JuMP.MOI.OPTIMAL
+    @test !haskey(
+        JuMP.object_dictionary(module_off_model),
+        :ngTerminalImport,
+    )
+    module_off_time = only(collect(module_off_periods))
+    @test JuMP.value(
+        module_off_model[:genOperational][
+            "B",
+            "GasCCGT",
+            module_off_time,
+        ],
+    ) ≈ 10.0
+    mktempdir() do result_dir
+        output_dir = OpenEMPIRE.write_solution_tables(
+            result_dir,
+            module_off_model,
+            module_off_sets,
+            module_off_params,
+            module_off_periods,
+        )
+        @test !isfile(joinpath(output_dir, "ngTerminalImport.csv"))
+        @test !isfile(joinpath(output_dir, "naturalGasBalance.csv"))
+    end
+
+    storage_model, storage_periods, storage_sets, storage_params, storage_discounter =
+        _natural_gas_solved_fixture(
+            pipeline_capacity = 16.0,
+            storage_capacity_b = 10.0,
+            transport_demand_b_ton_per_hour = 1.0,
+            load_b = [69.5, 139.0],
+            generator_marginal_cost = 2.0,
+            generator_capacity = 200.0,
+        )
+    @test JuMP.termination_status(storage_model) == JuMP.MOI.OPTIMAL
+    storage_times = collect(storage_periods)
+    @test [
+        JuMP.value(storage_model[:ngTransmission]["A", "B", time])
+        for time in storage_times
+    ] ≈ [16.0, 16.0]
+    @test [
+        JuMP.value(storage_model[:ngStorageOperational]["B", time])
+        for time in storage_times
+    ] ≈ [10.0, 5.0]
+    @test [
+        JuMP.value(storage_model[:ngStorageCharge]["B", time])
+        for time in storage_times
+    ] ≈ [5.0, 0.0]
+    @test [
+        JuMP.value(storage_model[:ngStorageDischarge]["B", time])
+        for time in storage_times
+    ] ≈ [0.0, 5.0]
+    @test all(
+        JuMP.value(
+            storage_model[:transportNaturalGasDemandMet]["B", time],
+        ) ≈ 1.0 for time in storage_times
+    )
+    @test all(
+        JuMP.value(
+            storage_model[:transportNaturalGasDemandShed]["B", time],
+        ) ≈ 0.0 for time in storage_times
+    )
+    storage_components = OpenEMPIRE.objective_component_values(
+        storage_model,
+        storage_sets,
+        storage_params,
+        storage_periods,
+        storage_discounter,
+    )
+    @test storage_components.natural_gas_transport_shedding ≈ 0.0
+
+    shed_cost = 54321.0
+    transport_model, transport_periods, transport_sets, transport_params,
+    transport_discounter = _natural_gas_solved_fixture(
+        terminal_capacity = 0.0,
+        pipeline_capacity = 0.0,
+        pipeline_power = 0.0,
+        transport_demand_b_ton_per_hour = 1.0,
+        transport_curtail_cost = shed_cost,
+        load_b = [0.0],
+    )
+    transport_time = only(collect(transport_periods))
+    @test JuMP.termination_status(transport_model) == JuMP.MOI.OPTIMAL
+    @test JuMP.value(
+        transport_model[:transportNaturalGasDemandMet]["B", transport_time],
+    ) ≈ 0.0
+    @test JuMP.value(
+        transport_model[:transportNaturalGasDemandShed]["B", transport_time],
+    ) ≈ 1.0
+    transport_components = OpenEMPIRE.objective_component_values(
+        transport_model,
+        transport_sets,
+        transport_params,
+        transport_periods,
+        transport_discounter,
+    )
+    expected_shed_cost = shed_cost * OpenEMPIRE.objective_weight(
+        transport_time,
+        transport_discounter;
+        type = "avg_year",
+    )
+    @test transport_components.natural_gas_transport_shedding ≈
+          expected_shed_cost
+    @test JuMP.objective_value(transport_model) ≈ expected_shed_cost
+
+    zero_supply_model, zero_supply_periods, _, _, _ =
+        _natural_gas_solved_fixture(
+            terminal_capacity = 0.0,
+            pipeline_capacity = 0.0,
+            pipeline_power = 0.0,
+        )
+    zero_supply_time = only(collect(zero_supply_periods))
+    @test JuMP.termination_status(zero_supply_model) == JuMP.MOI.OPTIMAL
+    @test JuMP.value(
+        zero_supply_model[:ngTerminalImport][
+            "A",
+            "DomesticProduction",
+            zero_supply_time,
+        ],
+    ) ≈ 0.0
+    @test JuMP.value(zero_supply_model[:loadShed]["B", zero_supply_time]) ≈
+          10.0
+
+    infeasible_model, _, _, _, _ = _natural_gas_solved_fixture(
+        terminal_capacity = 0.0,
+        pipeline_capacity = 0.0,
+        pipeline_power = 0.0,
+        fix_load_shed = true,
+    )
+    @test JuMP.termination_status(infeasible_model) ==
+          JuMP.MOI.INFEASIBLE
+    @test JuMP.primal_status(infeasible_model) == JuMP.MOI.NO_SOLUTION
+
+    emission_cap_model, emission_cap_periods, _, _, _ =
+        _natural_gas_solved_fixture(
+            co2_content = 0.2,
+            co2_cap = 0.0,
+        )
+    emission_cap_time = only(collect(emission_cap_periods))
+    @test JuMP.termination_status(emission_cap_model) ==
+          JuMP.MOI.OPTIMAL
+    @test haskey(JuMP.object_dictionary(emission_cap_model), :emission_cap)
+    @test JuMP.value(
+        emission_cap_model[:genOperational][
+            "B",
+            "GasCCGT",
+            emission_cap_time,
+        ],
+    ) ≈ 0.0 atol = 1.0e-9
+    @test JuMP.value(
+        emission_cap_model[:loadShed]["B", emission_cap_time],
+    ) ≈ 10.0
+end
+
+function test_natural_gas_three_by_three_scenarios()
+    model, periods, sets, params, discounter = _natural_gas_solved_fixture(
+        weather_scenarios = 3,
+        gas_scenarios = 3,
+    )
+    @test JuMP.termination_status(model) == JuMP.MOI.OPTIMAL
+    @test length(model[:natural_gas_max_reserves]) == 9
+    expected_pipeline = 10.0 / (0.5 * params.NaturalGas.mwhPerTon)
+    expected_compressor = params.NaturalGas.pipelinePowerDemandPerTon *
+                          expected_pipeline
+    expected_import =
+        expected_pipeline +
+        expected_compressor / (0.5 * params.NaturalGas.mwhPerTon)
+    period_context = OpenEMPIRE._natural_gas_period_maps(periods, 3)
+    expected_objective = sum(
+        OpenEMPIRE.objective_weight(
+            operational_period,
+            discounter;
+            type = "avg_year",
+        ) *
+        expected_import *
+        OpenEMPIRE.natural_gas_terminal_cost(
+            params,
+            "A",
+            "DomesticProduction",
+            1,
+            period_context[operational_period].gas,
+        ) for operational_period in periods
+    )
+    @test JuMP.objective_value(model) ≈ expected_objective
+
+    mktempdir() do output_dir
+        OpenEMPIRE.write_natural_gas_csvs(
+            output_dir,
+            model,
+            sets,
+            params,
+            periods,
+        )
+        rows = collect(CSV.File(joinpath(output_dir, "ngTerminalImport.csv")))
+        @test Set(
+            (Int(row.WeatherScenario), Int(row.GasScenario)) for row in rows
+        ) == Set((weather, gas) for weather in 1:3 for gas in 1:3)
+    end
+    components = OpenEMPIRE.objective_component_values(
+        model,
+        sets,
+        params,
+        periods,
+        discounter,
+    )
+    @test components.natural_gas_terminal_import ≈
+          JuMP.objective_value(model)
 end
 
 function test_natural_gas_oos_compatibility_and_full_year_streaming()
