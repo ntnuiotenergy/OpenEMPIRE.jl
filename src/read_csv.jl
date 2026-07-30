@@ -54,30 +54,65 @@ function available_datasets(; root::AbstractString = default_input_data_root())
 end
 
 """
-    read_data(input; format=:auto)
+    read_data(input; format=:auto, natural_gas=false,
+              weather_scenarios=1, gas_scenarios=1)
 
 Read EMPIRE input data from either a CSV dataset folder or an Excel dataset
 folder. `format` can be `:auto`, `:csv`, or `:xlsx`.
 """
-function read_data(input::AbstractString; format::Symbol = :auto)
+function read_data(
+    input::AbstractString;
+    format::Symbol = :auto,
+    natural_gas::Bool = false,
+    weather_scenarios::Int = 1,
+    gas_scenarios::Int = 1,
+)
     actual_format = format === :auto ? _detect_input_format(input) : format
     if actual_format === :csv
-        return read_data_csv(input)
+        return read_data_csv(
+            input;
+            natural_gas,
+            weather_scenarios,
+            gas_scenarios,
+        )
     elseif actual_format === :xlsx
+        natural_gas && throw(ArgumentError(
+            "The natural-gas module requires the validated CSV dataset layout",
+        ))
         return read_data_xlsx(input)
     end
     throw(ArgumentError("Unsupported input format: $format. Expected :auto, :csv, or :xlsx."))
 end
 
-function read_data(dataset::CsvDataset; format::Symbol = :csv)
+function read_data(
+    dataset::CsvDataset;
+    format::Symbol = :csv,
+    natural_gas::Bool = false,
+    weather_scenarios::Int = 1,
+    gas_scenarios::Int = 1,
+)
     format in (:auto, :csv) ||
         throw(ArgumentError("CsvDataset can only be read with format :auto or :csv, got: $format"))
-    return read_data_csv(dataset_path(dataset))
+    return read_data_csv(
+        dataset_path(dataset);
+        natural_gas,
+        weather_scenarios,
+        gas_scenarios,
+    )
 end
 
-function read_data(dataset::XlsxDataset; format::Symbol = :xlsx)
+function read_data(
+    dataset::XlsxDataset;
+    format::Symbol = :xlsx,
+    natural_gas::Bool = false,
+    weather_scenarios::Int = 1,
+    gas_scenarios::Int = 1,
+)
     format in (:auto, :xlsx) ||
         throw(ArgumentError("XlsxDataset can only be read with format :auto or :xlsx, got: $format"))
+    natural_gas && throw(ArgumentError(
+        "The natural-gas module requires the validated CSV dataset layout",
+    ))
     return read_data_xlsx(dataset_path(dataset))
 end
 
@@ -107,6 +142,105 @@ _is_blank(x) = ismissing(x) || isempty(strip(string(x)))
 _string_cell(x) = strip(string(x))
 _float_cell(x) = x isa Real ? Float64(x) : parse(Float64, strip(string(x)))
 _int_cell(x) = x isa Integer ? Int(x) : parse(Int, strip(string(x)))
+
+function _validated_module_rows(
+    path::AbstractString,
+    expected_headers::Tuple;
+    alternate_headers::Tuple = (),
+)
+    try
+        rows = collect(CSV.File(path; normalizenames = false, strict = true))
+        isempty(rows) && throw(ArgumentError("Natural-gas CSV is empty: $path"))
+        headers = Tuple(String.(propertynames(first(rows))))
+        valid_headers = headers == expected_headers ||
+            (!isempty(alternate_headers) && headers == alternate_headers)
+        valid_headers || throw(ArgumentError(
+            "Natural-gas CSV $path has headers $(collect(headers)); expected " *
+            "$(collect(expected_headers))",
+        ))
+        return rows
+    catch err
+        err isa ArgumentError && rethrow()
+        throw(ArgumentError("Failed to parse natural-gas CSV $path: $(sprint(showerror, err))"))
+    end
+end
+
+function _module_string(path, row::Int, column::AbstractString, value)
+    _is_blank(value) && throw(ArgumentError(
+        "Malformed natural-gas CSV $path data row $row column $column: empty value",
+    ))
+    return _string_cell(value)
+end
+
+function _module_float(path, row::Int, column::AbstractString, value)
+    _is_blank(value) && throw(ArgumentError(
+        "Malformed natural-gas CSV $path data row $row column $column: empty value",
+    ))
+    parsed = try
+        value isa Real ? Float64(value) : parse(Float64, strip(string(value)))
+    catch
+        throw(ArgumentError(
+            "Malformed natural-gas CSV $path data row $row column $column: " *
+            "expected a number, got $(repr(value))",
+        ))
+    end
+    isfinite(parsed) || throw(ArgumentError(
+        "Malformed natural-gas CSV $path data row $row column $column: " *
+        "value must be finite, got $(repr(value))",
+    ))
+    return parsed
+end
+
+function _module_int(path, row::Int, column::AbstractString, value)
+    parsed = _module_float(path, row, column, value)
+    isinteger(parsed) || throw(ArgumentError(
+        "Malformed natural-gas CSV $path data row $row column $column: " *
+        "expected an integer, got $(repr(value))",
+    ))
+    try
+        return Int(parsed)
+    catch
+        throw(ArgumentError(
+            "Malformed natural-gas CSV $path data row $row column $column: " *
+            "integer is out of range, got $(repr(value))",
+        ))
+    end
+end
+
+function _insert_unique_module_value!(values, key, value, path, row)
+    haskey(values, key) && throw(ArgumentError(
+        "Duplicate natural-gas key $key in $path at data row $row",
+    ))
+    values[key] = value
+    return values
+end
+
+function _read_module_vector(path, header::AbstractString)
+    rows = _validated_module_rows(path, (String(header),))
+    values = String[]
+    for (index, row) in enumerate(rows)
+        push!(values, _module_string(path, index + 1, header, row[1]))
+    end
+    allunique(values) || throw(ArgumentError("Duplicate natural-gas value in $path"))
+    return values
+end
+
+function _read_module_pairs(path, headers::Tuple{<:AbstractString, <:AbstractString})
+    expected = (String(headers[1]), String(headers[2]))
+    rows = _validated_module_rows(path, expected)
+    values = Tuple{String, String}[]
+    for (index, row) in enumerate(rows)
+        push!(
+            values,
+            (
+                _module_string(path, index + 1, headers[1], row[1]),
+                _module_string(path, index + 1, headers[2], row[2]),
+            ),
+        )
+    end
+    allunique(values) || throw(ArgumentError("Duplicate natural-gas key in $path"))
+    return values
+end
 
 function _read_vector_csv(path::AbstractString; col::Int = 1)
     values = String[]
@@ -241,19 +375,59 @@ function _read_strategic_profile_csv(
     return StrategicProfile(fixed)
 end
 
+function _read_natural_gas_sets_csv(
+    dir::AbstractString,
+    generators::AbstractVector{<:AbstractString},
+)
+    sets_dir = "Sets"
+    gas_nodes = _read_module_vector(
+        _required_csv(dir, sets_dir, "NaturalGasNodes.csv"),
+        "NaturalGasNodes",
+    )
+    gas_links = _read_module_pairs(
+        _required_csv(dir, sets_dir, "NaturalGasDirectionalLines.csv"),
+        ("NodeFrom", "NodeTo"),
+    )
+    terminals = _read_module_vector(
+        _required_csv(dir, sets_dir, "NaturalGasTerminals.csv"),
+        "NaturalGasTerminals",
+    )
+    terminal_nodes = _read_module_pairs(
+        _required_csv(dir, sets_dir, "NaturalGasTerminalsOfNode.csv"),
+        ("Node", "NG_Terminal_Type"),
+    )
+    onshore_nodes = _read_module_vector(
+        _required_csv(dir, sets_dir, "OnshoreNode.csv"),
+        "OnshoreNode",
+    )
+    gas_generators = [generator for generator in generators
+                      if occursin("gas", lowercase(generator))]
+    return NaturalGasSets(
+        Node = gas_nodes,
+        DirectionalLink = gas_links,
+        Terminal = terminals,
+        TerminalsOfNode = terminal_nodes,
+        OnshoreNode = onshore_nodes,
+        Generator = gas_generators,
+    )
+end
+
 """
     read_sets_csv(dir)
 
 Read EMPIRE sets from a CSV dataset folder using the Python/CSV dataset layout.
 """
-function read_sets_csv(dir::AbstractString)
+function read_sets_csv(dir::AbstractString; natural_gas::Bool = false)
     @info "Reading CSV sets from $dir"
 
     sets_dir = "Sets"
     offshore_node_path = _optional_csv(dir, sets_dir, "OffshoreNode.csv")
 
+    generators = _read_vector_csv(_required_csv(dir, sets_dir, "Generator.csv"))
+    gas_sets = natural_gas ? _read_natural_gas_sets_csv(dir, generators) : NaturalGasSets()
+
     return OpenEMPIRE.EmpireSets(
-        Generator = _read_vector_csv(_required_csv(dir, sets_dir, "Generator.csv")),
+        Generator = generators,
         ThermalGenerators = _read_vector_csv(_required_csv(dir, sets_dir, "ThermalGenerators.csv")),
         HydroGenerator = _read_vector_csv(_required_csv(dir, sets_dir, "HydroGenerator.csv")),
         RegHydroGenerator = _read_vector_csv(_required_csv(dir, sets_dir, "RegHydroGenerator.csv")),
@@ -269,7 +443,198 @@ function read_sets_csv(dir::AbstractString)
         GeneratorsOfTechnology = _read_tuple2_csv(_required_csv(dir, sets_dir, "GeneratorsOfTechnology.csv")),
         GeneratorsOfNode = _read_tuple2_csv(_required_csv(dir, sets_dir, "GeneratorsOfNode.csv")),
         StoragesOfNode = _read_tuple2_csv(_required_csv(dir, sets_dir, "StoragesOfNode.csv")),
+        NaturalGas = gas_sets,
     )
+end
+
+function _module_nonnegative(path, row, column, value)
+    parsed = _module_float(path, row, column, value)
+    parsed >= 0 || throw(ArgumentError(
+        "Malformed natural-gas CSV $path data row $row column $column: " *
+        "value must be non-negative, got $parsed",
+    ))
+    return parsed
+end
+
+function _read_natural_gas_params_csv(
+    dir::AbstractString;
+    weather_scenarios::Int,
+    gas_scenarios::Int,
+)
+    weather_scenarios > 0 ||
+        throw(ArgumentError("number_of_scenarios must be positive"))
+    gas_scenarios > 0 ||
+        throw(ArgumentError("number_of_gas_scenarios must be positive"))
+    component = "NaturalGas"
+    gas = NaturalGasParams(
+        weatherScenarioCount = weather_scenarios,
+        gasScenarioCount = gas_scenarios,
+    )
+
+    pipeline_path = _required_csv(dir, component, "PipelineCapacity.csv")
+    for (index, row) in enumerate(_validated_module_rows(
+        pipeline_path,
+        ("FromNode", "ToNode", "Capacity_(ton/h)"),
+    ))
+        row_number = index + 1
+        key = (
+            _module_string(pipeline_path, row_number, "FromNode", row[1]),
+            _module_string(pipeline_path, row_number, "ToNode", row[2]),
+        )
+        value = _module_nonnegative(
+            pipeline_path,
+            row_number,
+            "Capacity_(ton/h)",
+            row[3],
+        )
+        _insert_unique_module_value!(
+            gas.pipelineCapacity,
+            key,
+            value,
+            pipeline_path,
+            row_number,
+        )
+    end
+
+    power_path = _required_csv(dir, component, "PipelineElectricityUse.csv")
+    power_rows = _validated_module_rows(power_path, ("Power_usage_[MWh/ton]",))
+    length(power_rows) == 1 || throw(ArgumentError(
+        "Natural-gas scalar CSV $power_path must contain exactly one data row",
+    ))
+    gas.pipelinePowerDemandPerTon = _module_nonnegative(
+        power_path,
+        2,
+        "Power_usage_[MWh/ton]",
+        only(power_rows)[1],
+    )
+
+    for (filename, header, target) in (
+        ("StorageCapacity.csv", "Storage_(ton)", gas.storageCapacity),
+        ("Reserves.csv", "Reserves_(tons)", gas.reserves),
+    )
+        path = _required_csv(dir, component, filename)
+        for (index, row) in enumerate(_validated_module_rows(path, ("Node", header)))
+            row_number = index + 1
+            key = _module_string(path, row_number, "Node", row[1])
+            value = _module_nonnegative(path, row_number, header, row[2])
+            _insert_unique_module_value!(target, key, value, path, row_number)
+        end
+    end
+
+    capacity_path = _required_csv(dir, component, "TerminalCapacity.csv")
+    for (index, row) in enumerate(_validated_module_rows(
+        capacity_path,
+        ("Node", "Terminal", "Period", "Capacity_(ton/hr)"),
+    ))
+        row_number = index + 1
+        period = _module_int(capacity_path, row_number, "Period", row[3])
+        period > 0 || throw(ArgumentError(
+            "Malformed natural-gas CSV $capacity_path data row $row_number " *
+            "column Period: value must be positive",
+        ))
+        key = (
+            _module_string(capacity_path, row_number, "Node", row[1]),
+            _module_string(capacity_path, row_number, "Terminal", row[2]),
+            period,
+        )
+        value = _module_nonnegative(
+            capacity_path,
+            row_number,
+            "Capacity_(ton/hr)",
+            row[4],
+        )
+        _insert_unique_module_value!(
+            gas.terminalCapacity,
+            key,
+            value,
+            capacity_path,
+            row_number,
+        )
+    end
+
+    cost_filename = gas_scenarios == 1 ?
+                    "TerminalCost.csv" : "TerminalCost_stochastic.csv"
+    cost_path = _required_csv(dir, component, cost_filename)
+    for (index, row) in enumerate(_validated_module_rows(
+        cost_path,
+        ("Node", "Terminal", "Period", "GasScenario", "Cost_(EUR/ton)");
+        alternate_headers =
+            ("Node", "Terminal", "Period", "Scenario", "Cost_(EUR/ton)"),
+    ))
+        row_number = index + 1
+        period = _module_int(cost_path, row_number, "Period", row[3])
+        gas_scenario = _module_int(cost_path, row_number, "GasScenario", row[4])
+        period > 0 || throw(ArgumentError(
+            "Malformed natural-gas CSV $cost_path data row $row_number " *
+            "column Period: value must be positive",
+        ))
+        gas_scenario > 0 || throw(ArgumentError(
+            "Malformed natural-gas CSV $cost_path data row $row_number " *
+            "column GasScenario: value must be positive",
+        ))
+        key = (
+            _module_string(cost_path, row_number, "Node", row[1]),
+            _module_string(cost_path, row_number, "Terminal", row[2]),
+            period,
+            gas_scenario,
+        )
+        value = _module_nonnegative(
+            cost_path,
+            row_number,
+            "Cost_(EUR/ton)",
+            row[5],
+        )
+        _insert_unique_module_value!(
+            gas.terminalCost,
+            key,
+            value,
+            cost_path,
+            row_number,
+        )
+    end
+
+    demand_path = _required_csv(dir, "Transport", "NaturalGasDemand.csv")
+    for (index, row) in enumerate(_validated_module_rows(
+        demand_path,
+        ("Node", "Period", "Natural_gas_demand_[MWh/yr]"),
+    ))
+        row_number = index + 1
+        period = _module_int(demand_path, row_number, "Period", row[2])
+        period > 0 || throw(ArgumentError(
+            "Malformed natural-gas CSV $demand_path data row $row_number " *
+            "column Period: value must be positive",
+        ))
+        key = (
+            _module_string(demand_path, row_number, "Node", row[1]),
+            period,
+        )
+        value = _module_nonnegative(
+            demand_path,
+            row_number,
+            "Natural_gas_demand_[MWh/yr]",
+            row[3],
+        )
+        _insert_unique_module_value!(
+            gas.transportDemand,
+            key,
+            value,
+            demand_path,
+            row_number,
+        )
+    end
+
+    curtail_path = _required_csv(dir, "Transport", "CurtailCost.csv")
+    curtail_rows = _validated_module_rows(curtail_path, ("CurtailCost_(€/MWh)",))
+    length(curtail_rows) == 1 || throw(ArgumentError(
+        "Natural-gas scalar CSV $curtail_path must contain exactly one data row",
+    ))
+    gas.transportCurtailCost = _module_nonnegative(
+        curtail_path,
+        2,
+        "CurtailCost_(€/MWh)",
+        only(curtail_rows)[1],
+    )
+    return gas
 end
 
 """
@@ -278,7 +643,12 @@ end
 Read EMPIRE parameters from a CSV dataset folder using the Python/CSV dataset
 layout. Extra source/unit columns are ignored; files are parsed by position.
 """
-function read_params_csv(dir::AbstractString)
+function read_params_csv(
+    dir::AbstractString;
+    natural_gas::Bool = false,
+    weather_scenarios::Int = 1,
+    gas_scenarios::Int = 1,
+)
     @info "Reading CSV parameters from $dir"
 
     par = OpenEMPIRE.EmpireParams()
@@ -347,6 +717,13 @@ function read_params_csv(dir::AbstractString)
     general = "General"
     par.CO2cap = _read_strategic_profile_csv(_required_csv(dir, general, "CO2cap.csv"))
     par.CO2price = _read_strategic_profile_csv(_required_csv(dir, general, "CO2price.csv"))
+    if natural_gas
+        par.NaturalGas = _read_natural_gas_params_csv(
+            dir;
+            weather_scenarios,
+            gas_scenarios,
+        )
+    end
 
     return par
 end
@@ -356,8 +733,13 @@ end
 
 Read sets and parameters from a CSV EMPIRE dataset folder.
 """
-function read_data_csv(dir::AbstractString)
-    sets = read_sets_csv(dir)
-    par = read_params_csv(dir)
+function read_data_csv(
+    dir::AbstractString;
+    natural_gas::Bool = false,
+    weather_scenarios::Int = 1,
+    gas_scenarios::Int = 1,
+)
+    sets = read_sets_csv(dir; natural_gas)
+    par = read_params_csv(dir; natural_gas, weather_scenarios, gas_scenarios)
     return (sets, par)
 end

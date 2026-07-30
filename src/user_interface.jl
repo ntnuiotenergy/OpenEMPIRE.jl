@@ -5,7 +5,7 @@ function _optimizer_with_attributes(optimizer, optimizer_attributes)
     return optimizer_with_attributes(_optimizer_constructor(optimizer), optimizer_attributes...)
 end
 
-function _config_bool(config, key::AbstractString, default::Bool)
+function _config_bool(config, key::AbstractString, default::Bool)::Bool
     value = get(config, key, default)
     value isa Bool && return value
     if value isa AbstractString
@@ -63,7 +63,9 @@ function _prepare_model_inputs(
             season_for_hour[h] = season_count + peak_index
         end
     end
-    scenarios = config["number_of_scenarios"]
+    weather_scenarios = OpenEMPIRE.weather_scenario_count(config)
+    gas_scenarios = OpenEMPIRE.gas_scenario_count(config)
+    scenarios = OpenEMPIRE.combined_scenario_count(config)
     operational_hours_per_year = Int(get(config, "operational_hours_per_year", 8760))
 
     periods = OpenEMPIRE.create_timestruct(
@@ -80,7 +82,14 @@ function _prepare_model_inputs(
 
 
     _report_progress(progress, "Build 3/12: reading input data from $data_folder")
-    sets, params = OpenEMPIRE.read_data(data_folder; format = input_format)
+    gas_enabled = OpenEMPIRE.natural_gas_enabled(config)
+    sets, params = OpenEMPIRE.read_data(
+        data_folder;
+        format = input_format,
+        natural_gas = gas_enabled,
+        weather_scenarios,
+        gas_scenarios,
+    )
     _report_progress(
         progress,
         "Build 4/12: input data loaded ($(length(nodes(sets))) nodes, $(length(generators(sets))) generators, $(length(storages(sets))) storages)",
@@ -171,7 +180,8 @@ function create_model(
     params.discountRate = config["discount_rate"]
 
     _report_progress(progress, "Build 7/12: preprocessing parameters")
-    OpenEMPIRE.preprocess_params(params, sets, periods)
+    gas_enabled = OpenEMPIRE.natural_gas_enabled(config)
+    OpenEMPIRE.preprocess_params(params, sets, periods; natural_gas = gas_enabled)
 
     _report_progress(progress, "Build 8/12: validating parameters")
     OpenEMPIRE.validate(params; sets, periods, strict = false)
@@ -184,7 +194,13 @@ function create_model(
     end
     set_string_names_on_creation(emp, include_string_names)
     _report_progress(progress, "Build 10/12: creating variables")
-    @time OpenEMPIRE.create_variables(emp, sets, periods; progress)
+    @time OpenEMPIRE.create_variables(
+        emp,
+        sets,
+        periods;
+        natural_gas = gas_enabled,
+        progress,
+    )
     _report_progress(progress, "Build 11/12: creating constraints")
     @time OpenEMPIRE.create_constraints(
         emp,
@@ -192,6 +208,7 @@ function create_model(
         params,
         periods;
         north_sea = _config_bool(config, "north_sea", false),
+        natural_gas = gas_enabled,
         include_investment_constraints,
         progress,
     )
@@ -202,6 +219,7 @@ function create_model(
         params,
         periods,
         Discounter(OpenEMPIRE.discount_rate(params), 1, periods);
+        natural_gas = gas_enabled,
         progress,
     )
     _report_progress(progress, "Model build complete")
