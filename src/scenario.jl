@@ -803,6 +803,46 @@ function _copula_window_mean(table::RawScenarioTable, col::String, year::Int, se
     return mean(view(table.values[col], indices))
 end
 
+"""
+    _copula_window_means(table, col, candidates, season, regular_hours)
+
+Window means for `col` over every `(year, offset)` in `candidates`.
+
+Equivalent to mapping [`_copula_window_mean`] over `candidates`, but
+`_season_indices` scans the whole table, so it is resolved once per year instead
+of once per candidate window. That lookup otherwise dominates catalog
+construction: on `europe_v51` it is ~350k scans per season. Windows are still
+averaged with `mean` over the same elements in the same order, so results are
+unchanged.
+"""
+function _copula_window_means(
+    table::RawScenarioTable,
+    col::String,
+    candidates::Vector{Tuple{Int, Int}},
+    season::AbstractString,
+    regular_hours::Int,
+)
+    values = table.values[col]
+    year_indices = Dict{Int, Vector{Int}}()
+    for (year, _) in candidates
+        haskey(year_indices, year) && continue
+        year_indices[year] = _season_indices(table, year, season)
+    end
+
+    means = Vector{Float64}(undef, length(candidates))
+    for (i, (year, offset)) in enumerate(candidates)
+        indices = year_indices[year]
+        if offset < 0 || offset + regular_hours > length(indices)
+            throw(ArgumentError(
+                "Invalid sample window for $season $year: hour $offset with length " *
+                "$regular_hours but only $(length(indices)) rows are available",
+            ))
+        end
+        means[i] = mean(view(values, view(indices, (offset + 1):(offset + regular_hours))))
+    end
+    return means
+end
+
 # Ordinal rank (ties broken by order of appearance, matching pandas' rank(method="first"))
 # divided by N, transforming to a uniform-margin empirical copula.
 function _rank_transform(values::Vector{Float64})
@@ -884,7 +924,7 @@ function make_copula_clusters(
 
         dims = Vector{Float64}[]
         for (_, table) in source_tables, col in table.columns
-            means = [_copula_window_mean(table, col, year, season, offset, regular_hours) for (year, offset) in candidates]
+            means = _copula_window_means(table, col, candidates, season, regular_hours)
             push!(dims, _rank_transform(means))
         end
 
