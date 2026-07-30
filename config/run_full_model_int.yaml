@@ -6,6 +6,14 @@
 # Note: full_model_int also carries hydrogen/industry/natural-gas/heat data. Those
 # modules are not part of the Julia port yet; their tables live in
 # data_extra/full_model_int/ and are ignored by this run.
+#
+# REQUIRES THE NATURAL-GAS MODULE. InternalEMPIRE prices natural gas through its
+# gas module rather than through Generator!FuelCosts, so this dataset has no
+# genFuelCost row for Gasexisting, GasOCGT, GasCCGT, GasCCSadv or GasCCS. Until
+# the `natural_gas` module lands, building this dataset stops with an explicit
+# error naming the generator instead of pricing gas generation at zero. The
+# dataset, converter and validator are delivered first so the module can be
+# reviewed against fixed, hash-verified inputs.
 
 use_temporary_directory: True                          # Specifies whether to use a temporary directory for operations
 temporary_directory: './'                              # Path to the temporary directory used for certain operations

@@ -134,6 +134,42 @@ function test_read_bundled_csv_datasets()
     @test length(europe_params.genCapitalCost) == 23
 end
 
+# The converted InternalEMPIRE dataset must load through the standard CSV reader,
+# and its documented dependency on a natural-gas module must surface as a clear
+# error rather than an opaque BoundsError from an empty StrategicProfile.
+function test_read_full_model_int_dataset()
+    data_root = joinpath(pkgdir(OpenEMPIRE), "data")
+    dataset = joinpath(data_root, "full_model_int")
+    isdir(dataset) || return
+
+    @test "full_model_int" in OpenEMPIRE.available_datasets(; root = data_root)
+
+    sets, params = OpenEMPIRE.read_data(dataset; format = :csv)
+    @test length(OpenEMPIRE.nodes(sets)) == 52
+    @test length(OpenEMPIRE.generators(sets)) == 33
+    @test length(OpenEMPIRE.arcs(sets)) == 436
+
+    # InternalEMPIRE prices natural gas through its gas module, so these five
+    # generators carry no genFuelCost row anywhere in the dataset.
+    gas_generators = ["GasCCGT", "GasCCS", "GasCCSadv", "GasOCGT", "Gasexisting"]
+    for generator in gas_generators
+        @test generator in OpenEMPIRE.generators(sets)
+        @test !haskey(params.genFuelCost, generator)
+        @test haskey(params.genEfficiency, generator)
+    end
+
+    periods = OpenEMPIRE.create_timestruct(7, 5, 4, 24, 2, 24, 1)
+    err = try
+        OpenEMPIRE.preprocess_operational_cost(params, sets, periods)
+        nothing
+    catch caught
+        caught
+    end
+    @test err isa ArgumentError
+    @test any(occursin(generator, err.msg) for generator in gas_generators)
+    @test occursin("genFuelCost", err.msg)
+end
+
 function test_native_timestruct_operational_weights()
     periods = OpenEMPIRE.create_timestruct(1, 5, 4, 2, 2, 1, 2)
     sp = first(strat_periods(periods))
