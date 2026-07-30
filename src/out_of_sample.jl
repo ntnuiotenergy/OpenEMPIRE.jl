@@ -24,6 +24,7 @@ const _OOS_TREE_CONFIG_KEYS = (
     "forecast_horizon_year",
     "leap_years_investment",
     "number_of_scenarios",
+    "number_of_gas_scenarios",
     "regular_seasons",
     "length_of_regular_season",
     "n_peak_seasons",
@@ -38,6 +39,7 @@ const _OOS_INVESTMENT_COMPATIBILITY_KEYS = (
     "forecast_horizon_year",
     "leap_years_investment",
     "north_sea",
+    "natural_gas",
     "use_emission_cap",
     "discount_rate",
     "wacc",
@@ -48,6 +50,7 @@ const _OOS_ALLOWED_OPERATIONAL_CONFIG_DIFFERENCES = (
     "use_scenario_generation",
     "use_fixed_sample",
     "number_of_scenarios",
+    "number_of_gas_scenarios",
     "regular_seasons",
     "length_of_regular_season",
     "n_peak_seasons",
@@ -633,6 +636,7 @@ end
 function _oos_structural_config(config)
     defaults = Dict{String, Any}(
         "north_sea" => false,
+        "natural_gas" => false,
         "use_emission_cap" => false,
         "load_change_module" => false,
     )

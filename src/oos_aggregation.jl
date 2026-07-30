@@ -7,6 +7,15 @@ const OOS_DEFAULT_COMBINED_RESULT_FILES = (
     "loadShed.csv",
 )
 
+const OOS_NATURAL_GAS_COMBINED_RESULT_FILES = (
+    "ngTerminalImport.csv",
+    "ngTransmission.csv",
+    "ngForPower.csv",
+    "ngStorage.csv",
+    "naturalGasBalance.csv",
+    "transportNaturalGas.csv",
+)
+
 mutable struct _OOSEnsAccumulator
     conditional_mwh::Float64
     expected_mwh::Float64
@@ -238,7 +247,7 @@ function _oos_time_weights(config)
     regular_hours = Int(config["length_of_regular_season"])
     peak_count = scenario_peak_count(config)
     peak_hours = scenario_peak_hours(config)
-    scenario_count = Int(config["number_of_scenarios"])
+    scenario_count = combined_scenario_count(config)
     operational_hours_per_year = Int(get(config, "operational_hours_per_year", 8760))
     season_names = vcat(regular_seasons, ["peak$i" for i in 1:peak_count])
 
@@ -349,6 +358,10 @@ function _oos_objective_summary(solution)
         fixed_investment = fixed_cost,
         generator_operation = get(component_values, "generator_operation", 0.0),
         load_shedding = get(component_values, "load_shedding", 0.0),
+        natural_gas_terminal_import =
+            get(component_values, "natural_gas_terminal_import", 0.0),
+        natural_gas_transport_shedding =
+            get(component_values, "natural_gas_transport_shedding", 0.0),
         non_investment = objective - fixed_cost,
     )
 end
@@ -527,6 +540,7 @@ function summarize_oos_result(
         FullYearFormulation = full_year.formulation,
         FullYearTreeIndex = full_year.tree_index,
         DummyPeakResultsIgnored = full_year.dummy_peak_results_ignored,
+        NaturalGas = natural_gas_enabled(config),
         RunDirectory = normalized_result_dir,
         RunManifestSHA256 = _oos_sha256_file(manifest_file),
         ConfigSHA256 = config_sha256,
@@ -538,6 +552,10 @@ function summarize_oos_result(
         DiscountedFixedInvestmentCost_EUR = objective.fixed_investment,
         DiscountedGeneratorOperationCost_EUR = objective.generator_operation,
         DiscountedLoadSheddingCost_EUR = objective.load_shedding,
+        DiscountedNaturalGasTerminalImportCost_EUR =
+            objective.natural_gas_terminal_import,
+        DiscountedNaturalGasTransportSheddingCost_EUR =
+            objective.natural_gas_transport_shedding,
         DiscountedNonInvestmentObjective_EUR = objective.non_investment,
         ExpectedAnnualENSAllPeriods_MWh = total.expected_mwh,
         NodeHoursAboveThreshold = total.node_hours_above_threshold,
@@ -647,11 +665,16 @@ function aggregate_oos_results(
         ),
     )
     combined_dir = joinpath(normalized_output, "combined")
+    effective_combined_files = collect(combined_files)
+    if Tuple(combined_files) == OOS_DEFAULT_COMBINED_RESULT_FILES &&
+       all(row.NaturalGas for row in summaries)
+        append!(effective_combined_files, OOS_NATURAL_GAS_COMBINED_RESULT_FILES)
+    end
     combined_results = [
         (internalempire_full_year ?
          _stream_internalempire_full_year_csv(summaries, String(filename), combined_dir) :
          _stream_combined_oos_csv(summaries, String(filename), combined_dir)) for
-        filename in combined_files
+        filename in effective_combined_files
     ]
     output_files = [summary_file, scenario_file, season_file]
     aggregation_manifest = Dict{String, Any}(

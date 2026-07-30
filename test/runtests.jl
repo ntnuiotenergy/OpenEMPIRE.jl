@@ -13,6 +13,7 @@ using YAML
 include("test_excel.jl")
 include("test_csv.jl")
 include("test_scenario_csv.jl")
+include("test_natural_gas.jl")
 include("test_runner_staging.jl")
 include("test_out_of_sample.jl")
 include("test_oos_full_year.jl")
@@ -37,6 +38,14 @@ end
     test_native_timestruct_operational_weights()
     test_write_solution_csv_tables()
     test_europe_summary_uses_per_scenario_totals()
+end
+
+@testset "Natural gas" begin
+    test_natural_gas_csv_loading_and_validation()
+    test_natural_gas_scenario_mapping_and_costs()
+    test_weather_profiles_replicate_across_gas_scenarios()
+    test_natural_gas_model_and_results()
+    test_natural_gas_oos_compatibility_and_full_year_streaming()
 end
 
 @testset "CSV scenarios" begin

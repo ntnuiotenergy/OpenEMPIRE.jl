@@ -1,0 +1,15 @@
+Parameter,Value
+mwh_per_ton,13.9
+generator_efficiency,0.5
+generator_marginal_cost_eur_per_mwh,2.0
+generator_capacity_mw,200.0
+pipeline_capacity_ton_per_hour,16.0
+pipeline_power_mwh_per_ton,0.024
+terminal_cost_eur_per_ton,100.0
+terminal_capacity_ton_per_hour,100.0
+terminal_reserve_ton,1000.0
+storage_capacity_b_ton,10.0
+storage_initial_fraction,0.5
+transport_demand_b_ton_per_hour,1.0
+transport_shed_cost_eur_per_ton,100000.0
+lost_load_cost_eur_per_mwh,1000000.0

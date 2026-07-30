@@ -184,6 +184,61 @@ function _sampling_key_info(data_folder::AbstractString)
     )
 end
 
+function _natural_gas_input_info(data_folder::AbstractString, config)
+    enabled = OpenEMPIRE.natural_gas_enabled(config)
+    gas_scenarios = OpenEMPIRE.gas_scenario_count(config)
+    enabled || return Dict{String, Any}(
+        "enabled" => false,
+        "gas_scenarios" => 1,
+        "files" => Any[],
+        "conversion_provenance" => nothing,
+    )
+
+    relative_files = String[]
+    gas_dir = joinpath(data_folder, "NaturalGas")
+    isdir(gas_dir) && append!(
+        relative_files,
+        joinpath("NaturalGas", filename) for filename in readdir(gas_dir)
+        if isfile(joinpath(gas_dir, filename)),
+    )
+    append!(
+        relative_files,
+        joinpath("Sets", filename) for filename in (
+            "NaturalGasNodes.csv",
+            "NaturalGasTerminals.csv",
+            "NaturalGasTerminalsOfNode.csv",
+            "NaturalGasDirectionalLines.csv",
+            "OnshoreNode.csv",
+        ) if isfile(joinpath(data_folder, "Sets", filename)),
+    )
+    append!(
+        relative_files,
+        joinpath("Transport", filename) for filename in (
+            "NaturalGasDemand.csv",
+            "CurtailCost.csv",
+        ) if isfile(joinpath(data_folder, "Transport", filename)),
+    )
+    sort!(relative_files)
+    provenance_path = joinpath(data_folder, "conversion_manifest.json")
+    return Dict{String, Any}(
+        "enabled" => true,
+        "weather_scenarios" => OpenEMPIRE.weather_scenario_count(config),
+        "gas_scenarios" => gas_scenarios,
+        "combined_scenarios" => OpenEMPIRE.combined_scenario_count(config),
+        "files" => [
+            Dict{String, Any}(
+                "path" => relative,
+                "sha256" => _sha256_file(joinpath(data_folder, relative)),
+            ) for relative in relative_files
+        ],
+        "conversion_provenance" => isfile(provenance_path) ?
+                                   Dict{String, Any}(
+            "path" => provenance_path,
+            "sha256" => _sha256_file(provenance_path),
+        ) : nothing,
+    )
+end
+
 const _OOS_SCENARIO_FILENAMES = OpenEMPIRE._OOS_SCENARIO_FILENAMES
 
 function _scenario_data_dir(root::AbstractString)
@@ -674,6 +729,7 @@ function _initial_manifest(spec::JuliaRunSpec)
         ),
         "seed" => spec.seed,
         "fixed_sample" => spec.fixed_sample,
+        "natural_gas" => _natural_gas_input_info(spec.data_folder, spec.run_config),
         "investment_context" => OpenEMPIRE._oos_structural_config(spec.run_config),
         "investment_result" => nothing,
         "sampling_key" => _sampling_key_info(spec.data_folder),
