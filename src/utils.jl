@@ -172,21 +172,26 @@ function preprocess_operational_cost(
 )
     params.genMargCost = Dict{String, StrategicProfile}()
     for g in sets.Generator
-        # Without an efficiency profile there is no marginal-cost basis, so the
-        # generator keeps the documented accessor fallback. Never fall through to
-        # an empty StrategicProfile: validation and model evaluation index it and
-        # fail with an opaque BoundsError.
+        # Gas fuel is bought through terminal imports when the module is active, so
+        # gas-fired generators carry no ordinary fuel price and legitimately have no
+        # `genFuelCost` row. They still pay variable O&M and carbon costs, so they
+        # must not be skipped here: a missing `genMargCost` key silently falls back
+        # to `DEFAULT_GEN_MARGINAL_COST` (zero) and makes gas generation free.
+        gas_fuelled = natural_gas && g in natural_gas_generators(sets)
+
+        # Without an efficiency profile there is no marginal-cost basis at all, so
+        # the generator keeps the documented accessor fallback. Never construct an
+        # empty StrategicProfile: validation and model evaluation cannot index one.
         haskey(params.genEfficiency, g) || continue
 
-        # A generator with an efficiency but no fuel price cannot be costed here.
-        # `full_model_int` is the motivating case: it deliberately omits gas fuel
-        # prices because InternalEMPIRE prices gas through its natural-gas module,
-        # so that dataset needs the gas module rather than a silent zero cost.
-        haskey(params.genFuelCost, g) || throw(ArgumentError(
-            "Generator $g has a genEfficiency profile but no genFuelCost entry. " *
-            "Add its fuel cost, or use a dataset whose fuels are all priced in " *
-            "genFuelCost.",
-        ))
+        if !haskey(params.genFuelCost, g) && !gas_fuelled
+            throw(ArgumentError(
+                "Generator $g has a genEfficiency profile but no genFuelCost entry. " *
+                "Add its fuel cost, or enable `natural_gas` if it is gas-fired and " *
+                "priced through natural-gas terminal imports.",
+            ))
+        end
+
         values = Float64[]
         for sp in strat_periods(periods)
             # Variable cost in €/MWh

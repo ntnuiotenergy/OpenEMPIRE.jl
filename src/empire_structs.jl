@@ -487,6 +487,15 @@ function _check_natural_gas_params!(
         key[1] in gas_sets.OnshoreNode ||
             push!(errs, "NaturalGas.transportDemand has unknown onshore-node key: $key")
     end
+    # The gas-to-power conversion divides by generator efficiency, so a missing
+    # profile would otherwise surface as a bare KeyError during model building.
+    for generator in gas_sets.Generator
+        haskey(par.genEfficiency, generator) ||
+            push!(
+                errs,
+                "NaturalGas generator $generator has no genEfficiency profile",
+            )
+    end
 
     periods === nothing && return
     period_count = length(strat_periods(periods))
@@ -503,17 +512,44 @@ function _check_natural_gas_params!(
     expected_transport = Set(
         (node, period) for node in gas_sets.OnshoreNode for period in 1:period_count
     )
+    expected_reserves = Set(
+        node
+        for (node, terminal) in gas_sets.TerminalsOfNode
+        if is_finite_reserve_terminal(terminal)
+    )
     for (name, expected, actual) in (
         ("pipelineCapacity", expected_pipeline, Set(keys(gas.pipelineCapacity))),
         ("terminalCapacity", expected_terminal_capacity, Set(keys(gas.terminalCapacity))),
         ("terminalCost", expected_terminal_cost, Set(keys(gas.terminalCost))),
         ("transportDemand", expected_transport, Set(keys(gas.transportDemand))),
+        ("reserves", expected_reserves, Set(keys(gas.reserves))),
     )
         missing = setdiff(expected, actual)
         isempty(missing) ||
             push!(errs, "NaturalGas.$name is missing $(length(missing)) required key(s)")
     end
     return
+end
+
+"""
+    validate_natural_gas(par, sets, periods)
+
+Return the natural-gas validation issues for `par` as a vector of strings.
+
+The general [`validate`](@ref) entry point is called with `strict = false` during
+model building, which downgrades every issue to a single warning. Natural-gas
+inputs cannot tolerate that: a missing terminal cost silently becomes 99999
+EUR/t and a missing capacity silently becomes zero, so `create_model` treats
+these issues as fatal whenever the module is enabled.
+"""
+function validate_natural_gas(
+    par::EmpireParams,
+    sets::EmpireSets,
+    periods::Union{Nothing, TimeStructure} = nothing,
+)
+    errs = String[]
+    _check_natural_gas_params!(errs, par, sets, periods)
+    return errs
 end
 
 """

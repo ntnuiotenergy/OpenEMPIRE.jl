@@ -46,10 +46,15 @@ interface:
 | Check | Result |
 |---|---:|
 | Keyed metrics compared | 26 |
-| Maximum absolute difference | `8.881784197e-16` |
-| Maximum relative difference | `1.7763568394e-16` |
+| Maximum absolute difference | `4.54747350886e-13` |
+| Maximum relative difference | `3.5527136788e-16` |
 | Tolerance | `atol=1e-8`, `rtol=1e-9` |
 | Overall | PASS |
+
+Re-measured after reserve and storage rows were scaled by `NATURAL_GAS_ROW_SCALE`
+to match InternalEMPIRE's `/1e3` conditioning. The absolute figure moved from
+`8.881784197e-16` because the scaled rows change LP numerics slightly; the
+relative figure stays at machine precision.
 
 The fixture also confirms the intended compressor recursion: sending natural
 gas through the pipeline consumes electricity at the sending node, and the gas
@@ -61,6 +66,34 @@ that unrelated InternalEMPIRE modules are active. Natural-gas transport is
 deliberately independent of Hydrogen in Julia, and duplicate workbook rows are
 explicitly canonicalized before Julia reads them, as documented in
 `natural_gas_terminal_cost_duplicates.md`.
+
+## What this fixture cannot show
+
+Two limits are worth stating plainly.
+
+The fixture has one strategic period, one representative period and one
+operational scenario, so it cannot exercise strategic duration, season
+multiplicity, scenario probability, storage resets across seasons, or the
+gas-price axis. Those are covered separately by
+`test_natural_gas_multi_period_scenario_weighting`, which builds a
+2-period x 2-season x 2-weather x 3-gas model and checks reserve row counts,
+reserve coefficients, storage-reset counts, per-period objective coefficients
+against the correct gas scenario, and uniform `1/(W*G)` probabilities against
+hand-computed values.
+
+`natural_gas_parity_python.py` is an independent hand-written restatement of the
+intended equations, not `InternalEMPIRE/empire.py`. It establishes that the Julia
+formulation agrees with a second expression of the same equations; it does not
+establish agreement with the reference implementation's own code, and a shared
+misreading of InternalEMPIRE would pass both. A comparison driven against
+`empire.py` on a cut-down instance would be stronger evidence.
+
+The Julia side is not a reimplementation: `natural_gas_parity_julia.jl` calls the
+real `create_variables`, `create_constraints`, `create_objective` and
+`objective_component_values`. It does, however, inject `genMargCost` directly and
+so does not exercise `preprocess_operational_cost`; gas marginal cost is covered
+by `test_gas_marginal_cost_without_a_fuel_price` and
+`test_full_model_int_gas_generators_are_priced` instead.
 
 ## Performance diagnostics
 
