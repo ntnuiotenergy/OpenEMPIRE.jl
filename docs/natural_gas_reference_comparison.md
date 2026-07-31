@@ -549,6 +549,11 @@ Each was localised to the exact key including its scenario component.
 
 ## Verification summary
 
+> **Scope limit: everything below was verified with `number_of_gas_scenarios = 1`.**
+> The gas-scenario axis is unverified against `empire.py` -- see "The gas-scenario
+> axis" below. `full_model_int` carries only `GasScenario = 1`, and the module emits a
+> warning if it is configured with more.
+
 | Aspect | Status |
 |---|---|
 | Constraint rows, coefficients, RHS, sense | verified identical, two instances |
@@ -562,3 +567,43 @@ The gas module's translation from input data to optimisation problem is verified
 complete: the same constraints, the same prices, the same bounds. What is *not*
 claimed is that the two whole models produce the same answers -- see
 `internal_empire_base_divergences.md` for why that is neither attainable nor the goal.
+
+
+## The gas-scenario axis is unverified
+
+Every comparison in this document ran with `number_of_gas_scenarios = 1`, where the
+gas axis collapses. `full_model_int` carries only `GasScenario = 1`, so there is no
+data to compare against, and InternalEMPIRE's own implementation of this feature is
+described upstream as incomplete -- it was added temporarily, is read only when
+`gas_stochasticity_flag` is true, and has only ever been run with one scenario.
+
+Three things are therefore **not** verified against `empire.py`:
+
+1. **The combination convention.** Julia computes
+   `combined = (weather - 1) * gasScenarioCount + gas` -- weather-major, gas-minor. If
+   InternalEMPIRE orders it gas-major, every terminal price attaches to the wrong
+   scenario. Critically, **none of the checks in this document would catch that**: the
+   structure is symmetric under the swap, so row counts, coefficients and bounds all
+   still match. Only the mapping from price to scenario differs.
+2. **Scenario probability** `1/(W*G)`, asserted by
+   `test_natural_gas_multi_period_scenario_weighting` against hand-computed values.
+   With `G = 1` it degenerates to `1/W`, so the product is untested against the
+   reference.
+3. **Which cost table is read.** `gas_stochasticity_flag` makes InternalEMPIRE read
+   `TerminalCost_stochastic` rather than `TerminalCost`. With one gas scenario the two
+   agree, so the choice is invisible.
+
+All three rest on tests written alongside the implementation -- they pin what the
+author believed the convention to be, not what the reference does. That is the same
+failure mode that let an incorrect season-mapping "fix" survive its own unit test
+earlier in this work.
+
+**Practical impact today is nil**, because the axis is inert at `G = 1`, which is the
+only configuration anyone runs and the one verified here. The risk is latent: whoever
+first sets `G = 2` would get plausible-looking numbers rather than an error.
+
+`create_model` therefore emits a warning when `gasScenarioCount > 1`
+(`empire_structs.jl`, `_check_natural_gas_params!`). Closing this properly needs a
+dataset with a second gas price scenario -- synthesised is fine, since what is being
+tested is the indexing, and two deliberately distinct prices make a mis-assignment
+obvious. The three comparators already handle the scenario dimension.

@@ -1157,3 +1157,36 @@ function test_natural_gas_oos_compatibility_and_full_year_streaming()
         )
     end
 end
+
+"""
+Configuring more than one gas scenario warns that the path is unverified.
+
+The weather x gas combination convention has only ever been checked against a unit
+test written alongside the implementation, never against `empire.py`, because
+`full_model_int` carries only `GasScenario = 1`. A gas-major ordering in the
+reference would attach prices to the wrong scenarios while leaving row counts,
+coefficients and bounds identical, so nothing else would catch it. The warning is the
+only thing standing between that and a silently wrong result.
+"""
+function test_multiple_gas_scenarios_warn_unverified()
+    par = OpenEMPIRE.EmpireParams()
+    par.NaturalGas = OpenEMPIRE.NaturalGasParams(
+        weatherScenarioCount = 2,
+        gasScenarioCount = 2,
+    )
+    errs = String[]
+    @test_logs (:warn,) match_mode = :any OpenEMPIRE._check_natural_gas_params!(
+        errs, par, nothing, nothing,
+    )
+
+    # One gas scenario is the verified configuration and must stay silent.
+    quiet = OpenEMPIRE.EmpireParams()
+    quiet.NaturalGas = OpenEMPIRE.NaturalGasParams(
+        weatherScenarioCount = 2,
+        gasScenarioCount = 1,
+    )
+    errs2 = String[]
+    @test_logs min_level = Logging.Warn OpenEMPIRE._check_natural_gas_params!(
+        errs2, quiet, nothing, nothing,
+    )
+end
