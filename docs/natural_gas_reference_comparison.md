@@ -248,7 +248,35 @@ Every row key matches on both sides - no row exists in one model and not the oth
 All 171,936 coefficients and every right-hand side agree, and the maximum relative
 difference is `0.00e+00`: bit-identical, not merely within tolerance.
 
-### Validated against a negative control
+## Objective comparison, 2026-07-31
+
+The matrix comparison covers the constraint block (A, b, sense) but not the objective
+vector c. A module can build identical constraints and still price gas differently,
+and pricing is half of what the gas module does, so that was a real gap.
+
+`scripts/compare_gas_objective.py` closes it. Gas cost enters both objectives through
+exactly the same two variables, with the same counts:
+
+| Gas variable | Coefficients | Agreeing | Max relative difference |
+|---|---:|---:|---:|
+| `terminal_import` | 6,336 | 6,336 | `0.00e+00` |
+| `transport_shed` | 5,040 | 5,040 | `0.00e+00` |
+| **Total** | **11,376** | **11,376** | **`0.00e+00`** |
+
+No other gas variable carries an objective coefficient in either implementation --
+gas-fired generation is priced through terminal imports, not through `ng_forPower`,
+in both.
+
+These coefficients carry the whole operational weighting chain: discount rate x
+seasonal scale x scenario probability x terminal price. Their agreement therefore
+tests the weighting logic, not merely the price data. They do not depend on the
+weather draw, so this result is unaffected by the sampling-key divergence between the
+two implementations (see `internal_empire_base_divergences.md`).
+
+Validated against a negative control: a `1e-7` relative perturbation of one terminal
+import coefficient was detected and localised to the exact variable.
+
+### Constraint comparison validated against a negative control
 
 A comparator that silently parses nothing also reports "identical". Two known errors
 were injected into the Julia LP - one coefficient changed by `1e-5` relative, one RHS
