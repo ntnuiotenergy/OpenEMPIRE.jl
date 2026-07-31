@@ -194,15 +194,19 @@ function _create_natural_gas_reserve_constraints!(
                         for operational_period in scenario
                             # LeapYearsInvestment * seasScale, matching
                             # InternalEMPIRE's naturalGas_max_reserves_rule.
-                            total_import +=
+                            #
+                            # Accumulated in place: `total_import += coef * var`
+                            # rebuilds the expression each iteration, so this row --
+                            # which spans every operational period -- would be
+                            # O(n^2). At 19,440 periods that is seconds and gigabytes
+                            # per row.
+                            JuMP.add_to_expression!(
+                                total_import,
                                 NATURAL_GAS_ROW_SCALE *
                                 duration_strat(strategic_period) *
-                                multiple_strat(strategic_period, operational_period) *
-                                terminal_import[
-                                    node,
-                                    terminal,
-                                    operational_period,
-                                ]
+                                multiple_strat(strategic_period, operational_period),
+                                terminal_import[node, terminal, operational_period],
+                            )
                         end
                     end
                 end
