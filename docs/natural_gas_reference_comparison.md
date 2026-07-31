@@ -490,3 +490,75 @@ past the shared prefix) is blocked separately: the reference's `fix_sample=True`
 fails on this reduced time structure with
 `KeyError: Index '('Belgium', 'Windoffshore', 1, 'scenario1', 1)' is not valid for
 indexed component 'genCapAvailStochRaw'`. The fix is validated at unit level instead.
+
+
+## Bounds and a second instance, 2026-07-31
+
+Two gaps remained after the objective comparison: variable bounds were unchecked, and
+every result came from a single instance with one weather scenario.
+
+### Bounds
+
+`scripts/compare_gas_bounds.py` normalises Pyomo's `0 <= x <= +inf` and JuMP's
+`x >= 0` to a (lower, upper) pair. A variable left free where it should be
+non-negative changes the feasible region without touching any constraint row, so this
+is the last piece of the LP the gas module controls.
+
+All gas bounds are identical on both instances: 67,248 on the 2-period instance and
+201,744 on the 3-period one, with zero unmatched.
+
+### A structurally different instance
+
+The whole comparison was repeated on **3 strategic periods x 2 weather scenarios**
+(against 2 x 1 before). This exercises against `empire.py` for the first time what
+previously only a Julia unit test covered: scenario probability weighting at 1/2
+rather than 1/1, and discounting across a third period.
+
+| | 2 periods x 1 scenario | 3 periods x 2 scenarios |
+|---|---:|---:|
+| Gas constraint rows | 62,446 | 187,322 |
+| Constraint coefficients | 171,936 | 515,808 |
+| Objective coefficients | 11,376 | 34,128 |
+| Bounds | 67,248 | 201,744 |
+| Differences | **0** | **0** |
+
+Row counts decompose exactly as the sets predict, which independently confirms the
+scenario dimension is being distinguished rather than collapsed: `max_reserves` is
+32 = 16 (node, finite-terminal) pairs x 2 scenarios; `storage_cyclic` is 666 = 37
+nodes x 3 seasons x 3 periods x 2 scenarios; `terminal_import` objective coefficients
+are 19,008 = 44 pairs x 72 hours x 3 periods x 2 scenarios.
+
+Roughly **1.0 million numbers** have now been compared across the two instances, all
+agreeing exactly.
+
+### Negative controls
+
+The comparators were extended to carry the scenario in their canonical key, since JuMP
+omits it with one operational scenario (`sp1_rp1_t1`) and includes it with more
+(`sp1_rp1_sc2_t1`). A parser bug there could have collided the two scenarios onto one
+key and manufactured agreement, so all three were re-validated by injection on the
+2-scenario instance:
+
+| Comparator | Injected | Detected |
+|---|---|---|
+| matrix | coefficient x 1.0001 | yes, at `storage_max_capacity Austria sp1_rp1_sc1_t1` |
+| objective | coefficient x 1.000001 | yes, at `terminal_import NO2DomesticProduction sp1_rp1_sc1_t1` |
+| bounds | lower bound 0 -> 0.5 | yes, at `terminal_import NO2DomesticProduction sp1_rp1_sc1_t1` |
+
+Each was localised to the exact key including its scenario component.
+
+## Verification summary
+
+| Aspect | Status |
+|---|---|
+| Constraint rows, coefficients, RHS, sense | verified identical, two instances |
+| Objective coefficients | verified identical, two instances |
+| Variable bounds | verified identical, two instances |
+| Scenario probability weighting, multi-period discounting | verified against `empire.py` |
+| Structural decoupling from Hydrogen | verified: builds and solves with no hydrogen module, which InternalEMPIRE cannot |
+| Endogenous gas quantities in a solved model | differ by 1-7%, explained by fork divergences in the surrounding electricity model, not by the gas module |
+
+The gas module's translation from input data to optimisation problem is verified
+complete: the same constraints, the same prices, the same bounds. What is *not*
+claimed is that the two whole models produce the same answers -- see
+`internal_empire_base_divergences.md` for why that is neither attainable nor the goal.

@@ -84,15 +84,30 @@ def canon_entity(name):
     return re.sub(r"[^A-Za-z0-9]", "", name)
 
 
-def canon_time(sp=None, rp=None, t=None):
+def canon_time(sp=None, rp=None, t=None, sc=None):
+    """Canonical index label.
+
+    JuMP omits the scenario component when there is only one operational scenario
+    (`sp1_rp1_t1`) and includes it when there are more (`sp1_rp1_sc2_t1`). Pyomo always
+    carries the scenario in the tuple. Normalising a missing scenario to 1 makes the
+    single- and multi-scenario cases comparable with the same key.
+    """
     parts = []
     if sp is not None:
         parts.append(f"sp{sp}")
     if rp is not None:
         parts.append(f"rp{rp}")
+    if sc is not None:
+        parts.append(f"sc{sc}")
     if t is not None:
         parts.append(f"t{t}")
     return "_".join(parts)
+
+
+def scenario_number(token):
+    """`scenario2` -> "2"; a bare number passes through."""
+    m = re.match(r"^scenario(\d+)$", str(token))
+    return m.group(1) if m else str(token)
 
 
 def hour_to_rp_t(hour):
@@ -109,6 +124,7 @@ def py_key(tokens, tail_spec, drop_hour=False):
     entity = "_".join(tokens[:-n]) if n else "_".join(tokens)
     tail = dict(zip(tail_spec, tokens[-n:])) if n else {}
     sp = tail.get("i")
+    sc = scenario_number(tail["w"]) if "w" in tail else "1"
     if "h" in tail and not drop_hour:
         rp, t = hour_to_rp_t(tail["h"])
     elif "h" in tail:
@@ -116,7 +132,7 @@ def py_key(tokens, tail_spec, drop_hour=False):
         t = None
     else:
         rp = t = None
-    return canon_entity(entity), canon_time(sp, rp, t)
+    return canon_entity(entity), canon_time(sp, rp, t, sc)
 
 
 def jl_split(raw):
@@ -131,22 +147,23 @@ def jl_split(raw):
     parts = raw.split(",")
     # Trailing parts are index labels (sp.., sp.._rp.._t..); the rest is the entity.
     k = len(parts)
-    while k > 1 and re.match(r"^sp\d+(_rp\d+)?(_t\d+)?(_sc\d+)?$", parts[k - 1]):
+    while k > 1 and re.match(r"^sp\d+(_rp\d+)?(_sc\d+)?(_t\d+)?$", parts[k - 1]):
         k -= 1
     return canon_entity("_".join(parts[:k])), parts[k:]
 
 
 def jl_time(parts):
-    """Reduce JuMP index labels to the canonical sp/rp/t string."""
-    sp = rp = t = None
+    """Reduce JuMP index labels to canonical sp/rp/sc/t components."""
+    sp = rp = sc = t = None
     for p in parts:
-        m = re.match(r"^sp(\d+)(?:_rp(\d+))?(?:_t(\d+))?(?:_sc\d+)?$", p)
+        m = re.match(r"^sp(\d+)(?:_rp(\d+))?(?:_sc(\d+))?(?:_t(\d+))?$", p)
         if not m:
             continue
         sp = sp or m.group(1)
         rp = rp or m.group(2)
-        t = t or m.group(3)
-    return sp, rp, t
+        sc = sc or m.group(3)
+        t = t or m.group(4)
+    return sp, rp, sc or "1", t
 
 
 def parse_python(path, want):
@@ -230,20 +247,22 @@ def parse_julia(path, want):
                         # scenario indices are not part of the Pyomo row key.
                         comps = raw.split(",")
                         entity = canon_entity("_".join(comps[:-2]))
+                        sc = comps[-2].strip()
                         sp = rp = t = None
                     elif fam == "storage_balance":
                         # Indexed by withprev, so the label holds a (previous, current)
                         # pair such as "(sp1_rp1_t1,_sp1_rp1_t2)". Pyomo keys this row
                         # by the CURRENT hour, so take the last label in the pair.
                         entity = canon_entity(raw.split(",")[0])
-                        labels = re.findall(r"sp(\d+)_rp(\d+)_t(\d+)", raw)
-                        sp, rp, t = labels[-1]
+                        labels = re.findall(r"sp(\d+)_rp(\d+)(?:_sc(\d+))?_t(\d+)", raw)
+                        sp, rp, sc_lbl, t = labels[-1]
+                        sc = sc_lbl or "1"
                     else:
                         entity, parts = jl_split(raw)
-                        sp, rp, t = jl_time(parts)
+                        sp, rp, sc, t = jl_time(parts)
                         if fam == "storage_cyclic":
                             t = None
-                    cur = (fam, entity, canon_time(sp, rp, t))
+                    cur = (fam, entity, canon_time(sp, rp, t, sc))
                     rows[cur] = {"terms": {}, "sense": None, "rhs": None}
                 body = s.split(":", 1)[1]
             else:
@@ -267,11 +286,11 @@ def parse_julia(path, want):
                     continue
                 cname = info[0]
                 ent, parts = jl_split(rest)
-                sp, rp, t = jl_time(parts)
+                sp, rp, sc, t = jl_time(parts)
                 c = (coef or "+1").replace(" ", "")
                 if c in ("+", "-"):
                     c += "1"
-                lbl = f"{cname}|{ent}|{canon_time(sp, rp, t)}"
+                lbl = f"{cname}|{ent}|{canon_time(sp, rp, t, sc)}"
                 rec["terms"][lbl] = rec["terms"].get(lbl, 0.0) + float(c)
             if sm:
                 cur = None
