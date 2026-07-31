@@ -46,6 +46,12 @@ def canon_entity(name):
     return re.sub(r"[^A-Za-z0-9]", "", name)
 
 
+def scenario_number(token):
+    """`scenario2` -> "2"; a bare number passes through."""
+    m = re.match(r"^scenario(\d+)$", str(token))
+    return m.group(1) if m else str(token)
+
+
 def hour_to_rp_t(hour):
     idx = (int(hour) - 1) // REG_HOURS
     return idx + 1, int(hour) - idx * REG_HOURS
@@ -73,7 +79,8 @@ def py_objective(path):
                 toks = inner.split("_")
                 ent = canon_entity("_".join(toks[:-ntail]))
                 rp, t = hour_to_rp_t(toks[-4])
-                key = f"{cname}|{ent}|sp{toks[-3]}_rp{rp}_t{t}"
+                sc = scenario_number(toks[-2])
+                key = f"{cname}|{ent}|sp{toks[-3]}_rp{rp}_sc{sc}_t{t}"
                 coefs[key] = coefs.get(key, 0.0) + float(coef.replace(" ", ""))
     return coefs
 
@@ -97,11 +104,12 @@ def jl_objective(path):
                 if cname is None:
                     continue
                 parts = rest.rstrip("_").split(",")
-                m = re.match(r"^sp(\d+)_rp(\d+)_t(\d+)$", parts[-1])
+                m = re.match(r"^sp(\d+)_rp(\d+)(?:_sc(\d+))?_t(\d+)$", parts[-1])
                 if not m:
                     continue
                 ent = canon_entity("_".join(parts[:-1]))
-                key = f"{cname}|{ent}|sp{m.group(1)}_rp{m.group(2)}_t{m.group(3)}"
+                sc = m.group(3) or "1"
+                key = f"{cname}|{ent}|sp{m.group(1)}_rp{m.group(2)}_sc{sc}_t{m.group(4)}"
                 coefs[key] = coefs.get(key, 0.0) + float(coef.replace(" ", ""))
     return coefs
 
