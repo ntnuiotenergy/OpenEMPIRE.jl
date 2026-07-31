@@ -85,8 +85,12 @@ hand-computed values.
 intended equations, not `InternalEMPIRE/empire.py`. It establishes that the Julia
 formulation agrees with a second expression of the same equations; it does not
 establish agreement with the reference implementation's own code, and a shared
-misreading of InternalEMPIRE would pass both. A comparison driven against
-`empire.py` on a cut-down instance would be stronger evidence.
+misreading of InternalEMPIRE would pass both.
+
+**That gap has since been closed** by a direct comparison against `empire.py` itself:
+all 62,446 natural-gas rows and 171,936 coefficients on a 52-node instance agree
+bit-for-bit with the reference's own LP. See `natural_gas_reference_comparison.md`.
+This fixture remains useful as a fast, hand-inspectable regression check.
 
 The Julia side is not a reimplementation: `natural_gas_parity_julia.jl` calls the
 real `create_variables`, `create_constraints`, `create_objective` and
