@@ -406,6 +406,15 @@ def validate_gas_tables(dataset: Path, manifest: dict[str, object]) -> None:
     differing = sum(row["ValuesDiffer"] == "True" for row in terminal_audit)
     if differing != int(manifest["terminal_cost_conflicting_keys"]):
         fail("Terminal-cost conflicting-key count differs from conversion manifest")
+    corrections = manifest.get("owner_confirmed_corrections", {}).get("rules", [])
+
+    def corrected_value(table, terminal, period):
+        """Owner-confirmed value that intentionally overrides the workbook, if any."""
+        for rule in corrections:
+            if table in rule["tables"] and terminal == rule["terminal"]:
+                return rule["values_by_period"].get(str(period))
+        return None
+
     for row in terminal_audit:
         key = (
             row["Node"],
@@ -414,8 +423,35 @@ def validate_gas_tables(dataset: Path, manifest: dict[str, object]) -> None:
             row["GasScenario"],
         )
         selected = cost_rows_by_table[row["Table"]][key]
-        if selected != float(row["SelectedValue"]):
+        override = corrected_value(row["Table"], row["Terminal"], row["Period"])
+        if override is not None:
+            # The audit still records what the workbook said; the CSV deliberately
+            # carries the corrected value instead. Check that, not last-row-wins.
+            if selected != override:
+                fail(
+                    f"Owner-confirmed correction not applied for {row['Table']} "
+                    f"key {key}: expected {override}, found {selected}"
+                )
+        elif selected != float(row["SelectedValue"]):
             fail(f"Last-source-row-wins mismatch for {row['Table']} key {key}")
+
+    # Every row covered by a correction rule must carry the corrected value, not only
+    # the ones that happened to be duplicated in the workbook.
+    for rule in corrections:
+        for table in rule["tables"]:
+            for (node, terminal, period, gas_scenario), value in cost_rows_by_table[
+                table
+            ].items():
+                if terminal != rule["terminal"]:
+                    continue
+                want = rule["values_by_period"].get(str(period))
+                if want is None:
+                    fail(f"{table}: {terminal} has unexpected period {period}")
+                if value != want:
+                    fail(
+                        f"{table}: {terminal} at {node} period {period} is {value}, "
+                        f"expected the owner-confirmed {want}"
+                    )
 
     reserve_audit = read_csv(dataset, "NaturalGas/reserves_duplicate_audit.csv")
     if len(reserve_audit) != int(manifest["reserve_duplicate_keys"]):

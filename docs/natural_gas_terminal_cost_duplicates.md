@@ -60,13 +60,78 @@ row counts; exact gas schemas; foreign keys; period coverage; uniqueness,
 finiteness and non-negativity; terminal and transport completeness; and that
 each audited selected value is the value present in the canonical CSV.
 
-## Recommended upstream correction
+## Resolved: the intended values, confirmed by the dataset owner (2026-07-30)
 
-The source workbook should eventually contain one intentional row per key.
-Before deleting the duplicates, the workbook owner should confirm which
-Russian-gas cost trajectory is intended. Once corrected, regeneration should
-produce an empty duplicate audit; until then, the audited last-row-wins rule
-preserves current InternalEMPIRE behavior.
+The correct profile for **every** RussianGas terminal is:
+
+| Period | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| EUR/ton | **278** | 800 | 800 | 800 | 800 | 800 | 800 |
+
+Cheap gas in the first period, then a sharp increase representing Russian gas after
+the war in Ukraine. Italy's reserves are ~28 Mton (the smaller of the two duplicated
+figures); proven Italian reserves are roughly 23-31 Mton, so the 2,182 Mton row is
+wrong by a factor of about 75.
+
+### Root cause
+
+The workbook's RussianGas section has **8 periods per country**, but only 7
+investment periods exist. Its value column was pasted on a **7-row stride** against
+8-row country blocks, so the 278 drifts one period later for each successive country:
+Hungary has it at period 1 *and* 8, Poland at 7, Romania at 6, Slovakia at 5,
+Bulgaria at 4, Greece at 3, Croatia at 2, and so on. The five countries that appear
+in both the original block (rows 228-276) and the appended block (rows 277-316) are
+the 35 duplicate keys. The original block is correct; the appended block is the
+damaged one.
+
+### What was changed
+
+`TerminalCost.csv` and `TerminalCost_stochastic.csv` in `data/full_model_int/` now
+carry the confirmed profile: 16 corrected values in the deterministic table and 12 in
+the stochastic one, where the 278 had been lost entirely (flat 800). `Reserves.csv`
+already held the correct Italian figure, because last-source-row-wins happened to
+select it.
+
+The correction is recorded as `owner_confirmed_corrections` in
+`conversion_manifest.json`, and `scripts/validate_full_model_int_dataset.py` enforces
+it for every RussianGas row — not only the duplicated ones. The duplicate audit files
+are unchanged: they remain the record of what the workbook says, which is now
+deliberately distinct from what the CSV carries.
+
+### The workbook itself was NOT modified
+
+An attempt to repair `NaturalGas.xlsx` programmatically with `openpyxl` was made and
+**reverted**. Round-tripping the file through `openpyxl` discards cached formula
+results, and `Reserves`, `PipelineCapacity` and `TerminalCapacity` all contain
+formulas. After saving, every value-reading consumer — `pandas.read_excel`,
+`reader.py` — read `None` for those cells. The damage reached three sheets that were
+never edited. The workbook was restored with `git checkout` and verified byte-clean.
+
+Repair it in Excel instead, where formulas and their cached values both survive:
+
+1. **`TerminalCost`** — delete rows **277-316** (the appended Hungary, Poland,
+   Romania, Slovakia and Bulgaria blocks; the correct copies remain at rows 228-276).
+2. **`TerminalCost`** — in the remaining appended blocks (Greece, Croatia, Macedonia,
+   Serbia, Bosnia H, rows 317-356) delete each period-8 row and set the cost to 278
+   for period 1 and 800 for periods 2-7.
+3. **`TerminalCost_stochastic`** — apply steps 1 and 2 identically, and additionally
+   set period 1 to 278 for Germany, Lithuania, Hungary, Poland, Romania, Slovakia and
+   Bulgaria, which are currently 800 there.
+4. **`Reserves`** — delete row **9** (`Italy`, 2181585300.486274), keeping row 13.
+
+Afterwards the duplicate audits should regenerate empty, and the
+`owner_confirmed_corrections` block can be dropped from the manifest.
+
+### Consequence for Python/Julia comparison
+
+Until the workbook is repaired, **the two implementations no longer read the same
+gas prices**. InternalEMPIRE reads the uncorrected workbook; OpenEMPIRE.jl reads the
+corrected CSV. Any parity run that touches RussianGas terminal costs will diverge,
+and that divergence is intended and correct — the Julia side has the right data.
+
+Comparison work must therefore apply the same correction to the generated `.tab`
+files before running the reference, and assert it took effect, rather than treating
+the resulting difference as a port defect.
 
 ## Separate reserve duplicate
 
