@@ -8,7 +8,11 @@
 using OpenEMPIRE
 using JuMP
 
-const CONFIG = joinpath(@__DIR__, "..", "config", "gas_reference_comparison.yaml")
+const CONFIG = get(
+    ENV,
+    "GASPARITY_CONFIG",
+    joinpath(@__DIR__, "..", "config", "gas_reference_comparison.yaml"),
+)
 const DATA = joinpath(@__DIR__, "..", "data", "full_model_int")
 
 function main(output)
