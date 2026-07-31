@@ -60,7 +60,7 @@ end
     test_fixed_sample_raw_csv_scenarios()
     test_configurable_regular_scenario_seasons()
     test_season_months_match_python()
-    test_december_is_sampled_into_winter()
+    test_december_is_sampled_into_fall()
     test_python_fixed_sample_scenario_parity()
     test_create_model_with_raw_csv_scenarios()
     test_generate_scenarios_without_model()

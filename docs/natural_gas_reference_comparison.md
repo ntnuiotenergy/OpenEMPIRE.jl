@@ -348,38 +348,40 @@ keys. So the divergence is key-dependent, which points at window construction in
 `_sample_regular_indices` / `generate_scenario_csv!` rather than at the key being
 dropped outright.
 
-### Root cause found and fixed: the season -> month mapping was wrong
+### Root cause: InternalEMPIRE and base EMPIRE define seasons differently
 
-`_season_months` in `scenario.jl` did not match `season_month` in
-`scenario_random.py:23-31`. Every season was offset by one month:
+The two implementations disagree about which months belong to which season:
 
-| Season | Reference | Port (before) |
+| Season | base EMPIRE (`OpenEMPIRE-csv/empire/core/scenario_utils.py:21-29`) | InternalEMPIRE (`scenario_random.py:23-31`) |
 |---|---|---|
-| winter | 1, 2, **12** | 1, 2, **3** |
-| spring | **3**, 4, 5 | 4, 5, **6** |
-| summer | **6**, 7, 8 | 7, 8, **9** |
-| fall | **9**, 10, 11 | 10, 11, **12** |
+| winter | 1, 2, **3** | 1, 2, **12** |
+| spring | **4**, 5, 6 | **3**, 4, 5 |
+| summer | **7**, 8, 9 | **6**, 7, 8 |
+| fall | **10**, 11, 12 | **9**, 10, 11 |
 
-Both implementations preserve chronological order when filtering, so a winter pool of
-(1, 2, 12) and one of (1, 2, 3) are **identical for their first 1,416 rows** -- January
-plus February -- and diverge only beyond that. A fixed-sample key with a small sample
-hour therefore reproduced the reference exactly, while a large one silently sampled
-March where the reference sampled December. That is precisely the observed pattern:
-period 2 (hour 127) matched, period 1 (hour 2124) did not.
+OpenEMPIRE.jl targets base EMPIRE and matches it. InternalEMPIRE wraps winter around
+the turn of the year instead. This is a **fork divergence**, recorded in
+`internal_empire_base_divergences.md` -- not a defect in the port.
 
-This affected **all** scenario generation, random as well as fixed-sample, for every
-dataset -- not just the gas comparison.
+Both implementations preserve chronological order when filtering, so the two winter
+pools are identical for their first 1,416 rows (January plus February) and diverge only
+beyond that. That is exactly the observed pattern: a sampling key whose winter hour was
+127 or 7 reproduced the reference perfectly, while one at 2124 did not, because 2124
+lands in December for InternalEMPIRE and in March for base EMPIRE.
 
-Fixed in `scenario.jl`, with two regression tests in `test_scenario_csv.jl`:
-`test_season_months_match_python` pins the mapping against the reference values and
-checks every month belongs to exactly one season, and
-`test_december_is_sampled_into_winter` exercises `_season_indices` on a December
-fixture. The pre-existing `test_python_fixed_sample_scenario_parity` could not catch
-this: its fixture only emits months 1, 4, 7 and 10, each of which falls in the same
-season under both the correct and the incorrect mapping.
+Consequently the two cannot be made to draw the same weather from a shared sampling key
+unless the season definition is aligned -- and aligning it would break parity with the
+implementation this port actually targets. For the runs below the key happened to use
+winter hours inside the shared prefix, so loads matched exactly
+(`max abs diff 0.0000e+00` across 7,488 keys); that is a property of those keys, not a
+general guarantee.
 
-After the fix the electricity load matches **exactly** -- `max abs diff 0.0000e+00`
-across all 7,488 shared keys, against 2.98e+04 before.
+**Correction:** an earlier revision of this document claimed the port had an off-by-one
+month bug and that it had been fixed. That was wrong. The comparison had been made
+against InternalEMPIRE rather than against `OpenEMPIRE-csv`, which is the port's actual
+reference. The port's mapping was correct throughout; the change was reverted and the
+regression tests now pin against `scenario_utils.py` and assert that December is in
+fall, guarding against adopting the fork's split by mistake.
 
 ## Solution comparison: current state
 

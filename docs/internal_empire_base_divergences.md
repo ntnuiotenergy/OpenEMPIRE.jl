@@ -49,7 +49,33 @@ The Julia side can now be aligned either way: `ccs_cost_fixed` reads an optional
 `Generator/CCSCostTSFixed.csv` and `CCSCostTSVariable.csv` is already data-driven, so
 both can be zeroed per dataset without a code change.
 
-## 2. Base constructs absent from InternalEMPIRE
+## 2. Season definitions
+
+The two implementations assign months to seasons differently:
+
+| Season | base EMPIRE (`scenario_utils.py:21-29`) | InternalEMPIRE (`scenario_random.py:23-31`) |
+|---|---|---|
+| winter | 1, 2, **3** | 1, 2, **12** |
+| spring | **4**, 5, 6 | **3**, 4, 5 |
+| summer | **7**, 8, 9 | **6**, 7, 8 |
+| fall | **10**, 11, 12 | **9**, 10, 11 |
+
+InternalEMPIRE wraps winter around the turn of the year; base EMPIRE does not.
+OpenEMPIRE.jl follows base EMPIRE.
+
+This one is unusually easy to trip over. Both implementations preserve chronological
+order when filtering, so the two winter pools are **identical for their first 1,416
+rows** (January plus February) and diverge only beyond that. A fixed-sample key with a
+small winter hour therefore reproduces either implementation equally well, and only a
+key past that prefix reveals the difference. During this work the divergence was
+briefly misdiagnosed as a port bug and "fixed" in the wrong direction before being
+caught and reverted.
+
+Practical consequence: OpenEMPIRE.jl and InternalEMPIRE cannot be driven from a shared
+sampling key and be expected to draw the same weather, except by coincidence of the key
+landing in the shared prefix.
+
+## 3. Base constructs absent from InternalEMPIRE
 
 Nine declarations exist in the base with no counterpart under the same name in the
 fork. Some are genuine removals, some may be renames — each needs checking before
@@ -78,7 +104,7 @@ that alone can move dispatch, independently of anything gas-related.
 `run_EMPIRE_int.py` instead of being declared in the model, so those are plumbing
 rather than behaviour.
 
-## 3. Shared rules whose maths differs
+## 4. Shared rules whose maths differs
 
 **36 of 45 shared functions differ.** Ranked by how much (lower similarity = more
 changed):
@@ -107,11 +133,11 @@ unreachable:
 - **`FlowBalance_rule`** — the electricity balance itself. The fork adds hydrogen
   production, industry, and transport electricity terms to the nodal balance.
 - **`Obj_rule`** and **`operational_cost_rule`** — different cost composition.
-- **`emission_cap_rule`** — a different cap formulation, per section 2.
+- **`emission_cap_rule`** — a different cap formulation, per section 3.
 - **`prepSload_rule`** — load preparation subtracts heat and industry electricity
   shares that the base does not model.
 
-## 4. What this means for the port
+## 5. What this means for the port
 
 Whole-model agreement between OpenEMPIRE.jl and InternalEMPIRE is **not attainable**
 without first porting InternalEMPIRE's base divergences as well — a different and much
@@ -128,7 +154,7 @@ So the parity claims should be scoped accordingly:
 | Base electricity model matches base EMPIRE | covered separately by `compare_python_julia_outputs.jl` against `OpenEMPIRE-csv` |
 | Whole model matches InternalEMPIRE | **not attainable**, and not a goal |
 
-## 5. Reproducing
+## 6. Reproducing
 
 ```bash
 python3 scripts/diff_empire_implementations.py       # summary

@@ -181,21 +181,24 @@ end
 """
 Months belonging to each regular season.
 
-These must match `season_month` in `InternalEMPIRE/scenario_random.py:23-31` exactly:
-winter wraps around the turn of the year and includes December, so the seasons are
-offset by one month from the naive Jan-Mar / Apr-Jun / ... split.
+These match `season_month` in `OpenEMPIRE-csv/empire/core/scenario_utils.py:21-29`,
+which is the implementation this port targets.
 
-Getting this wrong is nearly invisible in testing: pandas' boolean mask and this
-comprehension both preserve chronological order, so a winter pool of (1, 2, 3) and one
-of (1, 2, 12) are byte-identical for their first 1,416 rows (January plus February)
-and only diverge beyond that. A fixed-sample key with a small sample hour reproduces
-the reference perfectly while a large one silently samples a different month.
+Note that **InternalEMPIRE uses a different split** -- winter (1, 2, 12), spring
+(3, 4, 5), summer (6, 7, 8), fall (9, 10, 11) -- wrapping winter around the turn of
+the year. That is one of the fork's divergences from base EMPIRE, documented in
+`docs/internal_empire_base_divergences.md`, not something to reproduce here. Adopting
+InternalEMPIRE's split would break parity with the actual reference.
+
+The difference is easy to miss in testing because both implementations preserve
+chronological order when filtering, so the two winter pools are identical for their
+first 1,416 rows (January plus February) and diverge only beyond that.
 """
 function _season_months(season::AbstractString)
-    season == "winter" && return (1, 2, 12)
-    season == "spring" && return (3, 4, 5)
-    season == "summer" && return (6, 7, 8)
-    season == "fall" && return (9, 10, 11)
+    season == "winter" && return (1, 2, 3)
+    season == "spring" && return (4, 5, 6)
+    season == "summer" && return (7, 8, 9)
+    season == "fall" && return (10, 11, 12)
     throw(ArgumentError("$season is not a valid regular season"))
 end
 

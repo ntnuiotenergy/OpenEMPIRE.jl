@@ -931,49 +931,47 @@ function test_create_model_respects_emission_cap_config()
 end
 
 """
-Pin the season -> month mapping against InternalEMPIRE's `season_month`.
+Pin the season -> month mapping against the implementation this port targets.
 
-This is a direct value test rather than a behavioural one because the behavioural
-fixtures cannot see the difference. `_write_python_parity_scenario_data` only emits
-rows in months 1, 4, 7 and 10, and each of those falls in the same season under both
-the correct mapping and the off-by-one-month mapping the port originally had, so
-`test_python_fixed_sample_scenario_parity` passes either way.
+The reference is `OpenEMPIRE-csv/empire/core/scenario_utils.py:21-29`, NOT
+InternalEMPIRE, which uses a different split (winter wraps to include December). That
+difference is a fork divergence recorded in `docs/internal_empire_base_divergences.md`;
+reproducing it here would break parity with the actual reference.
 
-The bug it missed: winter was (1, 2, 3) instead of (1, 2, 12). Both pools begin with
-January and February in chronological order, so they are identical for their first
-1,416 rows and only diverge after that. A fixed-sample key with a small sample hour
-reproduced the Python reference exactly; one with a large hour silently sampled March
-instead of December.
+The two are easy to confuse because both preserve chronological order when filtering,
+so their winter pools are identical for the first 1,416 rows (January plus February)
+and diverge only beyond that -- a fixed-sample key with a small sample hour cannot tell
+them apart.
 """
 function test_season_months_match_python()
-    # Verbatim from InternalEMPIRE/scenario_random.py:23-31.
-    python_season_month = Dict(
-        "winter" => [1, 2, 12],
-        "spring" => [3, 4, 5],
-        "summer" => [6, 7, 8],
-        "fall" => [9, 10, 11],
+    # Verbatim from OpenEMPIRE-csv/empire/core/scenario_utils.py:21-29.
+    base_season_month = Dict(
+        "winter" => [1, 2, 3],
+        "spring" => [4, 5, 6],
+        "summer" => [7, 8, 9],
+        "fall" => [10, 11, 12],
     )
-    for (season, months) in python_season_month
+    for (season, months) in base_season_month
         @test sort(collect(OpenEMPIRE._season_months(season))) == sort(months)
     end
 
-    # Every month must belong to exactly one season -- an off-by-one mapping that
-    # dropped or doubled a month would still satisfy the per-season check above if
-    # the reference list were mis-transcribed too.
+    # Every month belongs to exactly one season.
     covered = reduce(vcat, [collect(OpenEMPIRE._season_months(s))
                             for s in OpenEMPIRE.REGULAR_SCENARIO_SEASONS])
     @test sort(covered) == collect(1:12)
+
+    # Guard against silently adopting InternalEMPIRE's split.
+    @test 12 in OpenEMPIRE._season_months("fall")
+    @test !(12 in OpenEMPIRE._season_months("winter"))
 
     @test_throws ArgumentError OpenEMPIRE._season_months("midsummer")
 end
 
 """
-December belongs to winter, not fall.
-
-The month where the old and new mappings disagree most visibly, exercised through the
-actual season-filtering helper rather than the constant.
+December belongs to fall under base EMPIRE's split, exercised through the actual
+season-filtering helper rather than the constant.
 """
-function test_december_is_sampled_into_winter()
+function test_december_is_sampled_into_fall()
     rows = Tuple{String, Int}[]
     idx = 0
     for (month, day) in ((1, 1), (3, 1), (12, 1))
@@ -996,8 +994,8 @@ function test_december_is_sampled_into_winter()
         spring = OpenEMPIRE._season_indices(table, 2020, "spring")
         fall = OpenEMPIRE._season_indices(table, 2020, "fall")
 
-        @test table.months[winter] == [1, 1, 1, 1, 12, 12, 12, 12]
-        @test table.months[spring] == [3, 3, 3, 3]
-        @test isempty(fall)
+        @test table.months[winter] == [1, 1, 1, 1, 3, 3, 3, 3]
+        @test isempty(spring)
+        @test table.months[fall] == [12, 12, 12, 12]
     end
 end
