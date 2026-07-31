@@ -353,6 +353,22 @@ function _read_strategic_profiles_pair_csv(
     return profiles
 end
 
+"""
+    _read_scalar_csv(path)
+
+Read a single numeric value from a one-column CSV (header plus one data row).
+
+Used for parameters the reference declares as a scalar `Param(initialize=...)` rather
+than a per-period profile, such as the CCS fixed transport-and-storage cost.
+"""
+function _read_scalar_csv(path::AbstractString; value_col::Int = 1)
+    for row in _csv_rows(path)
+        _is_blank(row[value_col]) && continue
+        return _float_cell(row[value_col])
+    end
+    throw(ArgumentError("No numeric value found in $path"))
+end
+
 function _read_strategic_profile_csv(
         path::AbstractString;
         period_col::Int = 1,
@@ -659,6 +675,10 @@ function read_params_csv(
     par.genVariableOMCost = _read_float_by_string_csv(_required_csv(dir, generator, "genVariableOMCost.csv"))
     par.genFuelCost = _read_strategic_profiles_csv(_required_csv(dir, generator, "genFuelCost.csv"))
     par.CCSCostTSVariable = _read_strategic_profile_csv(_required_csv(dir, generator, "CCSCostTSVariable.csv"))
+    ccs_fixed_path = _optional_csv(dir, generator, "CCSCostTSFixed.csv")
+    if ccs_fixed_path !== nothing
+        par.CCSCostTSFixed = _read_scalar_csv(ccs_fixed_path)
+    end
     par.genEfficiency = _read_strategic_profiles_csv(_required_csv(dir, generator, "genEfficiency.csv"))
     par.genRefInitCap = _read_float_by_pair_csv(_required_csv(dir, generator, "genRefInitCap.csv"))
     par.genScaleInitCap = _read_strategic_profiles_csv(_required_csv(dir, generator, "genScaleInitCap.csv"))

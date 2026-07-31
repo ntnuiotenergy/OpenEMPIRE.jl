@@ -245,15 +245,15 @@
     },
     {
       "path": "NaturalGas/TerminalCost.csv",
-      "bytes": 10940,
+      "bytes": 11249,
       "rows": 308,
-      "sha256": "627f6b8395974afb0ead13f9bf59ce3e615644c355933e22b0dc87ac7e2fb7fc"
+      "sha256": "d756f75ee3d02de5755f38e241bcac6c9c33f2825d04c2e11ec0b3378d6a2a93"
     },
     {
       "path": "NaturalGas/TerminalCost_stochastic.csv",
-      "bytes": 10955,
+      "bytes": 11264,
       "rows": 308,
-      "sha256": "46012db9e3c35b76431e705faff366a5137d50d2688d9cd49d654c1c0cdc9507"
+      "sha256": "c7432d9ff8c57c5b0518fddd9b05087619398711af7bdb45988f85011a3c7015"
     },
     {
       "path": "NaturalGas/reserves_duplicate_audit.csv",
@@ -615,5 +615,27 @@
       "rows": 245,
       "sha256": "4263a074b9408a317a9195eff83502ed4bb3b3f3a5a4a3b0891a01c92a7d8208"
     }
-  ]
+  ],
+  "owner_confirmed_corrections": {
+    "description": "Corrections confirmed by the dataset owner that intentionally override the workbook value. Until NaturalGas.xlsx is repaired, these make the CSV differ from what InternalEMPIRE currently reads.",
+    "rules": [
+      {
+        "tables": [
+          "TerminalCost",
+          "TerminalCost_stochastic"
+        ],
+        "terminal": "RussianGas",
+        "values_by_period": {
+          "1": 278.0,
+          "2": 800.0,
+          "3": 800.0,
+          "4": 800.0,
+          "5": 800.0,
+          "6": 800.0,
+          "7": 800.0
+        },
+        "reason": "The workbook RussianGas block has 8 periods and its value column was pasted on a 7-row stride, so the 278 drifted one period later per country. Owner-confirmed intent: cheap pre-war gas in period 1, 800 EUR/ton thereafter."
+      }
+    ]
+  }
 }

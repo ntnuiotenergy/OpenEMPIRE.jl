@@ -929,3 +929,75 @@ function test_create_model_respects_emission_cap_config()
         @test _sparse_axis_length(emp_true[:emission_cap]) == expected
     end
 end
+
+"""
+Pin the season -> month mapping against InternalEMPIRE's `season_month`.
+
+This is a direct value test rather than a behavioural one because the behavioural
+fixtures cannot see the difference. `_write_python_parity_scenario_data` only emits
+rows in months 1, 4, 7 and 10, and each of those falls in the same season under both
+the correct mapping and the off-by-one-month mapping the port originally had, so
+`test_python_fixed_sample_scenario_parity` passes either way.
+
+The bug it missed: winter was (1, 2, 3) instead of (1, 2, 12). Both pools begin with
+January and February in chronological order, so they are identical for their first
+1,416 rows and only diverge after that. A fixed-sample key with a small sample hour
+reproduced the Python reference exactly; one with a large hour silently sampled March
+instead of December.
+"""
+function test_season_months_match_python()
+    # Verbatim from InternalEMPIRE/scenario_random.py:23-31.
+    python_season_month = Dict(
+        "winter" => [1, 2, 12],
+        "spring" => [3, 4, 5],
+        "summer" => [6, 7, 8],
+        "fall" => [9, 10, 11],
+    )
+    for (season, months) in python_season_month
+        @test sort(collect(OpenEMPIRE._season_months(season))) == sort(months)
+    end
+
+    # Every month must belong to exactly one season -- an off-by-one mapping that
+    # dropped or doubled a month would still satisfy the per-season check above if
+    # the reference list were mis-transcribed too.
+    covered = reduce(vcat, [collect(OpenEMPIRE._season_months(s))
+                            for s in OpenEMPIRE.REGULAR_SCENARIO_SEASONS])
+    @test sort(covered) == collect(1:12)
+
+    @test_throws ArgumentError OpenEMPIRE._season_months("midsummer")
+end
+
+"""
+December belongs to winter, not fall.
+
+The month where the old and new mappings disagree most visibly, exercised through the
+actual season-filtering helper rather than the constant.
+"""
+function test_december_is_sampled_into_winter()
+    rows = Tuple{String, Int}[]
+    idx = 0
+    for (month, day) in ((1, 1), (3, 1), (12, 1))
+        for h in 0:3
+            ts = Dates.format(
+                DateTime(2020, month, day) + Dates.Hour(h),
+                dateformat"dd/mm/yyyy HH:MM",
+            )
+            push!(rows, (ts, idx))
+            idx += 1
+        end
+    end
+
+    mktempdir() do root
+        path = joinpath(root, "electricload.csv")
+        _write_two_node_scenario_file(path, rows, i -> (100.0 + i, 200.0 + i))
+        table = OpenEMPIRE._read_raw_scenario_table(path, dateformat"dd/mm/yyyy HH:MM")
+
+        winter = OpenEMPIRE._season_indices(table, 2020, "winter")
+        spring = OpenEMPIRE._season_indices(table, 2020, "spring")
+        fall = OpenEMPIRE._season_indices(table, 2020, "fall")
+
+        @test table.months[winter] == [1, 1, 1, 1, 12, 12, 12, 12]
+        @test table.months[spring] == [3, 3, 3, 3]
+        @test isempty(fall)
+    end
+end

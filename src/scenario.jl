@@ -178,11 +178,24 @@ function _python_dateformat(time_format::AbstractString)
     return DateFormat(julia_format)
 end
 
+"""
+Months belonging to each regular season.
+
+These must match `season_month` in `InternalEMPIRE/scenario_random.py:23-31` exactly:
+winter wraps around the turn of the year and includes December, so the seasons are
+offset by one month from the naive Jan-Mar / Apr-Jun / ... split.
+
+Getting this wrong is nearly invisible in testing: pandas' boolean mask and this
+comprehension both preserve chronological order, so a winter pool of (1, 2, 3) and one
+of (1, 2, 12) are byte-identical for their first 1,416 rows (January plus February)
+and only diverge beyond that. A fixed-sample key with a small sample hour reproduces
+the reference perfectly while a large one silently samples a different month.
+"""
 function _season_months(season::AbstractString)
-    season == "winter" && return (1, 2, 3)
-    season == "spring" && return (4, 5, 6)
-    season == "summer" && return (7, 8, 9)
-    season == "fall" && return (10, 11, 12)
+    season == "winter" && return (1, 2, 12)
+    season == "spring" && return (3, 4, 5)
+    season == "summer" && return (6, 7, 8)
+    season == "fall" && return (9, 10, 11)
     throw(ArgumentError("$season is not a valid regular season"))
 end
 
