@@ -4,6 +4,7 @@ using HiGHS
 using JuMP
 using OpenEMPIRE
 using Dates
+using Logging
 using Random
 using Test
 using TimeStruct
@@ -62,6 +63,7 @@ end
     test_gas_marginal_cost_without_a_fuel_price()
     test_full_model_int_gas_generators_are_priced()
     test_natural_gas_validation_is_enforced()
+    test_multiple_gas_scenarios_warn_unverified()
     test_natural_gas_multi_period_scenario_weighting()
     test_weather_profiles_replicate_across_gas_scenarios()
     test_natural_gas_model_and_results()
