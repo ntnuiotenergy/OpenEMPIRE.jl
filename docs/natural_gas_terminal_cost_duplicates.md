@@ -122,16 +122,25 @@ Repair it in Excel instead, where formulas and their cached values both survive:
 Afterwards the duplicate audits should regenerate empty, and the
 `owner_confirmed_corrections` block can be dropped from the manifest.
 
-### Consequence for Python/Julia comparison
+### The workbook has since been repaired
 
-Until the workbook is repaired, **the two implementations no longer read the same
-gas prices**. InternalEMPIRE reads the uncorrected workbook; OpenEMPIRE.jl reads the
-corrected CSV. Any parity run that touches RussianGas terminal costs will diverge,
-and that divergence is intended and correct — the Julia side has the right data.
+The steps above were subsequently applied to `NaturalGas.xlsx` by editing the sheet
+XML directly inside the zip, which — unlike `openpyxl` — preserves cached formula
+results in the sheets that are not touched. Steps 1-3 were applied; step 4 was
+deliberately skipped, because last-source-row-wins already selects Italy's correct
+figure and the `Reserves` data column holds formulas whose relative references would
+need rewriting after a row shift.
 
-Comparison work must therefore apply the same correction to the generated `.tab`
-files before running the reference, and assert it took effect, rather than treating
-the resulting difference as a port defect.
+Verified afterwards: 12 RussianGas nodes at `[1:278, 2-7:800]` in both sheets, no
+duplicate keys, no period 8, all other sheets value-identical, headers still on row 3,
+and `pandas.read_excel(..., skiprows=2)` — the way `reader.py` reads it — returning
+the corrected profile. Regenerating the `.tab` files through
+`reader.generate_tab_files` and comparing key-by-key against the Julia CSV gives all
+308 keys present on both sides with no real differences (only 16 one-ULP float
+formatting differences on an unrelated `LNGImport` value).
+
+So **Python and Julia read identical terminal costs**, and no correction needs to be
+applied to the generated `.tab` files during comparison runs.
 
 ## Separate reserve duplicate
 

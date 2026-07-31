@@ -1,0 +1,43 @@
+# Time-reduced full_model_int instance used to compare the Julia natural-gas rows
+# against InternalEMPIRE's own model builder. See
+# docs/natural_gas_reference_comparison.md.
+#
+# The time structure must match the reference driver exactly:
+#   2 strategic periods, 1 regular season of 24 h, 2 peak seasons of 24 h,
+#   1 weather scenario, 1 gas scenario.
+# n_peak_seasons is 2 because scenario_random.py:160-172 in the reference always
+# emits a country-peak and an overall-peak block; a 1-peak structure produces
+# scenario hours the reference's Operationalhour set does not contain.
+
+use_temporary_directory: True
+temporary_directory: './'
+forecast_horizon_year: 2030                            # 2020 + 2 periods x 5 years
+number_of_scenarios: 1
+natural_gas: True                                      # the module under comparison
+number_of_gas_scenarios: 1
+length_of_regular_season: 24
+regular_seasons: ["winter"]
+n_peak_seasons: 2
+len_peak_season: 24
+discount_rate: 0.05
+wacc: 0.05
+optimization_solver: "HiGHS"
+use_scenario_generation: True
+use_fixed_sample: True                                 # solution comparison feeds the reference's own key
+load_change_module: False
+filter_make: False
+filter_use: False
+copula_clusters_make: False
+copula_clusters_use: False
+copulas_to_use: ["electricload"]
+n_cluster: 10
+moment_matching: False
+n_tree_compare: 20
+use_emission_cap: True
+compute_operational_duals: False
+print_in_iamc_format: False
+write_in_lp_format: False
+serialize_instance: False
+north_sea: True
+leap_years_investment: 5
+time_format: "%d/%m/%Y %H:%M"

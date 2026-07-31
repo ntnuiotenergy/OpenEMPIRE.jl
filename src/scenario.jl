@@ -186,6 +186,22 @@ function _python_dateformat(time_format::AbstractString)
     return DateFormat(julia_format)
 end
 
+"""
+Months belonging to each regular season.
+
+These match `season_month` in `OpenEMPIRE-csv/empire/core/scenario_utils.py:21-29`,
+which is the implementation this port targets.
+
+Note that **InternalEMPIRE uses a different split** -- winter (1, 2, 12), spring
+(3, 4, 5), summer (6, 7, 8), fall (9, 10, 11) -- wrapping winter around the turn of
+the year. That is one of the fork's divergences from base EMPIRE, documented in
+`docs/internal_empire_base_divergences.md`, not something to reproduce here. Adopting
+InternalEMPIRE's split would break parity with the actual reference.
+
+The difference is easy to miss in testing because both implementations preserve
+chronological order when filtering, so the two winter pools are identical for their
+first 1,416 rows (January plus February) and diverge only beyond that.
+"""
 function _season_months(season::AbstractString)
     season == "winter" && return (1, 2, 3)
     season == "spring" && return (4, 5, 6)

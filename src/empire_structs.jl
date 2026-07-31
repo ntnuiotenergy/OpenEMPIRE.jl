@@ -60,6 +60,11 @@ Base.@kwdef mutable struct EmpireParams
     genVariableOMCost::Dict{String, Float64}                     = Dict{String, Float64}()
     genFuelCost::Dict{String, TimeProfile}                       = Dict{String, TimeProfile}()
     CCSCostTSVariable::Union{Nothing, TimeProfile}               = nothing
+    # CO2 transport-and-storage cost charged on CCS generator *investment*, in
+    # EUR per tCO2 of annual capture capability. `nothing` keeps the historical
+    # hardcoded default (see `ccs_cost_fixed`); supply Generator/CCSCostTSFixed.csv
+    # to override, including with 0.0 to disable the charge entirely.
+    CCSCostTSFixed::Union{Nothing, Float64}                      = nothing
     genEfficiency::Dict{String, TimeProfile}                     = Dict{String, TimeProfile}()
     genRefInitCap::Dict{Tuple{String, String}, Float64}          = Dict{Tuple{String, String}, Float64}()
     genScaleInitCap::Dict{String, TimeProfile}                   = Dict{String, TimeProfile}()
@@ -212,6 +217,22 @@ co2_price(par, sp) = par.CO2price === nothing ? 0.0 : par.CO2price[sp]
 co2_cap(par, sp) = par.CO2cap === nothing ? nothing : par.CO2cap[sp]
 co2_content(par, g) = get(par.genCO2Content, g, 0.0)
 ccs_cost_variable(par, sp) = par.CCSCostTSVariable === nothing ? 0.0 : par.CCSCostTSVariable[sp]
+
+"""
+    DEFAULT_CCS_COST_FIXED
+
+CO2 transport-and-storage cost charged on CCS generator investment, EUR/tCO2.
+
+Matches the value InternalEMPIRE declares at `empire.py:461`
+(`CCSCostTSFix = Param(initialize=1149873.72) #NB! Hard-coded`). Note that the
+reference has that declaration, and its variable counterpart at `empire.py:462`,
+**commented out**, so InternalEMPIRE charges neither. OpenEMPIRE.jl charges both, which
+is a documented difference rather than an accident -- see
+`docs/natural_gas_reference_comparison.md`.
+"""
+const DEFAULT_CCS_COST_FIXED = 1149873.72
+
+ccs_cost_fixed(par) = par.CCSCostTSFixed === nothing ? DEFAULT_CCS_COST_FIXED : par.CCSCostTSFixed
 
 # General properties
 load(par, n, t) = haskey(par.sload, n) ? par.sload[n][t] : DEFAULT_LOAD

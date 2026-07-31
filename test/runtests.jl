@@ -27,6 +27,7 @@ end
 
 @testset "CSV" begin
     test_read_csv_dataset()
+    test_ccs_fixed_cost_is_data_driven()
     test_read_bundled_csv_datasets()
     test_read_full_model_int_dataset()
     test_native_timestruct_operational_weights()
@@ -38,6 +39,8 @@ end
     test_read_raw_csv_scenarios()
     test_fixed_sample_raw_csv_scenarios()
     test_configurable_regular_scenario_seasons()
+    test_season_months_match_python()
+    test_december_is_sampled_into_fall()
     test_scenario_filter_metrics_and_clustering()
     test_scenario_filter_make_and_use()
     test_scenario_filter_defaults()

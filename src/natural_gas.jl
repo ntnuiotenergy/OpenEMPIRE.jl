@@ -206,12 +206,16 @@ function _create_natural_gas_reserve_constraints!(
                         end
                     end
                 end
+                # Named so the rows are identifiable in an exported LP and in solver
+                # diagnostics (IIS). Anonymous rows are invisible to any LP-level
+                # comparison against the Python reference.
                 push!(
                     constraints,
                     @constraint(
                         emp,
                         total_import <=
                         NATURAL_GAS_ROW_SCALE * natural_gas_reserves(par, node),
+                        base_name = "natural_gas_max_reserves[$node,$terminal,$weather_scenario,$gas_scenario]",
                     ),
                 )
             end
