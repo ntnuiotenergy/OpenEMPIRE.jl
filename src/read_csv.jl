@@ -138,7 +138,13 @@ function _optional_csv(dir::AbstractString, component::AbstractString, filename:
 end
 
 _csv_rows(path::AbstractString) = CSV.File(path; normalizenames = false)
-_is_blank(x) = ismissing(x) || isempty(strip(string(x)))
+# Dispatch rather than `isempty(strip(string(x)))`: the generic form formats every
+# cell into a String just to test emptiness, including every Float64 in the multi-
+# million-cell scenario CSVs. A number is never blank, and a string needs no copy.
+_is_blank(::Missing) = true
+_is_blank(x::AbstractString) = isempty(strip(x))
+_is_blank(::Real) = false
+_is_blank(x) = isempty(strip(string(x)))
 _string_cell(x) = strip(string(x))
 _float_cell(x) = x isa Real ? Float64(x) : parse(Float64, strip(string(x)))
 _int_cell(x) = x isa Integer ? Int(x) : parse(Int, strip(string(x)))
