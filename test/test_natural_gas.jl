@@ -243,7 +243,12 @@ function test_natural_gas_csv_loading_and_validation()
         @test params.NaturalGas.terminalCost[
             ("A", "DomesticProduction", 1, 2)
         ] == 200.0
-        @test isempty(OpenEMPIRE.validate(params; sets, periods, strict = false))
+        validation_errors =
+            OpenEMPIRE.validate(params; sets, periods, strict = false)
+        @test any(
+            occursin("gasScenarioCount must equal 1", error)
+            for error in validation_errors
+        )
         empty!(params.NaturalGas.reserves)
         reserve_error = try
             OpenEMPIRE.validate(params; sets, periods)
@@ -765,8 +770,8 @@ end
 function test_natural_gas_model_and_results()
     pipeline_power = 0.024
     model, periods, sets, params, discounter = _natural_gas_solved_fixture(
-        weather_scenarios = 2,
-        gas_scenarios = 2,
+        weather_scenarios = 1,
+        gas_scenarios = 1,
         pipeline_power = pipeline_power,
     )
     @test JuMP.termination_status(model) == JuMP.MOI.OPTIMAL
@@ -795,7 +800,7 @@ function test_natural_gas_model_and_results()
             ],
         ) ≈ expected_import
     end
-    @test length(model[:natural_gas_max_reserves]) == 4
+    @test length(model[:natural_gas_max_reserves]) == 1
     @test length(model[:natural_gas_storage_balance].data) ==
           2 * length(periods)
 
@@ -834,8 +839,8 @@ function test_natural_gas_model_and_results()
         )
         @test all(isfile(joinpath(output_dir, file)) for file in expected_files)
         terminal_rows = collect(CSV.File(joinpath(output_dir, "ngTerminalImport.csv")))
-        @test Set(Int(row.WeatherScenario) for row in terminal_rows) == Set(1:2)
-        @test Set(Int(row.GasScenario) for row in terminal_rows) == Set(1:2)
+        @test Set(Int(row.WeatherScenario) for row in terminal_rows) == Set((1,))
+        @test Set(Int(row.GasScenario) for row in terminal_rows) == Set((1,))
         balance_rows = collect(CSV.File(joinpath(output_dir, "naturalGasBalance.csv")))
         @test all(abs(Float64(row.BalanceResidual_ton)) <= 1.0e-10 for row in balance_rows)
     end
@@ -1029,58 +1034,17 @@ function test_natural_gas_storage_transport_and_supply_edges()
 end
 
 function test_natural_gas_three_by_three_scenarios()
-    model, periods, sets, params, discounter = _natural_gas_solved_fixture(
-        weather_scenarios = 3,
-        gas_scenarios = 3,
+    params = OpenEMPIRE.EmpireParams(
+        NaturalGas = OpenEMPIRE.NaturalGasParams(
+            weatherScenarioCount = 3,
+            gasScenarioCount = 3,
+        ),
     )
-    @test JuMP.termination_status(model) == JuMP.MOI.OPTIMAL
-    @test length(model[:natural_gas_max_reserves]) == 9
-    expected_pipeline = 10.0 / (0.5 * params.NaturalGas.mwhPerTon)
-    expected_compressor = params.NaturalGas.pipelinePowerDemandPerTon *
-                          expected_pipeline
-    expected_import =
-        expected_pipeline +
-        expected_compressor / (0.5 * params.NaturalGas.mwhPerTon)
-    period_context = OpenEMPIRE._natural_gas_period_maps(periods, 3)
-    expected_objective = sum(
-        OpenEMPIRE.objective_weight(
-            operational_period,
-            discounter;
-            type = "avg_year",
-        ) *
-        expected_import *
-        OpenEMPIRE.natural_gas_terminal_cost(
-            params,
-            "A",
-            "DomesticProduction",
-            1,
-            period_context[operational_period].gas,
-        ) for operational_period in periods
+    errors = String[]
+    OpenEMPIRE._check_natural_gas_params!(errors, params, nothing, nothing)
+    @test any(
+        occursin("gasScenarioCount must equal 1", error) for error in errors
     )
-    @test JuMP.objective_value(model) ≈ expected_objective
-
-    mktempdir() do output_dir
-        OpenEMPIRE.write_natural_gas_csvs(
-            output_dir,
-            model,
-            sets,
-            params,
-            periods,
-        )
-        rows = collect(CSV.File(joinpath(output_dir, "ngTerminalImport.csv")))
-        @test Set(
-            (Int(row.WeatherScenario), Int(row.GasScenario)) for row in rows
-        ) == Set((weather, gas) for weather in 1:3 for gas in 1:3)
-    end
-    components = OpenEMPIRE.objective_component_values(
-        model,
-        sets,
-        params,
-        periods,
-        discounter,
-    )
-    @test components.natural_gas_terminal_import ≈
-          JuMP.objective_value(model)
 end
 
 function test_natural_gas_oos_compatibility_and_full_year_streaming()
@@ -1159,25 +1123,24 @@ function test_natural_gas_oos_compatibility_and_full_year_streaming()
 end
 
 """
-Configuring more than one gas scenario warns that the path is unverified.
+Configuring more than one gas scenario is rejected until reference parity exists.
 
 The weather x gas combination convention has only ever been checked against a unit
 test written alongside the implementation, never against `empire.py`, because
 `full_model_int` carries only `GasScenario = 1`. A gas-major ordering in the
 reference would attach prices to the wrong scenarios while leaving row counts,
-coefficients and bounds identical, so nothing else would catch it. The warning is the
-only thing standing between that and a silently wrong result.
+coefficients and bounds identical, so deterministic delivery rejects the unverified
+axis instead of returning a plausible but potentially mis-mapped result.
 """
-function test_multiple_gas_scenarios_warn_unverified()
+function test_multiple_gas_scenarios_rejected_until_verified()
     par = OpenEMPIRE.EmpireParams()
     par.NaturalGas = OpenEMPIRE.NaturalGasParams(
         weatherScenarioCount = 2,
         gasScenarioCount = 2,
     )
     errs = String[]
-    @test_logs (:warn,) match_mode = :any OpenEMPIRE._check_natural_gas_params!(
-        errs, par, nothing, nothing,
-    )
+    OpenEMPIRE._check_natural_gas_params!(errs, par, nothing, nothing)
+    @test any(occursin("gasScenarioCount must equal 1", error) for error in errs)
 
     # One gas scenario is the verified configuration and must stay silent.
     quiet = OpenEMPIRE.EmpireParams()
@@ -1186,7 +1149,13 @@ function test_multiple_gas_scenarios_warn_unverified()
         gasScenarioCount = 1,
     )
     errs2 = String[]
-    @test_logs min_level = Logging.Warn OpenEMPIRE._check_natural_gas_params!(
-        errs2, quiet, nothing, nothing,
-    )
+    OpenEMPIRE._check_natural_gas_params!(errs2, quiet, nothing, nothing)
+    @test isempty(errs2)
+end
+
+function test_gas_comparator_negative_controls()
+    python = something(Sys.which("python3"), Sys.which("python"), nothing)
+    python === nothing && return @test_skip "Python is unavailable"
+    script = joinpath(pkgdir(OpenEMPIRE), "scripts", "test_gas_comparators.py")
+    @test success(run(ignorestatus(`$python $script`)))
 end

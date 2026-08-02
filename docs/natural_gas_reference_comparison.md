@@ -60,8 +60,11 @@ That was dropped, for two reasons discovered while trying it:
 - Emptying `Hydrogen_ReformerLocations.tab` is not loadable at all: Pyomo's set
   reader raises `TypeError` on a header-only file (`dataportal/plugins/text.py:57`).
 
-So the reference runs **completely unmodified, with unmodified data**, in its real
-`hydrogen=True` configuration. The Hydrogen-side columns that appear in gas rows are
+The reference runs with **unmodified, commit-pinned model code** in its real
+`hydrogen=True` configuration. It uses the corrected natural-gas workbook described
+in `natural_gas_terminal_cost_duplicates.md`; the runner records the exact workbook
+hashes, generated-tab hashes, time dimensions, and configuration. The Hydrogen-side
+columns that appear in gas rows are
 then *enumerated and justified* rather than suppressed:
 
 | Extra column in reference gas rows | Origin | Why Julia has no counterpart |
@@ -73,6 +76,13 @@ one: the port implements it as `transportNaturalGasDemandMet` (`natural_gas.jl:1
 so it is compared rather than excused. The comparison asserts `ng_forHydrogen` is the
 only unmatched column; any second one is a finding. This is the same discipline the
 repository applies elsewhere: document the difference, do not mask it.
+
+InternalEMPIRE also permits Hydrogen pipelines to repurpose gas pipelines. Before LP
+export, the isolated runner fixes the reference's `repurposedPipelineBuilt` variables
+to zero and records that restriction in `reference_provenance.json`. This selects the
+gas-only subsystem implemented in Julia; it does not modify reference source or input
+files. Without the restriction, the fail-closed comparator rejects those extra
+columns rather than silently dropping them.
 
 `industry=False` and `HEATMODULE=False` are ordinary run flags, not modifications,
 and match the port's current scope.
@@ -119,20 +129,23 @@ therefore secondary here, and any claim from it is scoped accordingly.
 
 ## Checks
 
-Independent of the coefficient comparison, the run must satisfy:
+Independent of coefficient values, the automated comparison must:
 
-1. `ReformerLocations` is empty in the built instance.
-2. Every `transport_naturalGasDemandMet` value is exactly zero.
-3. No `ng_forHydrogen` variable appears in any gas balance row.
-4. Gas row and gas variable counts agree between the two models.
+1. reject a reference-code commit mismatch or modifications to reference Python code;
+2. record source-workbook, generated-tab, and compared-LP hashes;
+3. find a nonzero, exact inventory for every expected gas row and variable family;
+4. reject unknown variable families, duplicate canonical keys, and unparsed gas rows;
+5. permit only the explicitly enumerated reference-side `ng_forHydrogen` column; and
+6. pass injected coefficient, RHS, row-key, objective, unknown-variable, and bound
+   negative controls.
 
-Items 1-3 verify the neutralisation actually held. If any fails, the comparison is
-void regardless of how well the coefficients match.
+If any check fails, the comparison exits nonzero and no assurance result is written.
 
 ## Reference-side result, 2026-07-30
 
-The reference ran end to end on the reduced instance with **no modification to
-`empire.py`, `reader.py`, `scenario_random.py` or any tab file**:
+The reference builder ran end to end on the reduced instance with **no modification
+to `empire.py`, `reader.py`, `scenario_random.py` or any tab file**. The comparison
+stops after LP export, so a solver licence is unnecessary:
 
 | | |
 |---|---|
@@ -252,10 +265,10 @@ difference is `0.00e+00`: bit-identical, not merely within tolerance.
 
 The matrix comparison covers the constraint block (A, b, sense) but not the objective
 vector c. A module can build identical constraints and still price gas differently,
-and pricing is half of what the gas module does, so that was a real gap.
+so the objective comparator covers module-specific gas costs and gas-fired generation.
 
-`scripts/compare_gas_objective.py` closes it. Gas cost enters both objectives through
-exactly the same two variables, with the same counts:
+Terminal import and transport shedding are the two objective families introduced by
+the natural-gas module:
 
 | Gas variable | Coefficients | Agreeing | Max relative difference |
 |---|---:|---:|---:|
@@ -263,9 +276,11 @@ exactly the same two variables, with the same counts:
 | `transport_shed` | 5,040 | 5,040 | `0.00e+00` |
 | **Total** | **11,376** | **11,376** | **`0.00e+00`** |
 
-No other gas variable carries an objective coefficient in either implementation --
-gas-fired generation is priced through terminal imports, not through `ng_forPower`,
-in both.
+Gas-fired `genOperational` variables are also gas-relevant objective terms. Ordinary
+gas generators must agree exactly. `GasCCS` and `GasCCSadv` are reported separately
+because base OpenEMPIRE.jl retains a CCS transport/storage term that InternalEMPIRE
+does not. The comparator fails on any ordinary-gas difference and requires an
+explicit `--allow-ccs-difference` acknowledgement for the documented CCS difference.
 
 These coefficients carry the whole operational weighting chain: discount rate x
 seasonal scale x scenario probability x terminal price. Their agreement therefore
@@ -306,34 +321,42 @@ What it does **not** cover, unchanged from `natural_gas_equivalence_assurance.md
   exercised only by `test_natural_gas_multi_period_scenario_weighting`, not here.
 - `ng_forHydrogen` columns in the reference's gas balance are skipped by agreement,
   since hydrogen reforming is outside the port's scope.
-- The objective function and the electricity-side model are not compared here, only
-  the natural-gas rows. `GasCCS`/`GasCCSadv` marginal costs still differ by base
-  OpenEMPIRE.jl's CCS transport-and-storage term.
+- The complete objective and electricity-side model are not compared. Module-specific
+  gas costs and gas-fired `genOperational` coefficients are compared;
+  `GasCCS`/`GasCCSadv` are reported separately because of base OpenEMPIRE.jl's CCS
+  transport-and-storage term.
 - Solution values are not compared; that would additionally require identical
   scenario tables on both sides.
 
 ### Reproducing
 
 ```bash
-# reference side (writes LP_gasparity.lp)
-conda run -n empire_env python scripts/gas_reference_build.py
-# julia side
-julia --project=. scripts/write_gas_reference_lp.jl /tmp/julia.lp
-# compare
-python3 scripts/compare_gas_matrix.py LP_gasparity.lp /tmp/julia.lp
+conda run -n empire_env python scripts/run_gas_reference_comparison.py \
+  --internal-repo ../InternalEMPIRE \
+  --output-dir /tmp/openempire-gas-reference
+
+# Fast, dependency-free parser/comparator negative controls.
+python3 scripts/test_gas_comparators.py
 ```
 
+The runner creates isolated temporary tab directories, never writes to the source
+InternalEMPIRE checkout, checks its commit and Python-code status, and writes compact
+JSON provenance plus one log per build/comparison under the requested output folder.
 
-## Solution-level comparison: attempted, blocked (2026-07-31)
 
-The matrix comparison above shows the two models *are* the same. The natural follow-up
-is to show the numbers coming out of them agree. That is **not** delivered, and the
-blocker is worth recording precisely because it is not in the gas module.
+## Historical exploratory solution comparison (not acceptance evidence)
+
+An earlier local investigation tried to compare whole-model solution values after
+neutralising out-of-scope Hydrogen consumers through data. That procedure was not
+retained as a runnable interface because it does not test the delivered model without
+altering its effective inputs. The historical numbers below explain why whole-model
+solution identity is outside the assurance claim; they are not reproducible release
+evidence.
 
 ### Setup that does work
 
-`scripts/gas_reference_build.py` (env `GASPARITY_NEUTRALISE_H2=1`) makes the two
-out-of-scope consumers inert through data, leaving `empire.py` unmodified:
+The exploratory setup made two out-of-scope consumers inert through data, leaving
+`empire.py` unmodified:
 
 | Lever | Why |
 |---|---|
@@ -351,8 +374,8 @@ Both models solve to optimality, and the hydrogen neutralisation verifiably hold
 
 ### The blocker: the two sides cannot be made to draw the same weather
 
-`compare_gas_solution.py` refuses to report quantities unless the electricity balance
-RHS -- the hourly load, straight from the scenario draw -- matches on both sides.
+The exploratory comparator refused to report quantities unless the electricity
+balance RHS -- the hourly load, straight from the scenario draw -- matched on both sides.
 Feeding Julia the reference's own `sampling_key.csv` does **not** achieve that:
 
 ```
@@ -551,13 +574,14 @@ Each was localised to the exact key including its scenario component.
 
 > **Scope limit: everything below was verified with `number_of_gas_scenarios = 1`.**
 > The gas-scenario axis is unverified against `empire.py` -- see "The gas-scenario
-> axis" below. `full_model_int` carries only `GasScenario = 1`, and the module emits a
-> warning if it is configured with more.
+> axis" below. `full_model_int` carries only `GasScenario = 1`, and deterministic
+> delivery rejects any larger configured value.
 
 | Aspect | Status |
 |---|---|
 | Constraint rows, coefficients, RHS, sense | verified identical, two instances |
-| Objective coefficients | verified identical, two instances |
+| Module-controlled and ordinary gas-generator objective coefficients | verified identical, two instances |
+| Gas CCS generator coefficients | documented base-model difference reported separately |
 | Variable bounds | verified identical, two instances |
 | Scenario probability weighting, multi-period discounting | verified against `empire.py` |
 | Structural decoupling from Hydrogen | verified: builds and solves with no hydrogen module, which InternalEMPIRE cannot |
@@ -602,7 +626,7 @@ earlier in this work.
 only configuration anyone runs and the one verified here. The risk is latent: whoever
 first sets `G = 2` would get plausible-looking numbers rather than an error.
 
-`create_model` therefore emits a warning when `gasScenarioCount > 1`
+`create_model` therefore rejects `gasScenarioCount > 1`
 (`empire_structs.jl`, `_check_natural_gas_params!`). Closing this properly needs a
 dataset with a second gas price scenario -- synthesised is fine, since what is being
 tested is the indexing, and two deliberately distinct prices make a mis-assignment

@@ -16,6 +16,7 @@ With one regular 24 h season followed by two 24 h peak seasons, Pyomo's flat hou
 49-72 -> rp3, and its Period i maps to sp{i}. Entity names are never split on "_",
 because several contain one.
 """
+import argparse
 import collections
 import json
 import re
@@ -166,8 +167,16 @@ def jl_time(parts):
     return sp, rp, sc or "1", t
 
 
+def _validate_rows(rows, side):
+    if not rows:
+        raise ValueError(f"{side}: no natural-gas rows were parsed")
+    incomplete = [key for key, row in rows.items() if row["sense"] is None or row["rhs"] is None]
+    if incomplete:
+        raise ValueError(f"{side}: {len(incomplete)} parsed rows have no complete sense/RHS")
+
+
 def parse_python(path, want):
-    rows, cur, spec = {}, None, None
+    rows, cur, spec, unknown = {}, None, None, collections.Counter()
     row_re = re.compile(r"^c_[elu]_([A-Za-z_]+)\((.*)\)_?:$")
     term_re = re.compile(r"([+-]?\s*[\d.]+(?:[eE][+-]?\d+)?)?\s*([A-Za-z_][\w()]*)")
     with open(path, errors="replace") as fh:
@@ -187,6 +196,8 @@ def parse_python(path, want):
                 entity, time = py_key(m.group(2).split("_"), spec,
                                       drop_hour=(fam == "storage_cyclic"))
                 cur = (fam, entity, time)
+                if cur in rows:
+                    raise ValueError(f"python: duplicate canonical row key {cur}")
                 rows[cur] = {"terms": {}, "sense": None, "rhs": None}
                 continue
             if cur is None:
@@ -204,6 +215,7 @@ def parse_python(path, want):
                 base, inner = name.split("(", 1)
                 info = COLUMNS.get(base.lower())
                 if info is None:
+                    unknown[base] += 1
                     continue
                 cname, ntail = info
                 toks = inner.rstrip(")").split("_")
@@ -213,11 +225,12 @@ def parse_python(path, want):
                     c += "1"
                 lbl = f"{cname}|{ent}|{tm}"
                 rec["terms"][lbl] = rec["terms"].get(lbl, 0.0) + float(c)
-    return rows
+    _validate_rows(rows, "python")
+    return rows, unknown
 
 
 def parse_julia(path, want):
-    rows, cur = {}, None
+    rows, cur, unknown = {}, None, collections.Counter()
     names = sorted(JL_FAMILY, key=len, reverse=True)
     term_re = re.compile(r"([+-]?\s*[\d.]+(?:[eE][+-]?\d+)?)?\s*([A-Za-z][\w,.()\"]*)")
     with open(path, errors="replace") as fh:
@@ -263,6 +276,8 @@ def parse_julia(path, want):
                         if fam == "storage_cyclic":
                             t = None
                     cur = (fam, entity, canon_time(sp, rp, t, sc))
+                    if cur in rows:
+                        raise ValueError(f"julia: duplicate canonical row key {cur}")
                     rows[cur] = {"terms": {}, "sense": None, "rhs": None}
                 body = s.split(":", 1)[1]
             else:
@@ -283,6 +298,7 @@ def parse_julia(path, want):
                 base, rest = name.split("_", 1)
                 info = COLUMNS.get(base.lower())
                 if info is None:
+                    unknown[base] += 1
                     continue
                 cname = info[0]
                 ent, parts = jl_split(rest)
@@ -294,25 +310,44 @@ def parse_julia(path, want):
                 rec["terms"][lbl] = rec["terms"].get(lbl, 0.0) + float(c)
             if sm:
                 cur = None
-    return rows
+    _validate_rows(rows, "julia")
+    return rows, unknown
 
 
 def close(a, b, rtol=1e-9, atol=1e-9):
     return abs(a - b) <= atol + rtol * max(abs(a), abs(b))
 
 
-def main():
-    py_path, jl_path = sys.argv[1], sys.argv[2]
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("python_lp")
+    parser.add_argument("julia_lp")
+    args = parser.parse_args(argv)
+    py_path, jl_path = args.python_lp, args.julia_lp
     want = set(FAMILIES)
-    py = parse_python(py_path, want)
-    jl = parse_julia(jl_path, want)
+    py, py_unknown = parse_python(py_path, want)
+    jl, jl_unknown = parse_julia(jl_path, want)
+
+    if py_unknown or jl_unknown:
+        details = []
+        py_unknown and details.append(f"python={dict(py_unknown)}")
+        jl_unknown and details.append(f"julia={dict(jl_unknown)}")
+        raise ValueError(
+            "unknown variable families occurred in natural-gas rows: " + "; ".join(details)
+        )
 
     print(f"{'family':22s} {'python':>8s} {'julia':>8s} {'matched':>8s} {'coefs':>11s} {'diffs':>6s} {'max rel':>10s}")
     total_bad = 0
+    total_coef = 0
+    hydrogen_columns = 0
     report = collections.defaultdict(list)
     for fam in sorted(FAMILIES):
         pk = {k: v for k, v in py.items() if k[0] == fam}
         jk = {k: v for k, v in jl.items() if k[0] == fam}
+        if not pk or not jk:
+            raise ValueError(
+                f"expected non-empty {fam} family, got python={len(pk)}, julia={len(jk)}"
+            )
         shared = set(pk) & set(jk)
         maxrel, bad, ncoef = 0.0, 0, 0
         for k in shared:
@@ -321,6 +356,7 @@ def main():
             for c in cols:
                 a, b = p["terms"].get(c, 0.0), j["terms"].get(c, 0.0)
                 if c.startswith("for_hydrogen|"):
+                    hydrogen_columns += int(a != 0.0) + int(b != 0.0)
                     continue  # documented: reforming is outside the port
                 ncoef += 1
                 if not close(a, b):
@@ -338,7 +374,7 @@ def main():
         only_py, only_jl = len(set(pk) - set(jk)), len(set(jk) - set(pk))
         flag = "" if (not bad and not only_py and not only_jl) else "  <-- CHECK"
         print(f"{fam:22s} {len(pk):8d} {len(jk):8d} {len(shared):8d} {ncoef:11d} {bad:6d} {maxrel:10.2e}{flag}")
-        globals()['TOTAL_COEF'] = globals().get('TOTAL_COEF', 0) + ncoef
+        total_coef += ncoef
         if only_py or only_jl:
             print(f"{'':22s} keys only in python: {only_py}, only in julia: {only_jl}")
             for k in list(set(pk) - set(jk))[:3]:
@@ -353,9 +389,16 @@ def main():
             print(f"  {k} {c}: python={a!r} julia={b!r}")
 
     print()
-    print(f"coefficients compared: {globals().get('TOTAL_COEF', 0)}")
+    if hydrogen_columns == 0:
+        raise ValueError(
+            "reference comparison parsed no ng_forHydrogen coefficients; the expected "
+            "out-of-scope column was not actually enumerated"
+        )
+    print(f"coefficients compared: {total_coef}")
+    print(f"documented ng_forHydrogen coefficients excluded: {hydrogen_columns}")
     print("GAS MATRIX IDENTICAL" if total_bad == 0 else f"DIFFERENCES: {total_bad}")
     return 0 if total_bad == 0 else 1
 
 
-sys.exit(main())
+if __name__ == "__main__":
+    sys.exit(main())

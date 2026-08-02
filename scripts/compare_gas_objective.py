@@ -14,6 +14,7 @@ built from the discount rate, seasScale, scenario probability and terminal cost)
 this comparison is unaffected by the sampling-key divergence between the two
 implementations.
 """
+import argparse
 import collections
 import re
 import sys
@@ -29,6 +30,7 @@ PY_VARS = {
     "ng_storageOperational": ("storage_level", 4),
     "ng_transmission": ("transmission", 4),
     "ng_forPower": ("for_power", 4),
+    "genOperational": ("generation", 4),
 }
 JL_VARS = {
     "ngTerminalImport": "terminal_import",
@@ -39,7 +41,11 @@ JL_VARS = {
     "ngStorageOperational": "storage_level",
     "ngTransmission": "transmission",
     "ngForPower": "for_power",
+    "genOperational": "generation",
 }
+
+GAS_GENERATORS = {"Gasexisting", "GasOCGT", "GasCCGT", "GasCCS", "GasCCSadv"}
+CCS_GENERATORS = {"GasCCS", "GasCCSadv"}
 
 
 def canon_entity(name):
@@ -77,6 +83,11 @@ def py_objective(path):
                     continue
                 cname, ntail = info
                 toks = inner.split("_")
+                if cname == "generation":
+                    generator = toks[-ntail - 1]
+                    if generator not in GAS_GENERATORS:
+                        continue
+                    cname = f"generation_{generator}"
                 ent = canon_entity("_".join(toks[:-ntail]))
                 rp, t = hour_to_rp_t(toks[-4])
                 sc = scenario_number(toks[-2])
@@ -107,6 +118,11 @@ def jl_objective(path):
                 m = re.match(r"^sp(\d+)_rp(\d+)(?:_sc(\d+))?_t(\d+)$", parts[-1])
                 if not m:
                     continue
+                if cname == "generation":
+                    generator = parts[-2]
+                    if generator not in GAS_GENERATORS:
+                        continue
+                    cname = f"generation_{generator}"
                 ent = canon_entity("_".join(parts[:-1]))
                 sc = m.group(3) or "1"
                 key = f"{cname}|{ent}|sp{m.group(1)}_rp{m.group(2)}_sc{sc}_t{m.group(4)}"
@@ -118,9 +134,22 @@ def close(a, b, rtol=1e-9, atol=1e-9):
     return abs(a - b) <= atol + rtol * max(abs(a), abs(b))
 
 
-def main():
-    py = py_objective(sys.argv[1])
-    jl = jl_objective(sys.argv[2])
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("python_lp")
+    parser.add_argument("julia_lp")
+    parser.add_argument(
+        "--allow-ccs-difference",
+        action="store_true",
+        help="report, but do not fail on, the documented base-OpenEMPIRE CCS term",
+    )
+    args = parser.parse_args(argv)
+    py = py_objective(args.python_lp)
+    jl = jl_objective(args.julia_lp)
+    if not py or not jl:
+        raise ValueError(
+            f"no gas-relevant objective coefficients parsed: python={len(py)}, julia={len(jl)}"
+        )
 
     groups = collections.defaultdict(lambda: [0, 0, 0, 0.0, []])
     for key in set(py) | set(jl):
@@ -143,16 +172,43 @@ def main():
     ok = True
     for name in sorted(groups):
         shared, agree, unmatched, maxrel, samples = groups[name]
-        flag = "" if (shared == agree and unmatched == 0) else "  <-- CHECK"
-        ok &= shared == agree and unmatched == 0
+        ccs_group = name in {f"generation_{generator}" for generator in CCS_GENERATORS}
+        accepted_difference = ccs_group and args.allow_ccs_difference and unmatched == 0
+        group_ok = (shared == agree and unmatched == 0) or accepted_difference
+        flag = ""
+        if accepted_difference and shared != agree:
+            flag = "  <-- DOCUMENTED CCS DIFFERENCE"
+        elif not group_ok:
+            flag = "  <-- CHECK"
+        ok &= group_ok
         print(f"{name:20s} {shared:8d} {agree:8d} {unmatched:10d} {maxrel:10.2e}{flag}")
         for key, a, b in samples:
             print(f"    {key}: python={a!r} julia={b!r}")
 
+    required = {"terminal_import", "transport_shed"} | {
+        f"generation_{generator}" for generator in GAS_GENERATORS - CCS_GENERATORS
+    }
+    absent = required - groups.keys()
+    if absent:
+        raise ValueError(
+            f"expected gas-relevant objective families were not parsed: {sorted(absent)}"
+        )
+
     total = sum(g[0] for g in groups.values())
     print(f"\ncoefficients compared: {total}")
-    print("GAS OBJECTIVE IDENTICAL" if ok else "DIFFERENCES FOUND")
+    documented_ccs_difference = any(
+        name in {f"generation_{generator}" for generator in CCS_GENERATORS}
+        and group[0] != group[1]
+        for name, group in groups.items()
+    )
+    if not ok:
+        print("DIFFERENCES FOUND")
+    elif documented_ccs_difference:
+        print("GAS OBJECTIVE ACCEPTED WITH DOCUMENTED CCS DIFFERENCES")
+    else:
+        print("GAS OBJECTIVE IDENTICAL")
     return 0 if ok else 1
 
 
-sys.exit(main())
+if __name__ == "__main__":
+    sys.exit(main())

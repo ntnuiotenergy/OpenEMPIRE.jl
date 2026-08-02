@@ -112,6 +112,10 @@ end
 
 function _write_python_parity_scenario_data(root)
     scenario_dir = joinpath(root, "ScenarioData")
+    _write_csv(
+        joinpath(root, "Sets", "Generator.csv"),
+        "Generator\nSolar\nWindonshore\nWindoffshore\nHydrorun-of-the-river\n",
+    )
     rows = _parity_time_rows()
     _write_two_node_scenario_file(joinpath(scenario_dir, "electricload.csv"), rows, row_index -> begin
         if row_index == 12

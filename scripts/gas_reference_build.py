@@ -1,31 +1,27 @@
-"""Build InternalEMPIRE's own model on a time-reduced full_model_int instance and
-write its LP with symbolic labels.
+"""Build an unmodified InternalEMPIRE gas-reference LP in an isolated directory.
 
-empire.py is imported unmodified. Hydrogen is left enabled (it cannot be disabled:
-the transport-demand constraints at empire.py:2664-2677 are ungated while their
-variables are declared only under `if hydrogen is True:`). Instead the two data
-couplings that let hydrogen touch the natural-gas balance are neutralised in the
-tab files, which is auditable and leaves the reference code untouched:
-
-  * Hydrogen_ReformerLocations.tab -> empty, so `ng_forHydrogen` drops out of
-    naturalGas_flow_balance_rule (empire.py:2179-2180).
-  * Transport_NaturalGasDemand.tab -> zero, so transport_naturalGasDemandMet is
-    driven to zero by its own >= constraint at empire.py:2676.
-
-Both neutralisations are asserted in the resulting LP/solution, not assumed.
+The script generates tabs from the supplied workbook tree, drives InternalEMPIRE's
+actual ``empire.py`` builder, and records code/data hashes beside the LP. Hydrogen is
+enabled because the reference cannot build with it disabled; ``ng_forHydrogen`` is
+enumerated explicitly by the comparator as the one out-of-scope gas-balance column.
+No source workbook or file in the InternalEMPIRE checkout is modified.
 """
+import argparse
+import hashlib
+import json
 import os
 import shutil
+import subprocess
 import sys
+import tempfile
+from pathlib import Path
 
-REPO = "/Users/torgrim/Documents/NTNU/iot/empire/InternalEMPIRE"
-sys.path.insert(0, REPO)
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-SRC_TABS = os.path.join(HERE, "tabs_full")
-TABS = os.path.join(HERE, "tabs_reduced")
-RESULTS = os.path.join(HERE, "py_results")
-TEMP = os.path.join(HERE, "py_temp")
+EXPECTED_INTERNAL_COMMIT = "14675a780129e11d03b9e9f4a03fb2649c715346"
+HERE = Path(__file__).resolve().parent
+REPO = ""
+TABS = ""
+RESULTS = ""
+TEMP = ""
 
 # ---- time reduction (the only structural change) ----
 NoOfPeriods = 2
@@ -44,20 +40,46 @@ discountrate = 0.05
 WACC = 0.05
 
 
-def prepare_tabs():
-    """Copy the generated tabs verbatim. No edits.
+def sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
-    An earlier version neutralised Hydrogen couplings here. That was dropped:
-    zeroing `Transport_NaturalGasDemand` does not remove the
-    `transport_naturalGasDemandMet` *column* from the gas balance row (Pyomo builds
-    the term whatever the parameter value), and emptying
-    `Hydrogen_ReformerLocations` is not loadable -- Pyomo's set reader rejects a
-    header-only file. The comparison instead runs the reference in its real
-    configuration and enumerates the extra Hydrogen-side columns explicitly.
-    """
+
+def verify_reference(repo, expected_commit):
+    commit = subprocess.check_output(
+        ["git", "-C", repo, "rev-parse", "HEAD"], text=True
+    ).strip()
+    if commit != expected_commit:
+        raise RuntimeError(
+            f"InternalEMPIRE commit mismatch: expected {expected_commit}, found {commit}"
+        )
+    code_files = ("empire.py", "reader.py", "scenario_random.py", "run_EMPIRE_int.py")
+    changed = subprocess.run(
+        ["git", "-C", repo, "diff", "--quiet", "--", *code_files]
+    ).returncode
+    if changed:
+        raise RuntimeError(
+            "InternalEMPIRE reference code is modified; refusing a non-reproducible comparison"
+        )
+    return commit, code_files
+
+
+def prepare_tabs(reader_module, source_data):
+    """Generate a fresh, unedited tab set in the isolated comparison directory."""
     if os.path.exists(TABS):
         shutil.rmtree(TABS)
-    shutil.copytree(SRC_TABS, TABS)
+    reader_module.generate_tab_files(
+        filepath=source_data,
+        tab_file_path=TABS,
+        HEATMODULE=False,
+        hydrogen=True,
+        industry=False,
+        periods=NoOfPeriods,
+        gas_stochasticity_flag=False,
+    )
 
 
 def node_dicts():
@@ -91,11 +113,95 @@ def node_dicts():
     return found["dict_countries"], found["dict_offshr_nodes"]
 
 
-def main():
-    prepare_tabs()
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--internal-repo",
+        type=Path,
+        default=HERE.parents[1] / "InternalEMPIRE",
+        help="InternalEMPIRE checkout (default: sibling workspace checkout)",
+    )
+    parser.add_argument(
+        "--work-dir",
+        type=Path,
+        help="isolated output directory (default: a retained temporary directory)",
+    )
+    parser.add_argument("--periods", type=int, choices=(2, 3), default=2)
+    parser.add_argument("--weather-scenarios", type=int, choices=(1, 2), default=1)
+    parser.add_argument("--expected-commit", default=EXPECTED_INTERNAL_COMMIT)
+    parser.add_argument(
+        "--solve",
+        action="store_true",
+        help="solve after writing the LP (not needed for structural assurance)",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    global REPO, TABS, RESULTS, TEMP, NoOfPeriods, NoOfScenarios
+    args = parse_args(argv)
+    repo = args.internal_repo.resolve()
+    work_dir = (
+        args.work_dir.resolve()
+        if args.work_dir
+        else Path(tempfile.mkdtemp(prefix="openempire-gas-reference-"))
+    )
+    work_dir.mkdir(parents=True, exist_ok=True)
+    REPO = str(repo)
+    TABS = str(work_dir / "tabs")
+    RESULTS = str(work_dir / "results")
+    TEMP = str(work_dir / "solver-temp")
+    NoOfPeriods = args.periods
+    NoOfScenarios = args.weather_scenarios
+
+    commit, code_files = verify_reference(REPO, args.expected_commit)
+    sys.path.insert(0, REPO)
 
     import empire
+    import reader
     from scenario_random import generate_random_scenario
+
+    source_data = os.path.join(REPO, "Data handler", "full_model_int")
+    prepare_tabs(reader, source_data)
+
+    provenance = {
+        "internal_repo": REPO,
+        "internal_commit": commit,
+        "reference_code": [
+            {"path": path, "sha256": sha256(os.path.join(REPO, path))}
+            for path in code_files
+        ],
+        "source_workbooks": [
+            {
+                "path": str(path.relative_to(repo)),
+                "bytes": path.stat().st_size,
+                "sha256": sha256(path),
+            }
+            for path in sorted((repo / "Data handler" / "full_model_int").rglob("*.xlsx"))
+        ],
+        "generated_tabs": [
+            {
+                "path": str(path.relative_to(work_dir)),
+                "bytes": path.stat().st_size,
+                "sha256": sha256(path),
+            }
+            for path in sorted((work_dir / "tabs").rglob("*.tab"))
+        ],
+        "periods": NoOfPeriods,
+        "weather_scenarios": NoOfScenarios,
+        "gas_scenarios": NoOfGasScenarios,
+        "regular_seasons": regular_seasons,
+        "regular_season_hours": lengthRegSeason,
+        "peak_seasons": NoOfPeakSeason,
+        "peak_season_hours": lengthPeakSeason,
+        "repurpose_cost_factor": 1.0,
+        "repurpose_energy_flow_factor": 0.0,
+        "fixed_out_of_scope_variables": {"repurposedPipelineBuilt": 0.0},
+        "solve_requested": args.solve,
+    }
+    (work_dir / "reference_provenance.json").write_text(
+        json.dumps(provenance, indent=2) + "\n", encoding="utf-8"
+    )
 
     FirstHoursOfRegSeason = [lengthRegSeason * i + 1 for i in range(NoOfRegSeason)]
     FirstHoursOfPeakSeason = [
@@ -184,49 +290,93 @@ def main():
         north_sea=True,
     )
 
-    empire.run_empire(
-        name="gasparity",
-        tab_file_path=TABS,
-        result_file_path=RESULTS,
-        scenariogeneration=True,
-        scenario_data_path=os.path.join(
-            REPO, "Data handler/full_model_int/ScenarioData"
-        ),
-        solver="Gurobi",
-        temp_dir=TEMP,
-        FirstHoursOfRegSeason=FirstHoursOfRegSeason,
-        FirstHoursOfPeakSeason=FirstHoursOfPeakSeason,
-        lengthRegSeason=lengthRegSeason,
-        lengthPeakSeason=lengthPeakSeason,
-        Period=Period,
-        Operationalhour=Operationalhour,
-        Scenario=Scenario,
-        GasScenario=GasScenario,
-        Season=Season,
-        HoursOfSeason=HoursOfSeason,
-        NoOfRegSeason=NoOfRegSeason,
-        NoOfPeakSeason=NoOfPeakSeason,
-        discountrate=discountrate,
-        WACC=WACC,
-        LeapYearsInvestment=LeapYearsInvestment,
-        WRITE_LP=True,
-        PICKLE_INSTANCE=False,
-        EMISSION_CAP=True,
-        include_results=[],
-        USE_TEMP_DIR=True,
-        offshoreNodesList=offshore,
-        sample_file_path=None,
-        OUT_OF_SAMPLE=False,
-        repurposeCostFactor=1.0,
-        repurposeEnergyFlowFactor=1.0,
-        windfarmNodes=windfarm,
-        hydrogen=True,
-        HEATMODULE=False,
-        industry=False,
-        FLEX_IND=True,
-        use_cvar=False,
-        gas_stochasticity_flag=False,
-    )
+    class BuildComplete(Exception):
+        """Stop the reference immediately after its unmodified builder writes the LP."""
+
+    class BuildOnlySolver:
+        def __init__(self):
+            self.options = {}
+
+        def solve(self, *_args, **_kwargs):
+            raise BuildComplete
+
+    original_solver_factory = empire.SolverFactory
+    original_model_write = empire.ConcreteModel.write
+
+    def write_gas_only_reference(model, *write_args, **write_kwargs):
+        """Fix out-of-scope H2 repurposing before the reference exports its LP."""
+        for variable in model.repurposedPipelineBuilt.values():
+            variable.fix(0.0)
+        return original_model_write(model, *write_args, **write_kwargs)
+
+    empire.ConcreteModel.write = write_gas_only_reference
+    if not args.solve:
+        empire.SolverFactory = lambda *_args, **_kwargs: BuildOnlySolver()
+
+    previous_directory = os.getcwd()
+    os.chdir(work_dir)
+    try:
+        try:
+            empire.run_empire(
+                name="gasparity",
+                tab_file_path=TABS,
+                result_file_path=RESULTS,
+                scenariogeneration=True,
+                scenario_data_path=os.path.join(
+                    REPO, "Data handler/full_model_int/ScenarioData"
+                ),
+                solver="Gurobi",
+                temp_dir=TEMP,
+                FirstHoursOfRegSeason=FirstHoursOfRegSeason,
+                FirstHoursOfPeakSeason=FirstHoursOfPeakSeason,
+                lengthRegSeason=lengthRegSeason,
+                lengthPeakSeason=lengthPeakSeason,
+                Period=Period,
+                Operationalhour=Operationalhour,
+                Scenario=Scenario,
+                GasScenario=GasScenario,
+                Season=Season,
+                HoursOfSeason=HoursOfSeason,
+                NoOfRegSeason=NoOfRegSeason,
+                NoOfPeakSeason=NoOfPeakSeason,
+                discountrate=discountrate,
+                WACC=WACC,
+                LeapYearsInvestment=LeapYearsInvestment,
+                WRITE_LP=True,
+                PICKLE_INSTANCE=False,
+                EMISSION_CAP=True,
+                include_results=[],
+                USE_TEMP_DIR=True,
+                offshoreNodesList=offshore,
+                sample_file_path=None,
+                OUT_OF_SAMPLE=False,
+                repurposeCostFactor=1.0,
+                # Hydrogen pipeline repurposing is outside the deterministic gas port.
+                # Zero is an existing reference configuration and removes its column
+                # from gas-pipeline capacity rows without modifying reference code.
+                repurposeEnergyFlowFactor=0.0,
+                windfarmNodes=windfarm,
+                hydrogen=True,
+                HEATMODULE=False,
+                industry=False,
+                FLEX_IND=True,
+                use_cvar=False,
+                gas_stochasticity_flag=False,
+            )
+        except BuildComplete:
+            pass
+    finally:
+        empire.SolverFactory = original_solver_factory
+        empire.ConcreteModel.write = original_model_write
+        os.chdir(previous_directory)
+
+    lp_path = work_dir / "LP_gasparity.lp"
+    if not lp_path.is_file() or lp_path.stat().st_size == 0:
+        raise RuntimeError("InternalEMPIRE did not write a nonempty LP")
+
+    print(f"reference work directory: {work_dir}")
+    print(f"reference provenance: {work_dir / 'reference_provenance.json'}")
+    print(f"reference LP: {work_dir / 'LP_gasparity.lp'}")
 
 
 if __name__ == "__main__":
