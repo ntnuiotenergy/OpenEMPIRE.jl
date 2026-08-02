@@ -203,7 +203,11 @@ def validate_manifest(dataset: Path) -> dict[str, object]:
     actual = {
         path.relative_to(dataset).as_posix()
         for path in dataset.rglob("*")
-        if path.is_file() and path.name != manifest_path.name
+        if path.is_file()
+        and path.name != manifest_path.name
+        # Finder metadata is not a model input and commonly appears in otherwise
+        # clean macOS checkouts. Keep the inventory strict for every other file.
+        and path.name != ".DS_Store"
     }
     if listed != actual:
         fail(
