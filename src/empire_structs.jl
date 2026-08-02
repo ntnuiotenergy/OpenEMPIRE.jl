@@ -460,22 +460,10 @@ function _check_natural_gas_params!(
     gas.gasScenarioCount > 0 ||
         push!(errs, "NaturalGas.gasScenarioCount must be positive")
 
-    # Everything verified against InternalEMPIRE was run with one gas scenario, where
-    # this axis collapses. With more than one, the weather x gas combination
-    # convention -- `combined = (weather - 1) * gasScenarioCount + gas` -- rests on a
-    # unit test written alongside the implementation rather than on a comparison with
-    # `empire.py`. A gas-major ordering there would attach prices to the wrong
-    # scenarios while leaving row counts, coefficients and bounds identical, so none
-    # of the existing checks would catch it. Warn rather than fail: the path may well
-    # be correct, and InternalEMPIRE's own implementation is described upstream as
-    # incomplete in this area.
-    gas.gasScenarioCount == 1 || @warn(
-        "number_of_gas_scenarios > 1 is UNVERIFIED against InternalEMPIRE. The " *
-        "weather x gas combination convention has only been tested against a unit " *
-        "test, never against empire.py. Results may be silently wrong. See " *
-        "docs/natural_gas_reference_comparison.md.",
-        gas_scenarios = gas.gasScenarioCount,
-        weather_scenarios = gas.weatherScenarioCount,
+    gas.gasScenarioCount == 1 || push!(
+        errs,
+        "NaturalGas.gasScenarioCount must equal 1: multiple gas-price scenarios " *
+        "have not been verified against InternalEMPIRE",
     )
 
     for (name, values) in (

@@ -8,6 +8,7 @@ without touching a single constraint row.
 Pyomo writes `0 <= name <= +inf`; JuMP writes `name >= 0`. Both are normalised to a
 (lower, upper) pair before comparison.
 """
+import argparse
 import collections
 import math
 import re
@@ -128,8 +129,16 @@ def jl_bounds(path):
     return out
 
 
-def main():
-    py, jl = py_bounds(sys.argv[1]), jl_bounds(sys.argv[2])
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("python_lp")
+    parser.add_argument("julia_lp")
+    args = parser.parse_args(argv)
+    py, jl = py_bounds(args.python_lp), jl_bounds(args.julia_lp)
+    if not py or not jl:
+        raise ValueError(
+            f"no gas bounds parsed: python={len(py)}, julia={len(jl)}"
+        )
     groups = collections.defaultdict(lambda: [0, 0, 0, []])
     for key in set(py) | set(jl):
         name = key.split("|", 1)[0]
@@ -156,10 +165,17 @@ def main():
         for key, a, b in samples:
             print(f"    {key}: python={a} julia={b}")
 
+    missing_groups = set(PY_VARS.values())
+    expected_names = {name for name, _ in missing_groups}
+    absent = expected_names - groups.keys()
+    if absent:
+        raise ValueError(f"expected gas bound families were not parsed: {sorted(absent)}")
+
     total = sum(g[0] for g in groups.values())
     print(f"\nbounds compared: {total}")
     print("GAS BOUNDS IDENTICAL" if ok else "DIFFERENCES FOUND")
     return 0 if ok else 1
 
 
-sys.exit(main())
+if __name__ == "__main__":
+    sys.exit(main())
