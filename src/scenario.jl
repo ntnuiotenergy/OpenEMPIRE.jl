@@ -897,6 +897,32 @@ function _best_kmeans(X::Matrix{Float64}, k::Int, rng; n_init::Int = 100, season
     return [canonical_group[assignment] for assignment in Clustering.assignments(best)]
 end
 
+# Column layout mirrors Python's `make_copula_filter`, which writes
+# `Year,Season,SampleIndex,Value1..ValueN,ClusterGroup`. `ValueI` is the
+# rank-transformed window mean of the I-th feature dimension, i.e. the uniform
+# margin the clustering actually ran on. Persisting those columns is what makes a
+# Julia catalog directly comparable with a Python one: the `ClusterGroup` labels
+# cannot be diffed (Python leaves K-means labelling arbitrary, this port
+# canonicalises it), so the `Value` columns are the part that can.
+#
+# Sampling reads only the four index columns, and `_read_copula_clusters` looks up
+# fields by name, so the extra columns are inert at read time.
+function _copula_cluster_table(rows::Vector{CopulaClusterRow}, value_columns::Vector{Vector{Float64}})
+    names = (
+        :Year, :Season, :SampleIndex,
+        (Symbol("Value", i) for i in eachindex(value_columns))...,
+        :ClusterGroup,
+    )
+    columns = (
+        [row.Year for row in rows],
+        [row.Season for row in rows],
+        [row.SampleIndex for row in rows],
+        value_columns...,
+        [row.ClusterGroup for row in rows],
+    )
+    return NamedTuple{names}(columns)
+end
+
 """
     make_copula_clusters(data_folder, regular_seasons, regular_hours, copulas_to_use, n_cluster,
                           load_table, hydro_table, generator_sources, rng; n_init=100)
@@ -923,6 +949,7 @@ function make_copula_clusters(
     years = _sample_years((table for (_, table) in source_tables)...)
 
     rows = CopulaClusterRow[]
+    value_columns = Vector{Float64}[]
     for season in regular_seasons
         candidates = _copula_candidate_windows((table for (_, table) in source_tables), years, season, regular_hours)
         n_candidates = length(candidates)
@@ -937,6 +964,17 @@ function make_copula_clusters(
             push!(dims, _rank_transform(means))
         end
 
+        if isempty(value_columns)
+            value_columns = [Float64[] for _ in dims]
+        end
+        length(value_columns) == length(dims) || throw(ArgumentError(
+            "Season $season produced $(length(dims)) copula dimensions, but earlier " *
+            "seasons produced $(length(value_columns))",
+        ))
+        for (dimension, ranks) in enumerate(dims)
+            append!(value_columns[dimension], ranks)
+        end
+
         X = permutedims(reduce(hcat, dims))
         cluster_of = _best_kmeans(X, n_cluster, rng; n_init, season)
 
@@ -947,7 +985,7 @@ function make_copula_clusters(
 
     path = _copula_cluster_path(data_folder)
     mkpath(dirname(path))
-    CSV.write(path, rows)
+    CSV.write(path, _copula_cluster_table(rows, value_columns))
     return rows
 end
 

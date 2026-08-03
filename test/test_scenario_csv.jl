@@ -595,7 +595,12 @@ function test_copula_clusters_make_writes_csv()
 
         csv_rows = collect(CSV.File(path; normalizenames = false))
         @test length(csv_rows) == length(rows)
-        @test Set(string.(propertynames(csv_rows[1]))) == Set(["Season", "Year", "SampleIndex", "ClusterGroup"])
+        # Column layout and order match Python's make_copula_filter, including the
+        # rank-value columns the clustering ran on. The fixture has one node
+        # column per variable, so a single copula variable gives one Value column.
+        @test string.(propertynames(csv_rows[1])) ==
+            ["Year", "Season", "SampleIndex", "Value1", "ClusterGroup"]
+        @test all(r -> 0.0 < r.Value1 <= 1.0, csv_rows)
 
         # Clustering consumes the scenario RNG, so an equal seed reproduces the
         # catalog exactly, including the canonical ClusterGroup labels.
