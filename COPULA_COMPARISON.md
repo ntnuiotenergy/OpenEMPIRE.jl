@@ -101,40 +101,48 @@ this.
 
 ## Numerical comparison
 
-Python's real `make_copula_filter` against the Julia path on the same input: all
-35 `electricload` nodes, 2015, 168-hour seasons, `n_cluster: 10`.
+Against the Python catalog in `parity_copula/work35/py/`, produced by Python's
+real `make_copula_filter`: all 35 `electricload` nodes, 2015, 168-hour seasons,
+`n_cluster: 10`.
 
-Raw window means agree to **1.27e-15** relative across all nodes. 26 of the 35
-rank-value columns are bit-identical; the rest differ at the 5e-4 level, one rank
-position out of roughly 2,000.
+**Candidate keys are identical.** 8,084 on both sides, exact set equality on
+`(Year, Season, SampleIndex)`.
 
-One column is an outlier with a definite cause. `Value35` is BA (Bosnia), whose
-load series is quantised to only 2,002 distinct values across 8,760 hours,
-leaving **83 %** of its window means as exact ties. Inside a tie group the
-ordering is decided entirely by tie-breaking, and although both sides break ties
-by order of appearance, the means sit a few ULP apart from summation order, so
-comparisons flip. Neither ordering is more correct. DE has 0 % tied means; NO1
-has 0.1–0.3 %.
+**Rank values**, over 8,084 rows x 35 columns = 282,940 cells:
 
-BA accounts for the entire partition disagreement:
+- 22 of the 35 columns are bit-identical.
+- Excluding BA, the largest difference is **1.5e-3** (NO1). Most differing
+  columns sit at **5.0e-4**, which is exactly one rank position: per-season
+  candidate counts are 1,991–2,039 and rank values are `rank / N`, so one
+  position is `1/1991 = 5.02e-4`. NO1's 1.5e-3 is three positions.
+- BA is a large outlier at **2.7e-1**.
 
-| | ARI winter | spring | summer | fall |
+BA's cause is definite. `Value35` is BA (Bosnia), whose load series is quantised
+to only 2,002 distinct values across 8,760 hours, leaving **83 %** of its window
+means as exact ties. Inside a tie group the ordering is decided entirely by
+tie-breaking, and although both sides break ties by order of appearance, the
+means sit a few ULP apart from summation order, so comparisons flip. Neither
+ordering is more correct. DE has 0 % tied means; NO1 has 0.1–0.3 %.
+
+**Partitions.** ARI between the two, re-clustering both sides' features at
+matched settings (k = 10, 100 restarts, seed 1):
+
+| | winter | spring | summer | fall |
 |---|---|---|---|---|
-| all 35 dimensions | 0.8936 | 0.9989 | 0.9910 | 0.9946 |
+| all 35 dimensions | 0.8533 | 0.9989 | 0.9940 | 0.9925 |
 | BA excluded | **1.0000** | **1.0000** | **1.0000** | **1.0000** |
 
-Sweeping `n_cluster` and re-clustering both sides' features at matched settings:
+Excluding BA the two implementations partition identically in every season. The
+all-35 row is itself unstable between runs, for the same tie-breaking reason — an
+earlier pass of this comparison recorded 0.8936 / 0.9989 / 0.9910 / 0.9946. That
+instability is evidence for the BA explanation rather than against it.
 
-| k | mean ARI, all 35 | mean ARI, BA excluded |
-|---:|---|---|
-| 1 | 1.0000 | 1.0000 |
-| 2 | 0.9985 | 1.0000 |
-| 5 | 0.9890 | 1.0000 |
-| 10 | 0.9520 | 1.0000 |
-| 20 | 0.9799 | 1.0000 |
-| 30 | 0.8535 | 1.0000 |
-
-Excluding BA the two implementations agree exactly at every k from 1 to 30.
+The figures above were measured against the current implementation. Two results
+from an earlier pass have **not** been re-derived since the candidate-range
+change and are recorded here as prior results: raw window means agreeing to
+1.27e-15 relative across all nodes, and an `n_cluster` sweep giving mean ARI
+1.0000 with BA excluded at every k from 1 to 30 (all-35 means 1.0000, 0.9985,
+0.9890, 0.9520, 0.9799, 0.8535 at k = 1, 2, 5, 10, 20, 30).
 
 This check uses one year rather than five because Python's `make_mean` grows its
 result with `pd.concat` inside a triple-nested loop, making it quadratic in
@@ -248,6 +256,15 @@ copula clustering enabled archives it under
 To compare against Python, run its `make_copula_filter` on the same input and
 diff the `Value` columns keyed on `(Year, Season, SampleIndex)`. Compare
 `ClusterGroup` with ARI rather than equality, for the labelling reason above.
+
+The harness that produced the Python catalog used above lives in
+`parity_copula/` (outside this repository): `make_input.py` builds the 35-node
+single-year input, `run_python.py` and `run_julia.jl` produce the two catalogs,
+and `compare.py` and `sweep_and_ba.py` do the diffing. Note that `run_julia.jl`
+predates this port writing its own `Value` columns, so it reimplements the
+candidate enumeration inline with a `trim` argument; with the candidate range now
+matching Python, its `julia_pyrange.csv` variant is reproduced exactly by
+`_copula_candidate_windows` and the trimming is no longer needed.
 
 Focused tests:
 
