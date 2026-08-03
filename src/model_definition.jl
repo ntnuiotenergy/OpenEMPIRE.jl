@@ -15,7 +15,7 @@ function create_timestruct(npers, years_period, nseasons, hours_season, npeaks, 
     # Give each season an equal share of each year outside peak periods
     seasons_share = [(8760 - peak_hours) / (8760 * nseasons) for _ in seasons]
 
-    # Give peaks zero weight (only used for feasibility checks)
+    # Count each modeled peak hour once per year.
     peaks_share = [hours_peak / 8760 for _ in peaks]
 
     # Create representative periods for each year
@@ -137,16 +137,12 @@ function create_objective(emp::JuMP.Model, sets, par, periods::TimeStructure, di
                     sum(stor_pw_invest_cost(par, s, sp) * storInvCapPow[n, s, sp] for n in N, s in storages(sets, n); init = 0) +
                     sum(stor_en_invest_cost(par, s, sp) * storInvCapEn[n, s, sp] for n in N, s in storages(sets, n); init = 0)
                 ) for sp in SP
-        ) +
-            sum(
-            operational_objective_weight(par, sp, representative_index, t, discounter) * (
+        ) + sum(
+            objective_weight(t, discounter; type = "avg_year") * (
                     sum(lost_load_cost(par, n, t) * shed[n, t] for n in N; init = 0) +
                     sum(gen_marginal_cost(par, g, t) * genOp[n, g, t] for n in N for g in generators(sets, n); init = 0)
                 )
-            for sp in SP
-            for (representative_index, rp) in enumerate(repr_periods(sp))
-            for sc in opscenarios(rp)
-            for t in sc
+            for t in periods
         )
     )
 end
@@ -178,7 +174,9 @@ function create_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; 
 
     create_generator_constraints(emp, sets, par, periods; progress)
     create_storage_constraints(emp, sets, par, periods; progress)
-    return create_transmission_constraints(emp, sets, par, periods; progress)
+    create_transmission_constraints(emp, sets, par, periods; progress)
+    create_emission_constraints(emp, sets, par, periods; progress)
+    return nothing
 
 end
 
@@ -231,11 +229,9 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
         emp,
         gen_hydro_node_limit[n in N, sp in SP; !isnothing(max_hydro_node(par, n))],
         sum(
-            seasonal_probability_weight(par, representative_index, t) * genOp[n, g, t]
+            multiple_strat(sp, t) * probability(t) * genOp[n, g, t]
             for g in generators(sets, n) if is_hydro(sets, g)
-            for (representative_index, rp) in enumerate(repr_periods(sp))
-            for sc in opscenarios(rp)
-            for t in sc
+            for t in sp
         ) <= max_hydro_node(par, n)
     )
 
@@ -246,7 +242,12 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
     @constraint(
         emp,
         installed_cap_gen[n in N, g in generators(sets, n), sp in SP],
-        sum(genInv[n, g, spp] for spp in SP if duration_aggr(spp, sp, SP) <= gen_lifetime(par, g)) +
+        # An investment in period spp stays installed for lifetime/leap_years periods and retires
+        # once `lifetime` years have elapsed. Python (empire.py lifetime_rule_gen) keeps it while
+        # i - j <= lifetime/LeapYears - 1, i.e. while elapsed years <= lifetime - leap_years.
+        # `duration_aggr` is the elapsed years (spp start -> sp start), so the cutoff must subtract
+        # one strategic period; using `<= lifetime` alone over-extends every asset by one period.
+        sum(genInv[n, g, spp] for spp in SP if duration_aggr(spp, sp, SP) <= gen_lifetime(par, g) - duration_strat(sp)) +
             gencap_init(par, n, g, sp) == genCap[n, g, sp]
     )
 
@@ -329,13 +330,13 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
     @constraint(
         emp,
         storage_installed_cap_en[n in N, s in storages(sets, n), sp in SP],
-        sum(storCapInvEn[n, s, spp] for spp in SP if duration_aggr(spp, sp, SP) <= lifetime_storage(par, s)) +
+        sum(storCapInvEn[n, s, spp] for spp in SP if duration_aggr(spp, sp, SP) <= lifetime_storage(par, s) - duration_strat(sp)) +
             stor_cap_init_en(par, n, s, sp) == storCapEn[n, s, sp]
     )
     @constraint(
         emp,
         storage_installed_cap_pow[n in N, s in storages(sets, n), sp in SP],
-        sum(storCapInvPow[n, s, spp] for spp in SP if duration_aggr(spp, sp, SP) <= lifetime_storage(par, s)) +
+        sum(storCapInvPow[n, s, spp] for spp in SP if duration_aggr(spp, sp, SP) <= lifetime_storage(par, s) - duration_strat(sp)) +
             stor_cap_init_pow(par, n, s, sp) == storCapPow[n, s, sp]
     )
 
@@ -396,7 +397,7 @@ function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::Ti
     @constraint(
         emp,
         trans_track_cap[(m, n) in bidir_arcs(sets), sp in SP],
-        sum(transCapInv[m, n, spp] for spp in SP if duration_aggr(spp, sp, SP) <= trans_lifetime(par, m, n)) +
+        sum(transCapInv[m, n, spp] for spp in SP if duration_aggr(spp, sp, SP) <= trans_lifetime(par, m, n) - duration_strat(sp)) +
             trans_cap_init(par, m, n, sp) == transCap[m, n, sp]
     )
 
@@ -417,14 +418,47 @@ function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::Ti
 end
 
 
-function create_emission_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure)
+function _opscenario_count(sp)
+    first_rp = first(repr_periods(sp))
+    return length(opscenarios(first_rp))
+end
 
-    # TODO: Implement emission constraints
-    #=
-    def emission_cap_rule(model, i, w):
-            return sum(model.seasScale[s]*model.genCO2TypeFactor[g]*(3.6/model.genEfficiency[g,i])*model.genOperational[n,g,h,i,w] for (n,g) in model.GeneratorsOfNode for (s,h) in model.HoursOfSeason)/1000000 \
-                - model.CO2cap[i] <= 0   #
-    =#
+function create_emission_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
+    par.CO2cap === nothing && return nothing
+
+    @info "Creating emission constraints"
+    SP = strat_periods(periods)
+    cap_count = sum(_opscenario_count(sp) for sp in SP)
+    _report_progress(progress, "Creating emission-cap constraints ($cap_count constraints)")
+
+    N = nodes(sets)
+    genOp = emp[:genOperational]
+
+    @variable(emp, nodeEmission[N, sp in SP, sc in 1:_opscenario_count(sp)])
+
+    @constraint(
+        emp,
+        node_emission[n in N, sp in SP, sc in 1:_opscenario_count(sp)],
+        nodeEmission[n, sp, sc] ==
+            sum(
+                multiple_strat(sp, t) *
+                co2_content(par, g) *
+                (3.6 / par.genEfficiency[g][sp]) *
+                genOp[n, g, t]
+                for g in generators(sets, n)
+                for rp in repr_periods(sp)
+                for (scenario_index, scenario) in enumerate(opscenarios(rp))
+                if scenario_index == sc
+                for t in scenario;
+                init = 0.0
+            )
+    )
+
+    return @constraint(
+        emp,
+        emission_cap[sp in SP, sc in 1:_opscenario_count(sp); co2_cap(par, sp) !== nothing],
+        sum(nodeEmission[n, sp, sc] for n in N; init = 0.0) <= 1e6 * co2_cap(par, sp)
+    )
 end
 
 function objective_component_expressions(emp::JuMP.Model, sets, par, periods::TimeStructure, discounter::Discounter)
@@ -477,19 +511,13 @@ function objective_component_expressions(emp::JuMP.Model, sets, par, periods::Ti
             for sp in SP
         ),
         load_shedding = sum(
-            operational_objective_weight(par, sp, representative_index, t, discounter) *
+            objective_weight(t, discounter; type = "avg_year") *
             sum(lost_load_cost(par, n, t) * shed[n, t] for n in N; init = 0)
-            for sp in SP
-            for (representative_index, rp) in enumerate(repr_periods(sp))
-            for sc in opscenarios(rp)
-            for t in sc
+            for t in periods
         ),
         generator_operation = sum(
-            operational_objective_weight(par, sp, representative_index, t, discounter) * generator_operation_expr(t)
-            for sp in SP
-            for (representative_index, rp) in enumerate(repr_periods(sp))
-            for sc in opscenarios(rp)
-            for t in sc
+            objective_weight(t, discounter; type = "avg_year") * generator_operation_expr(t)
+            for t in periods
         ),
     )
 end

@@ -1,7 +1,7 @@
 function test_solve()
 
-	data_folder = joinpath(pkgdir(OpenEMPIRE), "data")
-	config_file = joinpath(data_folder, "testrun.yaml")
+	data_folder = joinpath(pkgdir(OpenEMPIRE), "data", "test")
+	config_file = joinpath(pkgdir(OpenEMPIRE), "config", "testrun.yaml")
 
 	emp, periods, sets, params = OpenEMPIRE.create_model(config_file, data_folder; optimizer = HiGHS.Optimizer)
 

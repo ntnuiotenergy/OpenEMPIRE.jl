@@ -1,10 +1,27 @@
 
 function test_timestruct()
+    for scenario_count in (1, 4)
+        periods = OpenEMPIRE.create_timestruct(3, 5, 4, 168, 3, 24, scenario_count)
+        strategic_periods = collect(strat_periods(periods))
+        sp = first(strategic_periods)
+        representatives = collect(repr_periods(sp))
+        regular_time = first(first(opscenarios(representatives[1])))
+        peak_time = first(first(opscenarios(representatives[5])))
+        expected_regular_multiple = (8760 - 3 * 24) / (4 * 168)
 
-    periods = OpenEMPIRE.create_timestruct(3, 5, 4, 168, 3, 24, 4)
+        @test length(strategic_periods) == 3
+        @test multiple_strat(sp, regular_time) ≈ expected_regular_multiple
+        @test multiple_strat(sp, peak_time) ≈ 1.0
+        @test probability(regular_time) ≈ 1 / scenario_count
+        @test probability(peak_time) ≈ 1 / scenario_count
+        @test sum(multiple(t) * probability(t) * duration(t) for t in periods) ≈ 8760 * 15
 
-    @test length(strat_periods(periods)) == 3
-    @test sum(multiple(t) * probability(t) * duration(t) for t in periods) ≈ 8760 * 15
+        discounter = Discounter(0.05, 1, periods)
+        op_discount = sum((1 + 0.05)^(-j) for j in 0:4)
+        @test objective_weight(regular_time, discounter; type = "avg_year") ≈
+              objective_weight(sp, discounter) * op_discount *
+              multiple_strat(sp, regular_time) * probability(regular_time)
+    end
 end
 
 function test_variables()

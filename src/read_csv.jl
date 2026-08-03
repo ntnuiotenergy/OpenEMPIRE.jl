@@ -339,7 +339,6 @@ function read_params_csv(dir::AbstractString)
     general = "General"
     par.CO2cap = _read_strategic_profile_csv(_required_csv(dir, general, "CO2cap.csv"))
     par.CO2price = _read_strategic_profile_csv(_required_csv(dir, general, "CO2price.csv"))
-    par.seasScale = _read_float_by_string_csv(_required_csv(dir, general, "seasScale.csv"))
 
     return par
 end

@@ -1,11 +1,11 @@
-# This is an OpenEMPIRE configuration file used for test runs.
-# To be used with scripts/run_julia_empire.jl.
+# This is an OpenEMPIRE configuration file.
+# To be used with the execution script run.py
 
 use_temporary_directory: True                          # Specifies whether to use a temporary directory for operations
 temporary_directory: './'                              # Path to the temporary directory used for certain operations
 forecast_horizon_year: 2030                            # Target or end year for the run
-number_of_scenarios: 3                                 # Number of scenarios in every investment period
-length_of_regular_season: 24                           # Number of hours in a regular season
+number_of_scenarios: 1                                 # Number of scenarios in every investment period
+length_of_regular_season: 168                          # Number of hours in a regular season
 discount_rate: 0.05                                    # Rate used to discount future cash flows to present value
 wacc: 0.05                                             # Weighted average cost of capital
 optimization_solver: "Gurobi"                          # Mathematical solver used for optimization tasks
@@ -21,11 +21,11 @@ n_cluster : 10                                         #
 moment_matching : False                                #
 n_tree_compare : 20                                    # Number of trees to compare for moment matching and copula-sampling
 use_emission_cap: True                                 # Indicates if there's a cap on CO2 emissions
-compute_operational_duals: True                        # Resolve empire with fixed investment variables and write new duals
-print_in_iamc_format: True                             # Output should be printed in a IAMC-compatible format
+compute_operational_duals: False                       # Barrier without crossover is not safe to fix exactly for a second solve
+print_in_iamc_format: False                            # Output should be printed in a IAMC-compatible format
 write_in_lp_format: False                              # Problem should be written in Linear Programming format
 serialize_instance: False                              # Serialize the data structure or model for later use
-north_sea: False                                       # Whether the north sea is modelled or not
+north_sea: False                                       # Disabled for parity because Julia does not implement this optional constraint
 leap_years_investment: 5                               # Number of years per period (default: 5)
 time_format: "%d/%m/%Y %H:%M"                          # Time format for scenario data files
 
@@ -33,4 +33,7 @@ time_format: "%d/%m/%Y %H:%M"                          # Time format for scenari
 solver_method: 2                                       # 2 = barrier (interior point), usually best for large LPs
 solver_crossover: 0                                    # 0 = skip crossover; matches Python EMPIRE's large-run default
 solver_presolve: 2                                     # 2 = aggressive presolve
-# solver_threads: 8                                    # Set to physical core count on the machine if needed
+# solver_threads: 16                                   # Set to physical core count on the machine if needed
+# solver_scaleflag: 2                                  # Robustness option; can slow solves
+# solver_numericfocus: 1                               # Robustness option; 1-3 means progressively more numerical care
+# solver_barhomogeneous: 1                             # Robustness option for difficult/infeasible barrier runs

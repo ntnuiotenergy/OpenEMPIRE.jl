@@ -9,6 +9,8 @@ using Random
 using TimeStruct
 using YAML
 
+include(joinpath(@__DIR__, "runner_performance.jl"))
+
 function _parse_args(args)
     options = Dict{String, String}(
         "dataset" => "test",
@@ -18,7 +20,10 @@ function _parse_args(args)
         "seed" => "1",
         "results" => joinpath("results", "julia_runs"),
         "optimize" => "true",
+        "generate-only" => "false",
         "fixed-sample" => "auto",
+        "out-of-sample" => "false",
+        "fixed-investment-dir" => "",
         "gurobi-method" => "",
         "gurobi-crossover" => "",
     )
@@ -26,6 +31,8 @@ function _parse_args(args)
     for arg in args
         if arg == "--no-optimize"
             options["optimize"] = "false"
+        elseif arg == "--generate-only"
+            options["generate-only"] = "true"
         elseif arg == "--fixed-sample"
             options["fixed-sample"] = "true"
         elseif startswith(arg, "--") && occursin("=", arg)
@@ -116,6 +123,12 @@ function _boolean_option(value, name)
     throw(ArgumentError("Unsupported $name value: $value. Expected true or false."))
 end
 
+function _config_bool(config, key, default)
+    value = get(config, key, default)
+    value isa Bool && return value
+    return _boolean_option(string(value), key)
+end
+
 function _config_with_fixed_sample(config_file, result_dir)
     config = YAML.load_file(config_file)
     config["use_scenario_generation"] = true
@@ -162,6 +175,7 @@ function main(args = ARGS)
     optimizer = _optimizer(solver_name)
     seed = parse(Int, options["seed"])
     optimize_model = lowercase(options["optimize"]) in ("true", "1", "yes")
+    generate_only = lowercase(options["generate-only"]) in ("true", "1", "yes")
     fixed_sample_option = lowercase(options["fixed-sample"])
 
     isdir(data_folder) || throw(ArgumentError("Dataset folder not found: $data_folder"))
@@ -197,6 +211,7 @@ function main(args = ARGS)
     println("Solver attrs: $(_optimizer_attribute_summary(optimizer_attributes))")
     println("Seed:         $seed")
     println("Fixed sample: $fixed_sample_option")
+    println("Generate only: $generate_only")
     println("Optimize:     $optimize_model")
     println("Result dir:   $result_dir")
     println("Start time:   $(now())")
@@ -206,9 +221,52 @@ function main(args = ARGS)
     progress = _progress_logger()
     progress("Runner initialized")
 
-    build_start = time()
+    if generate_only
+        progress("Generating scenario data only (no model build)")
+        generate_start = time()
+        OpenEMPIRE.generate_scenarios(
+            config_file,
+            data_folder;
+            input_format = format,
+            scenario_rng = MersenneTwister(seed),
+            progress,
+        )
+        generate_seconds = time() - generate_start
+        progress("Scenario generation finished in $(round(generate_seconds; digits = 2)) seconds")
+        scenario_artifact = OpenEMPIRE.write_scenario_artifacts(
+            result_dir,
+            data_folder,
+            run_config;
+            config_file = config_file,
+            dataset = dataset,
+            input_format = format,
+            seed = seed,
+        )
+        scenario_artifact !== nothing &&
+            println("Scenario sampling key archived to: $scenario_artifact")
+        summary_path = _write_summary(
+            joinpath(result_dir, "summary.txt"),
+            [
+                "mode=generate-only",
+                "dataset=$dataset",
+                "config=$config_file",
+                "seed=$seed",
+                "fixed_sample=$fixed_sample_option",
+                "scenario_data_folder=$(joinpath(data_folder, "ScenarioData"))",
+                "generate_seconds=$generate_seconds",
+            ],
+        )
+        println("Summary written to: $summary_path")
+        println("End time: $(now())")
+        flush(stdout)
+        progress("Run complete")
+        return result_dir
+    end
+
+    perf_phases = JObj[]
+    run_start = time()
     progress("Starting model build")
-    emp, periods, sets, params = OpenEMPIRE.create_model(
+    build_stats = @timed OpenEMPIRE.create_model(
         config_file,
         data_folder;
         optimizer,
@@ -217,12 +275,53 @@ function main(args = ARGS)
         scenario_rng = MersenneTwister(seed),
         progress,
     )
-    build_seconds = time() - build_start
+    emp, periods, sets, params = build_stats.value
+    build_seconds = build_stats.time
+    push!(
+        perf_phases,
+        _perf_phase(
+            "build",
+            build_seconds;
+            alloc_bytes = build_stats.bytes,
+            gc_seconds = build_stats.gctime,
+        ),
+    )
     println("Model build seconds: $(round(build_seconds; digits = 2))")
     println("Variables: $(JuMP.num_variables(emp))")
     println("Constraints: $(JuMP.num_constraints(emp; count_variable_in_set_constraints = false))")
+    report_constraint_family_counts(emp)
     flush(stdout)
     progress("Model build finished in $(round(build_seconds; digits = 2)) seconds")
+    scenario_artifact = OpenEMPIRE.write_scenario_artifacts(
+        result_dir,
+        data_folder,
+        run_config;
+        config_file = config_file,
+        dataset = dataset,
+        input_format = format,
+        seed = seed,
+    )
+    if scenario_artifact !== nothing
+        println("Scenario sampling key archived to: $scenario_artifact")
+        flush(stdout)
+    end
+
+    if _boolean_option(options["out-of-sample"], "out-of-sample")
+        fixed_investment_dir = options["fixed-investment-dir"]
+
+        isempty(fixed_investment_dir) && throw(ArgumentError(
+            "--out-of-sample=true requires --fixed-investment-dir=..."
+        ))
+
+        progress("Fixing investments from previous result directory")
+        OpenEMPIRE.fix_investments_from_results!(
+            emp,
+            sets,
+            periods,
+            fixed_investment_dir;
+            fix_installed_capacities = true,
+        )
+    end
 
     termination = nothing
     objective = nothing
@@ -231,8 +330,17 @@ function main(args = ARGS)
     if optimize_model
         solve_start = time()
         progress("Starting solver optimization")
-        JuMP.optimize!(emp)
+        solve_stats = @timed JuMP.optimize!(emp)
         solve_seconds = time() - solve_start
+        push!(
+            perf_phases,
+            _perf_phase(
+                "solve",
+                solve_seconds;
+                alloc_bytes = solve_stats.bytes,
+                gc_seconds = solve_stats.gctime,
+            ),
+        )
         progress("Solver optimization finished in $(round(solve_seconds; digits = 2)) seconds")
         termination = JuMP.termination_status(emp)
         objective = JuMP.objective_value(emp)
@@ -254,7 +362,24 @@ function main(args = ARGS)
         flush(stdout)
         if JuMP.is_solved_and_feasible(emp)
             progress("Writing solution CSV tables")
-            output_dir = OpenEMPIRE.write_solution_tables(result_dir, emp, sets, params, periods)
+            results_stats =
+                @timed OpenEMPIRE.write_solution_tables(
+                    result_dir,
+                    emp,
+                    sets,
+                    params,
+                    periods,
+                )
+            output_dir = results_stats.value
+            push!(
+                perf_phases,
+                _perf_phase(
+                    "results",
+                    results_stats.time;
+                    alloc_bytes = results_stats.bytes,
+                    gc_seconds = results_stats.gctime,
+                ),
+            )
             println("Solution CSVs written to: $output_dir")
             flush(stdout)
             progress("Solution CSV tables written to $output_dir")
@@ -275,7 +400,6 @@ function main(args = ARGS)
     else
         ["objective_component_$name=$value" for (name, value) in pairs(objective_components)]
     end
-
     progress("Writing run summary")
     summary_path = _write_summary(
         joinpath(result_dir, "summary.txt"),
@@ -289,6 +413,8 @@ function main(args = ARGS)
             "solver_attributes=$(_optimizer_attribute_summary(optimizer_attributes))",
             "seed=$seed",
             "fixed_sample=$fixed_sample_option",
+            "out_of_sample=$(options["out-of-sample"])",
+            "fixed_investment_dir=$(options["fixed-investment-dir"])",
             "optimize=$optimize_model",
             "variables=$(JuMP.num_variables(emp))",
             "constraints=$(JuMP.num_constraints(emp; count_variable_in_set_constraints = false))",
@@ -300,6 +426,53 @@ function main(args = ARGS)
         ], component_lines),
     )
     println("Summary written to: $summary_path")
+
+    if _perf_enabled()
+        solver_threads = nothing
+        for (name, value) in optimizer_attributes
+            name == "Threads" && (solver_threads = value)
+        end
+        perf = JObj([
+            "runtime" => "julia",
+            "host" => gethostname(),
+            "cpu_threads" => Sys.CPU_THREADS,
+            "solver_threads" => solver_threads === nothing ? nothing : Int(solver_threads),
+            "datetime" => string(now()),
+            "dataset" => dataset,
+            "config" => config_file,
+            "seed" => seed,
+            "versions" => JObj([
+                "julia" => string(VERSION),
+                "jump" => _pkgversion_str(JuMP),
+                "gurobi_jl" => _pkgversion_str(Gurobi),
+            ]),
+            "solver" => solver_name,
+            "solver_attributes" => JObj(
+                Pair{String, Any}[
+                    string(name) => value for
+                    (name, value) in optimizer_attributes
+                ],
+            ),
+            "model" => JObj([
+                "variables" => JuMP.num_variables(emp),
+                "constraints" => JuMP.num_constraints(
+                    emp;
+                    count_variable_in_set_constraints = false,
+                ),
+            ]),
+            "phases" => perf_phases,
+            "totals" => JObj([
+                "wall_seconds" => round(time() - run_start; digits = 3),
+                "peak_rss_bytes" => Int(Sys.maxrss()),
+                "peak_rss_source" => "Sys.maxrss",
+            ]),
+            "objective_value" => objective,
+            "termination_status" => termination === nothing ? nothing : string(termination),
+        ])
+        perf_path = _write_perf_json(joinpath(result_dir, "perf.json"), perf)
+        println("Perf JSON written to: $perf_path")
+    end
+
     println("End time: $(now())")
     flush(stdout)
     progress("Run complete")
@@ -307,4 +480,6 @@ function main(args = ARGS)
     return termination
 end
 
-main()
+if abspath(PROGRAM_FILE) == @__FILE__
+    main()
+end
