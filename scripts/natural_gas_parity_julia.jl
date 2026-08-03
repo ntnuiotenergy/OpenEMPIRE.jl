@@ -101,6 +101,10 @@ function solve_julia_parity_fixture(
         genEfficiency = Dict(
             "GasCCGT" => FixedProfile(scalar["generator_efficiency"]),
         ),
+        genMaxInstalledCap = Dict(
+            ("A", "Gas") => FixedProfile(1.0e6),
+            ("B", "Gas") => FixedProfile(1.0e6),
+        ),
         genCapAvail = Dict(
             ("A", "GasCCGT") => FixedProfile(1.0),
             ("B", "GasCCGT") => FixedProfile(1.0),
@@ -138,7 +142,6 @@ function solve_julia_parity_fixture(
         params,
         periods;
         natural_gas = true,
-        include_investment_constraints = false,
     )
     strategic_period = only(collect(strat_periods(periods)))
     for node in ("A", "B")
