@@ -132,6 +132,11 @@ function _required_csv(dir::AbstractString, component::AbstractString, filename:
     return path
 end
 
+function _optional_csv(dir::AbstractString, component::AbstractString, filename::AbstractString)
+    path = joinpath(dir, component, filename)
+    return isfile(path) ? path : nothing
+end
+
 _csv_rows(path::AbstractString) = CSV.File(path; normalizenames = false)
 # Dispatch rather than `isempty(strip(string(x)))`: the generic form formats every
 # cell into a String just to test emptiness, including every Float64 in the multi-
