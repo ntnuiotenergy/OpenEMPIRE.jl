@@ -154,6 +154,18 @@ function _natural_gas_solved_fixture(
             ("A", "GasCCGT") => FixedProfile(1.0),
             ("B", "GasCCGT") => FixedProfile(1.0),
         ),
+        # Maximum installed capacity defaults to zero, so the investment
+        # constraints would cap genInstalledCap at 0 and make the fixed capacity
+        # below infeasible. Give the fixture headroom instead of switching the
+        # investment constraints off: the test still pins installed capacity and
+        # asserts the same gas quantities, but it no longer depends on a
+        # constraint-gating flag that lives in the unmerged out-of-sample stack.
+        # Keyed by (node, TECHNOLOGY) - the max_inst_tech constraint is technology
+        # level, not generator level.
+        genMaxInstalledCap = Dict(
+            ("A", "Gas") => FixedProfile(1.0e6),
+            ("B", "Gas") => FixedProfile(1.0e6),
+        ),
         genCO2Content = Dict("GasCCGT" => co2_content),
         genMargCost = Dict(
             "GasCCGT" => FixedProfile(generator_marginal_cost),
@@ -186,7 +198,6 @@ function _natural_gas_solved_fixture(
         params,
         periods;
         natural_gas = natural_gas_gate,
-        include_investment_constraints = false,
     )
     strategic_period = only(collect(strat_periods(periods)))
     for node in ("A", "B")
@@ -630,7 +641,6 @@ function test_natural_gas_multi_period_scenario_weighting()
         params,
         periods;
         natural_gas = true,
-        include_investment_constraints = false,
     )
     discounter = OpenEMPIRE.Discounter(0.05, 1, periods)
     OpenEMPIRE.create_objective(model, sets, params, periods, discounter; natural_gas = true)
@@ -1047,80 +1057,13 @@ function test_natural_gas_three_by_three_scenarios()
     )
 end
 
-function test_natural_gas_oos_compatibility_and_full_year_streaming()
-    source_config = Dict{String, Any}(
-        "forecast_horizon_year" => 2025,
-        "leap_years_investment" => 5,
-        "north_sea" => false,
-        "natural_gas" => true,
-        "use_emission_cap" => false,
-        "discount_rate" => 0.05,
-        "wacc" => 0.05,
-        "load_change_module" => false,
-    )
-    fixed_metadata = Dict{String, Any}(
-        "provenance" => Dict{String, Any}(
-            "structural_config" =>
-                OpenEMPIRE._oos_structural_config(source_config),
-        ),
-    )
-    compatible = OpenEMPIRE.validate_oos_fixed_investment_compatibility(
-        fixed_metadata,
-        source_config,
-    )
-    @test compatible["status"] == "compatible"
-    @test "natural_gas" in compatible["required_equal"]
-    module_off = copy(source_config)
-    module_off["natural_gas"] = false
-    @test_throws ArgumentError OpenEMPIRE.validate_oos_fixed_investment_compatibility(
-        fixed_metadata,
-        module_off,
-    )
-
-    mktempdir() do root
-        summaries = NamedTuple[]
-        for tree_index in 1:24
-            run_dir = joinpath(root, "tree$tree_index")
-            lines = [
-                "Node,Period,Scenario,WeatherScenario,GasScenario,Season,Hour,NaturalGasForPower_ton",
-            ]
-            append!(
-                lines,
-                "A,1,1,1,1,winter,$hour,$(tree_index + hour / 1000)"
-                for hour in 1:365
-            )
-            push!(lines, "A,1,1,1,1,peak1,1,999999")
-            _write_csv(
-                joinpath(run_dir, "output", "ngForPower.csv"),
-                join(lines, "\n") * "\n",
-            )
-            push!(
-                summaries,
-                (
-                    Tree = "tree$tree_index",
-                    Seed = tree_index,
-                    RunDirectory = run_dir,
-                    FullYearTreeIndex = tree_index,
-                ),
-            )
-        end
-        result = OpenEMPIRE._stream_internalempire_full_year_csv(
-            summaries,
-            "ngForPower.csv",
-            joinpath(root, "combined"),
-        )
-        @test result.rows == 8760
-        @test result.dummy_peak_rows_ignored == 24
-        rows = collect(CSV.File(result.path))
-        @test length(rows) == 8760
-        @test Int(first(rows).HourFullYear) == 1
-        @test Int(last(rows).HourFullYear) == 8760
-        @test all(String(row.Season) == "winter" for row in rows)
-        @test all(
-            Float64(row.NaturalGasForPower_ton) != 999999.0 for row in rows
-        )
-    end
-end
+# `test_natural_gas_oos_compatibility_and_full_year_streaming` is deliberately absent
+# from this branch. It exercises the gas module against the out-of-sample runner
+# (`_oos_structural_config`, full-year streaming), and the OOS stack is not part of
+# this PR - it is still in review as PRs #18-#29. The test belongs on whichever branch
+# carries both, and reintroducing it here would only add a dependency this change does
+# not have. Everything it covered about the gas module itself is covered by the tests
+# that remain.
 
 """
 Configuring more than one gas scenario is rejected until reference parity exists.
