@@ -778,17 +778,26 @@ function _copula_source_tables(copulas_to_use, load_table::RawScenarioTable, hyd
     return tables
 end
 
-function _copula_max_start(table::RawScenarioTable, year::Int, season::AbstractString, regular_hours::Int)
+# Candidate count per year, matching Python's `make_mean`:
+#
+#     for j in range(max_sample - regularSeasonHours - 1)
+#
+# `range` is exclusive, so the last offset Python considers is
+# `length(indices) - regular_hours - 2`, two short of the last window that
+# actually fits. `_filter_metric_rows` reproduces the same bound for the scenario
+# filter via Python's `make_ws`, so both stratification paths agree with the
+# reference implementation and with each other.
+function _copula_candidate_count(table::RawScenarioTable, year::Int, season::AbstractString, regular_hours::Int)
     indices = _season_indices(table, year, season)
-    return length(indices) - regular_hours
+    return length(indices) - regular_hours - 1
 end
 
 function _copula_candidate_windows(tables, years, season::AbstractString, regular_hours::Int)
     candidates = Tuple{Int, Int}[]
     for year in years
-        max_start = minimum(_copula_max_start(table, year, season, regular_hours) for table in tables)
-        max_start < 0 && continue
-        for offset in 0:max_start
+        candidate_count = minimum(_copula_candidate_count(table, year, season, regular_hours) for table in tables)
+        candidate_count <= 0 && continue
+        for offset in 0:(candidate_count - 1)
             push!(candidates, (year, offset))
         end
     end
