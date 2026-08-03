@@ -1,17 +1,117 @@
+"""
+    _category(value)
+
+Normalise a category cell to a `String`. Period columns are plain integers in the
+raw variable dumps (`genInvCap.csv`) but period *labels* in the aggregated report
+tables (`results_output_gen.csv` writes `"2020-2025"`), so categories are carried
+as strings everywhere and ordered by [`_sort_categories`](@ref).
+"""
+_category(value) = string(value)
+_category(value::AbstractFloat) = string(isinteger(value) ? Int(value) : value)
+
+"""
+    _sort_categories(values)
+
+Sort category labels so that numeric-looking labels order numerically rather than
+lexicographically: `"2", "10"` and `"2020-2025", "2025-2030"` both come out in the
+order a reader expects, while non-numeric labels fall back to plain string order.
+"""
+function _sort_categories(values)
+    return sort!(collect(values); by = _category_sort_key)
+end
+
+function _category_sort_key(value::AbstractString)
+    leading = match(r"^\s*(-?\d+(?:\.\d+)?)", value)
+    leading === nothing && return (1, 0.0, String(value))
+    return (0, parse(Float64, leading.captures[1]), String(value))
+end
+
+"""
+    _read_csv_sections(csv_path)
+
+Split a multi-section result CSV into one `CSV.File` per section.
+
+`results_output_EuropeSummary.csv` and `results_output_EuropePlot.csv` concatenate
+several tables with different headers into one file, separated by a blank line —
+the same layout the Python `EmpireOutputClient` splits on. Handing the whole file
+to `CSV.File` silently parses later sections against the first section's header,
+which is how rows with six fields end up in an eleven-column table.
+
+Sections are returned in file order; use [`_read_csv_section`](@ref) to pick one.
+"""
+function _read_csv_sections(csv_path::AbstractString)
+    isfile(csv_path) || return CSV.File[]
+    sections = CSV.File[]
+    buffer = IOBuffer()
+    lines_in_section = 0
+
+    function flush_section!()
+        if lines_in_section > 1
+            push!(sections, CSV.File(take!(buffer); normalizenames = false))
+        else
+            take!(buffer)
+        end
+        lines_in_section = 0
+        return nothing
+    end
+
+    for line in eachline(csv_path)
+        if isempty(strip(line))
+            flush_section!()
+        else
+            println(buffer, line)
+            lines_in_section += 1
+        end
+    end
+    flush_section!()
+    return sections
+end
+
+"""
+    _read_csv_section(csv_path, index = 1)
+
+Return one section of a multi-section result CSV, or an empty row vector when the
+file or that section is absent. Plain single-table CSVs have exactly one section,
+so this is safe to use for them too.
+"""
+function _read_csv_section(csv_path::AbstractString, index::Integer = 1)
+    sections = _read_csv_sections(csv_path)
+    length(sections) < index && return NamedTuple[]
+    return sections[index]
+end
+
 function _group_sum(
         csv_path::AbstractString,
-        x_col::Symbol,
-        series_col::Symbol,
-        value_col::Symbol;
+        x_col::Union{Symbol, Integer},
+        series_col::Union{Symbol, Integer},
+        value_col::Union{Symbol, Integer};
         series_mapper = identity,
     )
-    grouped = Dict{Tuple{Int, String}, Float64}()
+    grouped = Dict{Tuple{String, String}, Float64}()
     for row in CSV.File(csv_path; normalizenames = false)
-        key = (Int(row[x_col]), string(series_mapper(string(row[series_col]))))
-        grouped[key] = get(grouped, key, 0.0) + Float64(row[value_col])
+        key = (_category(row[x_col]), string(series_mapper(string(row[series_col]))))
+        grouped[key] = get(grouped, key, 0.0) + _number(row[value_col])
     end
     return grouped
 end
+
+"""
+    _number(value)
+
+Coerce a CSV cell to `Float64`, mapping empty/`missing` cells to `0.0`. Result
+tables legitimately contain blanks (e.g. a dual that was not computed), and
+`Float64(missing)` would otherwise abort the whole dashboard.
+"""
+_number(value::Real) = Float64(value)
+_number(::Missing) = 0.0
+_number(::Nothing) = 0.0
+function _number(value::AbstractString)
+    stripped = strip(value)
+    isempty(stripped) && return 0.0
+    parsed = tryparse(Float64, stripped)
+    return parsed === nothing ? 0.0 : parsed
+end
+_number(value) = Float64(value)
 
 function _read_arc_period_values(
         csv_path::AbstractString,
@@ -27,7 +127,7 @@ function _read_arc_period_values(
         from_node = string(row[from_col])
         to_node = string(row[to_col])
         period = Int(row[period_col])
-        values[(from_node, to_node, period)] = Float64(row[value_col])
+        values[(from_node, to_node, period)] = _number(row[value_col])
     end
     return values
 end
@@ -37,7 +137,7 @@ function _read_arc_values(csv_path::AbstractString, from_col::Symbol, to_col::Sy
     isfile(csv_path) || return values
 
     for row in CSV.File(csv_path; normalizenames = false)
-        values[(string(row[from_col]), string(row[to_col]))] = Float64(row[value_col])
+        values[(string(row[from_col]), string(row[to_col]))] = _number(row[value_col])
     end
     return values
 end

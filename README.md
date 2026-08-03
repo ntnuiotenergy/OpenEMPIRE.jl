@@ -44,9 +44,9 @@ The model can then be optimized using `JuMP` with the associated solver:
 JuMP.optimize!(emp)
 ```
 
-No systematic output and post-processing of results are currently available
-in the Julia version. 
-After solving, results can be extracted directly from the JuMP variables
+After solving, `OpenEMPIRE.write_solution_tables` writes the result CSVs (see
+[Results and dashboard](#results-and-dashboard)). Results can also be extracted
+directly from the JuMP variables
 (`emp[:genOperational]`, `emp[:genInvCap]`, `emp[:storCharge]`,
 `emp[:transmissionInvCap]`, `emp[:loadShed]`, ...) using `value` and the
 helpers from `JuMP.Containers`, for example:
@@ -209,9 +209,8 @@ Julia project with `Pkg.instantiate()`, and runs:
 julia --project=. scripts/run_julia_empire.jl --dataset=test
 ```
 
-Results from the Julia runner are written under `results/julia_runs/`. At the
-moment the runner writes a compact `summary.txt`; systematic result export is
-still under development.
+Results from the Julia runner are written under `results/julia_runs/` — see
+[Results and dashboard](#results-and-dashboard).
 
 For one-command local-to-Solstorm deployment, create a cluster config:
 
@@ -242,6 +241,72 @@ For one-command deployment, set this in `config/cluster.json`:
 The Julia project includes `Gurobi.jl`; on Solstorm, the script tries to load
 `gurobi/13.0` first and then `gurobi/12.0`. If Gurobi license discovery fails,
 check `GRB_LICENSE_FILE` in the job log and verify the Solstorm Gurobi module.
+
+## Results and dashboard
+
+A solved run writes to `results/julia_runs/<timestamp>_<dataset>/`:
+
+```text
+Input/     archived sampling key, scenario data and run metadata
+output/    result CSVs
+Plots/     dashboard.html plus one standalone HTML page per plot
+summary.txt
+```
+
+The result CSVs come in two families, and the difference matters when reading
+them:
+
+- **Report tables** (`results_output_gen.csv`, `results_output_stor.csv`,
+  `results_output_transmission.csv`, `results_output_EuropeSummary.csv`,
+  `results_output_curtailed_prod.csv`) hold scenario- and season-weighted
+  *annual* quantities and label periods `"2020-2025"`. These are the numbers to
+  quote.
+- **Raw variable dumps** (`genInvCap.csv`, `genOperational.csv`, `loadShed.csv`,
+  …) hold one row per JuMP variable with integer period indices and no
+  weighting. Summing them over exported hours does *not* give annual generation.
+
+`results_output_EuropeSummary.csv` and `results_output_EuropePlot.csv` contain
+several tables concatenated with a blank line between them, matching the Python
+layout; read them section by section.
+
+### Dashboard
+
+The runner generates the dashboard automatically after writing the CSVs. Pass
+`--no-plots` to skip it. To (re)generate for an existing run:
+
+```bash
+julia --project=. scripts/plot_results.jl results/julia_runs/<run> data/<dataset>
+```
+
+The second argument is optional and adds an "Inputs" tab plus the transmission
+map. Or call it as a library:
+
+```julia
+include("postprocessing/OpenEMPIREResults/src/OpenEMPIREResults.jl")
+using .OpenEMPIREResults
+
+write_result_plots("results/julia_runs/<run>"; input_dir = "data/<dataset>")
+```
+
+Plots are built only for the CSVs that are present, so partial runs still
+produce a dashboard. The transmission map additionally needs
+`Sets/Coords.csv` and `Sets/TransmissionTypeOfDirectionalLink.csv` in the
+dataset; without coordinates it is skipped silently and the other plots are
+unaffected.
+
+### Viewing results offline
+
+Pages load Plotly from a CDN by default. Runs produced on Solstorm are often
+read later from an archived copy or a machine without network access, where that
+renders a blank page — so the pages detect it and show an explanatory banner
+instead. To make a run self-contained, vendor the library:
+
+```bash
+julia --project=. scripts/run_julia_empire.jl --dataset=test --plotly-js=/path/to/plotly.min.js
+```
+
+or `write_result_plots(run; plotly_js = "/path/to/plotly.min.js")`. The file is
+copied into `Plots/` and every page then references it relatively.
 
 ### Time structure
 

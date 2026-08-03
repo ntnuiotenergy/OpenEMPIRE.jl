@@ -134,17 +134,59 @@ function _period_dropdown(
             "}",
         )
     end
+    # Fall back to the last period when `active_period` is not among `periods`;
+    # `findfirst` returns `nothing` there and `nothing - 1` would throw.
+    active_index = something(findfirst(==(active_period), periods), length(periods))
     return "[" * "{" * join([
         "\"buttons\": [" * join(buttons, ", ") * "]",
         "\"direction\": \"down\"",
         "\"showactive\": true",
-        "\"active\": $(findfirst(==(active_period), periods) - 1)",
+        "\"active\": $(active_index - 1)",
         "\"x\": 0.02",
         "\"xanchor\": \"left\"",
         "\"y\": 1.08",
         "\"yanchor\": \"top\"",
     ], ", ") * "}" * "]"
 end
+
+const PLOTLY_CDN_URL = "https://cdn.plot.ly/plotly-2.35.2.min.js"
+const PLOTLY_VENDOR_FILENAME = "plotly.min.js"
+
+"""
+    _plotly_script_tag(plot_dir)
+
+Reference a vendored `plotly.min.js` sitting next to the generated HTML when one
+is present, and fall back to the CDN otherwise.
+
+Runs are produced on Solstorm and read afterwards, often from an archived copy or
+a machine without network access. A bare CDN tag renders a silently blank page in
+that situation, so `write_result_plots(...; plotly_js = "/path/to/plotly.min.js")`
+copies the library into the plot directory and every page then loads offline.
+"""
+function _plotly_script_tag(plot_dir::AbstractString)
+    if isfile(joinpath(plot_dir, PLOTLY_VENDOR_FILENAME))
+        return "<script src=\"$PLOTLY_VENDOR_FILENAME\"></script>"
+    end
+    return "<script src=\"$PLOTLY_CDN_URL\"></script>"
+end
+
+# Shown only if `Plotly` is still undefined once the page has parsed, i.e. the
+# CDN was unreachable. Without it the viewer just sees an empty page.
+const PLOTLY_FALLBACK_NOTICE = """
+    <div id="plotly-missing" style="display:none; margin: 16px 0; padding: 12px 16px; border: 1px solid #d9534f; background: #fdf3f2; color: #a33; max-width: 960px;">
+      <strong>Plots could not be rendered.</strong>
+      The Plotly library was not reachable, most likely because this page is being
+      viewed without internet access. Re-generate with
+      <code>plotly_js = "/path/to/plotly.min.js"</code> to embed the library
+      alongside the results so the dashboard works offline.
+    </div>
+    """
+
+const PLOTLY_FALLBACK_SCRIPT = """
+    if (typeof Plotly === "undefined") {
+      document.getElementById("plotly-missing").style.display = "block";
+    } else {
+    """
 
 function _write_plotly_html(path::AbstractString, title::AbstractString, traces, layout::AbstractString)
     html = """
@@ -153,18 +195,21 @@ function _write_plotly_html(path::AbstractString, title::AbstractString, traces,
     <head>
       <meta charset="utf-8">
       <title>$(_html_escape(title))</title>
-      <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+      $(_plotly_script_tag(dirname(path)))
       <style>
         body { font-family: system-ui, sans-serif; margin: 24px; }
         #plot { width: 100%; height: 760px; }
       </style>
     </head>
     <body>
+    $PLOTLY_FALLBACK_NOTICE
       <div id="plot"></div>
       <script>
+        $PLOTLY_FALLBACK_SCRIPT
         const data = [$(join(traces, ","))];
         const layout = $layout;
         Plotly.newPlot("plot", data, layout, {responsive: true});
+        }
       </script>
     </body>
     </html>
@@ -211,7 +256,7 @@ function _write_dashboard_html(path::AbstractString, result_plots, input_plots)
     <head>
       <meta charset="utf-8">
       <title>OpenEMPIRE Results Dashboard</title>
-      <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+      $(_plotly_script_tag(dirname(path)))
       <style>
         body { font-family: system-ui, sans-serif; margin: 24px; color: #222; }
         h1 { margin-bottom: 8px; }
@@ -229,6 +274,7 @@ function _write_dashboard_html(path::AbstractString, result_plots, input_plots)
     </head>
     <body>
       <h1>OpenEMPIRE Results Dashboard</h1>
+    $PLOTLY_FALLBACK_NOTICE
       <div class="tabs">
         <button class="tab-button active" onclick="showTab('results', event)">Results</button>
         $input_button
@@ -251,8 +297,10 @@ function _write_dashboard_html(path::AbstractString, result_plots, input_plots)
         event.currentTarget.classList.add('active');
         window.dispatchEvent(new Event('resize'));
       }
+      $PLOTLY_FALLBACK_SCRIPT
       $result_scripts
       $input_scripts
+      }
       </script>
     </body>
     </html>
@@ -263,9 +311,46 @@ end
 
 _js_array(values) = "[" * join((_js_value(v) for v in values), ", ") * "]"
 _js_value(value::AbstractString) = _js_string(value)
+_js_value(value::Bool) = value ? "true" : "false"
 _js_value(value::Integer) = string(value)
 _js_value(value::Real) = isfinite(value) ? string(Float64(value)) : "null"
-_js_string(value::AbstractString) = "\"" * replace(value, "\\" => "\\\\", "\"" => "\\\"") * "\""
+
+"""
+    _js_string(value)
+
+Emit a JavaScript string literal. Besides the usual backslash/quote escaping this
+must neutralise two things that would otherwise produce a broken page rather than
+a visibly wrong one: raw control characters (an embedded newline terminates the
+literal) and the sequence `</script>`, which an HTML parser honours *inside* a
+script block and which would end the block early. Node and generator names come
+from user-supplied CSV, so neither is hypothetical.
+"""
+function _js_string(value::AbstractString)
+    io = IOBuffer()
+    print(io, '"')
+    for character in value
+        if character == '\\'
+            print(io, "\\\\")
+        elseif character == '"'
+            print(io, "\\\"")
+        elseif character == '\n'
+            print(io, "\\n")
+        elseif character == '\r'
+            print(io, "\\r")
+        elseif character == '\t'
+            print(io, "\\t")
+        elseif character == '<'
+            # Breaks up "</script>" without altering the decoded string value.
+            print(io, "\\u003c")
+        elseif character < ' '
+            print(io, "\\u", lpad(string(UInt16(character); base = 16), 4, '0'))
+        else
+            print(io, character)
+        end
+    end
+    print(io, '"')
+    return String(take!(io))
+end
 
 function _html_escape(value::AbstractString)
     return replace(value, "&" => "&amp;", "<" => "&lt;", ">" => "&gt;", "\"" => "&quot;")

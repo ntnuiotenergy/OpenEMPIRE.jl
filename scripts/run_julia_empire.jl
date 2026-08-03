@@ -10,6 +10,7 @@ using TimeStruct
 using YAML
 
 include(joinpath(@__DIR__, "runner_performance.jl"))
+include(joinpath(@__DIR__, "..", "postprocessing", "OpenEMPIREResults", "src", "OpenEMPIREResults.jl"))
 
 function _parse_args(args)
     options = Dict{String, String}(
@@ -26,6 +27,8 @@ function _parse_args(args)
         "fixed-investment-dir" => "",
         "gurobi-method" => "",
         "gurobi-crossover" => "",
+        "plots" => "true",
+        "plotly-js" => "",
     )
 
     for arg in args
@@ -33,6 +36,8 @@ function _parse_args(args)
             options["optimize"] = "false"
         elseif arg == "--generate-only"
             options["generate-only"] = "true"
+        elseif arg == "--no-plots"
+            options["plots"] = "false"
         elseif arg == "--fixed-sample"
             options["fixed-sample"] = "true"
         elseif startswith(arg, "--") && occursin("=", arg)
@@ -383,6 +388,28 @@ function main(args = ARGS)
             println("Solution CSVs written to: $output_dir")
             flush(stdout)
             progress("Solution CSV tables written to $output_dir")
+
+            if _boolean_option(options["plots"], "plots")
+                progress("Writing result dashboard")
+                # A failure here must not lose a solved run: the CSVs are already
+                # on disk and the dashboard can be regenerated with
+                # scripts/plot_results.jl.
+                try
+                    plotly_js = isempty(options["plotly-js"]) ? nothing : options["plotly-js"]
+                    dashboard_path = OpenEMPIREResults.write_result_plots(
+                        result_dir;
+                        output_dir,
+                        input_dir = data_folder,
+                        plotly_js,
+                    )
+                    println("Result dashboard written to: $dashboard_path")
+                    progress("Result dashboard written to $dashboard_path")
+                catch err
+                    @warn "Result dashboard generation failed; solution CSVs are unaffected" exception = (err, catch_backtrace())
+                    progress("Result dashboard generation failed")
+                end
+                flush(stdout)
+            end
         else
             println("Solution CSVs skipped because the solved model is not feasible.")
             flush(stdout)
