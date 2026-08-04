@@ -1,0 +1,12 @@
+Sector,Technology,Capacity_ton_per_h,VariableOM_EUR_per_ton,Electricity_MWh_per_ton,Coal_MWh_per_ton,Oil_MWh_per_ton,Biomass_MWh_per_ton,HydrogenOrFuel_kg_per_ton,CO2Emitted_ton_per_ton,CO2Captured_ton_per_ton,CaptureFraction
+Steel,BF-BOF,0.5,8,0.25,1.1,0.05,0,0,1.7,0,0
+Steel,BF-BOF-BioCarbon,0.5,9,0.3,0.5,0,0.6,0,0.8,0,0
+Steel,BF-BOF-CCS,0.5,12,0.35,1,0,0,0,0.3,1.2,0
+Steel,H2-DRI,2.5,5,0.4,0,0,0,55,0,0,0
+Steel,EAF,2.5,4,0.7,0,0,0,0,0.05,0,0
+Steel,Scrap,0.0005,2,0.2,0,0,0,0,0,0,0
+Cement,NG-Cement,1,0,0.1,0,0,0,100,0,0,0
+Cement,H2-Cement,1,0,0.12,0,0,0,80,0,0,0
+Cement,NG-CCS-Cement,1,0,0.15,0,0,0,110,0,0,0.85
+Ammonia,NG-Ammonia,1,0,0.3,0,0,0,500,0,0,0
+Ammonia,H2-Ammonia,1,0,0.25,0,0,0,180,0,0,0

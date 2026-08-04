@@ -108,6 +108,25 @@ in `run_manifest.yaml`. See
 [`HYDROGEN_IMPLEMENTATION_STATUS.md`](HYDROGEN_IMPLEMENTATION_STATUS.md) for
 the evidence boundary and remaining reference-parity work.
 
+### Industry evidence module
+
+The deterministic Industry port is opt-in and requires natural gas:
+
+```yaml
+natural_gas: true
+hydrogen: true   # optional; enables H2/CCS routes and refineries
+industry: true
+number_of_gas_scenarios: 1
+```
+
+It co-optimizes steel, cement, and ammonia investment and operation and couples
+industrial electricity, gas, Hydrogen, biomass, emissions, and captured CO2 to the
+existing systems. With Hydrogen disabled, H2/CO2-dependent routes and refineries
+are omitted explicitly. Native and Python-style tables are written beneath
+`<result-dir>/output/`, and six strategic capacity tables participate in fixed-
+investment OOS. See [`docs/industry_module.md`](docs/industry_module.md) and
+[`docs/industry_data_conversion.md`](docs/industry_data_conversion.md).
+
 The model can then be optimized using `JuMP` with the associated solver:
 ```
 JuMP.optimize!(emp)

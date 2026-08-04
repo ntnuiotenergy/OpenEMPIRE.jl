@@ -81,6 +81,7 @@ end
 
 natural_gas_enabled(config)::Bool = _config_bool(config, "natural_gas", false)
 hydrogen_enabled(config)::Bool = _config_bool(config, "hydrogen", false)
+industry_enabled(config)::Bool = _config_bool(config, "industry", false)
 weather_scenario_count(config)::Int =
     _positive_config_int(config, "number_of_scenarios", 1)
 gas_scenario_count(config)::Int =

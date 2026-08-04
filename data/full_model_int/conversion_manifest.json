@@ -178,6 +178,12 @@
       "sha256": "fe11d4a5d6bdd0f1fe721d0527b05d98b0fe3d6a371347cb8d99f6d8d1b1ce69"
     },
     {
+      "path": "General/availableBioEnergy.csv",
+      "bytes": 123,
+      "rows": 7,
+      "sha256": "1dc17b9e8ee6befdcbf92b61440315fd5fb9cb465140438d324a00e82dd8f0b6"
+    },
+    {
       "path": "General/seasScale.csv",
       "bytes": 137,
       "rows": 6,
@@ -490,6 +496,252 @@
       "sha256": "1ab5fadb376a9b32c3b0def470ab54049e0f39c1b1df10143123743a2b5e827f"
     },
     {
+      "path": "Industry/AmmoniaElConsumption.csv",
+      "bytes": 82,
+      "rows": 2,
+      "sha256": "675b0b173ee1bbe232c5335131d1e3d127575546a825dc8f594cd859d0ad5da0"
+    },
+    {
+      "path": "Industry/AmmoniaFeedstockConsumption.csv",
+      "bytes": 97,
+      "rows": 2,
+      "sha256": "d72789c51d060dbbd8eff34717ac3a87206ed6a4d8b588f45e76f21e0c72e2e0"
+    },
+    {
+      "path": "Industry/AmmoniaFixedOM.csv",
+      "bytes": 476,
+      "rows": 14,
+      "sha256": "ab3824e26b3a39c1f9bb78bb1ecb72d41bd73c7cd07d7776b53dd0533ca510a1"
+    },
+    {
+      "path": "Industry/AmmoniaInitialCapacity.csv",
+      "bytes": 1189,
+      "rows": 40,
+      "sha256": "2afde762357f0d9cd01db84dd49b70607a4962c98b7514e3231c99898e62c69b"
+    },
+    {
+      "path": "Industry/AmmoniaInvCost.csv",
+      "bytes": 426,
+      "rows": 14,
+      "sha256": "7e77ee5913250fe8feff138bf5d4a3d2f7d29b5ffaef72acbf73d496b1e4b075"
+    },
+    {
+      "path": "Industry/AmmoniaPlantLifetime.csv",
+      "bytes": 47,
+      "rows": 2,
+      "sha256": "a99612434816cc1d46d7df563780c02a6b066c74fefde1d4068e8a076d00de24"
+    },
+    {
+      "path": "Industry/AmmoniaPlants.csv",
+      "bytes": 36,
+      "rows": 2,
+      "sha256": "b3ec6661d429b0233df953d05f0f51d8916f583446233baac9fce0889e7018c3"
+    },
+    {
+      "path": "Industry/AmmoniaScaleFactorInitialCap.csv",
+      "bytes": 319,
+      "rows": 14,
+      "sha256": "313b41a30a4eddfa6d8b379b1395777834de091db55487dc91f2c61225f8d922"
+    },
+    {
+      "path": "Industry/AmmoniaYearlyProduction.csv",
+      "bytes": 4017,
+      "rows": 140,
+      "sha256": "760009aafc62412017b1a7a224bd8836dc721c1f5975982c9225c3455501cf17"
+    },
+    {
+      "path": "Industry/CementCO2CaptureRate.csv",
+      "bytes": 71,
+      "rows": 3,
+      "sha256": "5e580866a1fb6d6a8ef4e4a82cfd59f8affd4b3608288ee6b4f899d9b80f17a0"
+    },
+    {
+      "path": "Industry/CementElConsumption.csv",
+      "bytes": 566,
+      "rows": 21,
+      "sha256": "5a61f4f8be3e04c4293d2ce14b538a06f79aad9be2fc481c2b9f2a4fde1509bd"
+    },
+    {
+      "path": "Industry/CementFixedOM.csv",
+      "bytes": 539,
+      "rows": 21,
+      "sha256": "53a5988bf72b826fcffcddd543990fa350de6cf10500eaecc8f5aedab3ad5212"
+    },
+    {
+      "path": "Industry/CementFuelConsumption.csv",
+      "bytes": 496,
+      "rows": 21,
+      "sha256": "0ec63727aecbc57688421a85d15baa5c01cfd975e88d4e4bf5095363dc3e544f"
+    },
+    {
+      "path": "Industry/CementInitialCapacity.csv",
+      "bytes": 2449,
+      "rows": 105,
+      "sha256": "274d83efbfd63aa5f6f8fd5c66269eec171c547d1f97d21a2fbde291ea5c73c2"
+    },
+    {
+      "path": "Industry/CementInvCost.csv",
+      "bytes": 530,
+      "rows": 21,
+      "sha256": "79f7b38fed47f1f0f986369dd620ce2647845b6a80d8ee367e9eec53498c0a38"
+    },
+    {
+      "path": "Industry/CementPlantLifetime.csv",
+      "bytes": 62,
+      "rows": 3,
+      "sha256": "cdf97937a5bea59365246858d5034ffe5d1478d45f32189d3c8a7d28171f0309"
+    },
+    {
+      "path": "Industry/CementPlants.csv",
+      "bytes": 47,
+      "rows": 3,
+      "sha256": "312bd3c58c615d57e5cea05aa208f47248c0c87f3c6e148718e752742bbc6ccc"
+    },
+    {
+      "path": "Industry/CementScaleFactorInitialCap.csv",
+      "bytes": 445,
+      "rows": 21,
+      "sha256": "8f03038da34dcee02f186e7ebbff12ce0f214ad792aacd4649caeeb4cffcb276"
+    },
+    {
+      "path": "Industry/CementYearlyProduction.csv",
+      "bytes": 354,
+      "rows": 35,
+      "sha256": "e828523762f5072be794d769397851f42bdfe86ac29227d733f253f90a68b12b"
+    },
+    {
+      "path": "Industry/Constants.csv",
+      "bytes": 252,
+      "rows": 4,
+      "sha256": "b6c2b9be443cb7b49d46431d5b6312bb177153dc34afdf6969ef27f55675fcbc"
+    },
+    {
+      "path": "Industry/RefineryHeatConsumption.csv",
+      "bytes": 33,
+      "rows": 1,
+      "sha256": "ed9074546ee2d4e40971fbdfc1e0beaddd035e4a53d60457067b3518ab06e3df"
+    },
+    {
+      "path": "Industry/RefineryHydrogenConsumption.csv",
+      "bytes": 50,
+      "rows": 1,
+      "sha256": "6a9071e0174aa632645003fde27ea38049eac412eb2fac2fee998f2a1970b552"
+    },
+    {
+      "path": "Industry/RefineryYearlyProduction.csv",
+      "bytes": 4272,
+      "rows": 175,
+      "sha256": "3f2cb7edbb505c77e424252e4c3a05b85b20f0c641a362b0c7f5fd9303eec34b"
+    },
+    {
+      "path": "Industry/ShedCost.csv",
+      "bytes": 26,
+      "rows": 1,
+      "sha256": "d18ef811e382c9b502ce531cda93210534c25422dac0d93933ab7dcf07287e3f"
+    },
+    {
+      "path": "Industry/SteelBioConsumption.csv",
+      "bytes": 566,
+      "rows": 42,
+      "sha256": "0cb64ca247352c850186f0703bb912cdd57ce80ddb96265c6f794716d75a2305"
+    },
+    {
+      "path": "Industry/SteelCO2Captured.csv",
+      "bytes": 127,
+      "rows": 6,
+      "sha256": "c7d4bec84860632aab33ac6b56ff8e533417c75dfe182c2e169250d237d78ed5"
+    },
+    {
+      "path": "Industry/SteelCO2Emissions.csv",
+      "bytes": 145,
+      "rows": 6,
+      "sha256": "22c0bcaec59f1fe27c154506506aaf5f77cac686b3503335ad56ae2378acfaa4"
+    },
+    {
+      "path": "Industry/SteelCoalConsumption.csv",
+      "bytes": 567,
+      "rows": 42,
+      "sha256": "d26e21931ec8f87418d10801b026c4cf9235ed05d9ea46f5b42f17bc52324d2b"
+    },
+    {
+      "path": "Industry/SteelElConsumption.csv",
+      "bytes": 573,
+      "rows": 42,
+      "sha256": "7f78a1b8f5cb394540629807346f4213526fe926b0112bb33d0654aaaa09d2d3"
+    },
+    {
+      "path": "Industry/SteelFixedOM.csv",
+      "bytes": 756,
+      "rows": 42,
+      "sha256": "88c842393d638f1e728c260907bfd7f54be7a90b0567d6664191615fafb2212b"
+    },
+    {
+      "path": "Industry/SteelHydrogenConsumption.csv",
+      "bytes": 740,
+      "rows": 42,
+      "sha256": "42ab2baf9d7dbc8396d237506f2aa718b2be0912f1ee8f498139babee1c28579"
+    },
+    {
+      "path": "Industry/SteelInitialCapacity.csv",
+      "bytes": 2735,
+      "rows": 120,
+      "sha256": "07ab4d61a4d1661ed3a3e5910bd97781c2a4a47605da562d764f7bcd1e7b2981"
+    },
+    {
+      "path": "Industry/SteelInvCost.csv",
+      "bytes": 847,
+      "rows": 42,
+      "sha256": "92e193d12d7ec530b1c88f06e6926eafb13e55bc34f236dbe147b7f08b4aecb4"
+    },
+    {
+      "path": "Industry/SteelOilConsumption.csv",
+      "bytes": 566,
+      "rows": 42,
+      "sha256": "0cb64ca247352c850186f0703bb912cdd57ce80ddb96265c6f794716d75a2305"
+    },
+    {
+      "path": "Industry/SteelPlantLifetime.csv",
+      "bytes": 89,
+      "rows": 6,
+      "sha256": "7465c6e845a1587781a4fb7662d5ae40cf6efb5916e742f51953da31d2a63f1e"
+    },
+    {
+      "path": "Industry/SteelPlants.csv",
+      "bytes": 64,
+      "rows": 6,
+      "sha256": "545369f92c09c6413485fde7ba29f80fca4158e2818b64a398637fb35572743a"
+    },
+    {
+      "path": "Industry/SteelScaleFactorInitialCap.csv",
+      "bytes": 680,
+      "rows": 42,
+      "sha256": "4dcb629e2ed0a655e56fa3f98199446033a65541fb8fdfa674e35175c2fbae38"
+    },
+    {
+      "path": "Industry/SteelVarOpex.csv",
+      "bytes": 756,
+      "rows": 42,
+      "sha256": "168e37f6a9bd27f49ad76a7e653b192751d9e5dda34d969268bbb96052564fd0"
+    },
+    {
+      "path": "Industry/SteelYearlyProduction.csv",
+      "bytes": 3518,
+      "rows": 140,
+      "sha256": "08f90e754a30c6b7aee74db8cac464d96f294499ea1c33737335c5344a9bf0cd"
+    },
+    {
+      "path": "Industry/duplicate_input_audit.csv",
+      "bytes": 89,
+      "rows": 0,
+      "sha256": "7754c67270da97eabaaf7774884acd11a44632776e96da35d722f23dda0afa87"
+    },
+    {
+      "path": "Industry/generated_default_rows.csv",
+      "bytes": 25453,
+      "rows": 222,
+      "sha256": "d4a0ebd22e8ffd37d672de34e42da59bd97967e722a4b2554d16e74d2ab4ec7c"
+    },
+    {
       "path": "NaturalGas/PipelineCapacity.csv",
       "bytes": 3019,
       "rows": 94,
@@ -610,6 +862,18 @@
       "sha256": "2734e5c68c7a1b516e5d46ee5755e4423da7729b76d9e54f761eae25438a0b89"
     },
     {
+      "path": "Sets/AmmoniaProducers.csv",
+      "bytes": 176,
+      "rows": 20,
+      "sha256": "872a70914c81e9420e834fd5f77fbec1f80e4e4354cb1fe51e53abb82499b27d"
+    },
+    {
+      "path": "Sets/CementProducers.csv",
+      "bytes": 284,
+      "rows": 35,
+      "sha256": "bbff9cbc5d476c28fcf6f8375efffbb66d0ff4dfc22ff65f7e5cfc33930d2924"
+    },
+    {
       "path": "Sets/DependentStorage.csv",
       "bytes": 29,
       "rows": 1,
@@ -682,6 +946,12 @@
       "sha256": "ee5718532a3f44364e287e4e3b2bdf543c719dc7a1cf68f11072261649f9f847"
     },
     {
+      "path": "Sets/OilProducers.csv",
+      "bytes": 210,
+      "rows": 25,
+      "sha256": "b6a3781a36a3d9873f572605d4d0eddde730f09ff5c2baea39ecb586231c7643"
+    },
+    {
       "path": "Sets/OnshoreNode.csv",
       "bytes": 280,
       "rows": 35,
@@ -698,6 +968,12 @@
       "bytes": 43,
       "rows": 1,
       "sha256": "33f6c0710f308d3736cf39749973a78e7db4166dbccdb5341c16ab3f7cd750b6"
+    },
+    {
+      "path": "Sets/SteelProducers.csv",
+      "bytes": 176,
+      "rows": 20,
+      "sha256": "5c8486c02a3e05f6dc9b2632b346fd92a072df80f8ae17609d5d4ef8cf7e58e3"
     },
     {
       "path": "Sets/Storage.csv",
@@ -908,6 +1184,12 @@
       "bytes": 10511,
       "rows": null,
       "sha256": "47aa0de4f46cb0adc310361fbca6a0997db06b1c03432f0046f65690d6c3f48b"
+    },
+    {
+      "path": "industry_conversion_manifest.json",
+      "bytes": 9574,
+      "rows": null,
+      "sha256": "46e9825884f0a80a7b8aa795bb244777d7b93191aed622dcfc4d68f7b399433a"
     }
   ],
   "owner_confirmed_corrections": {
@@ -932,5 +1214,6 @@
       }
     ]
   },
-  "hydrogen_conversion_manifest": "hydrogen_conversion_manifest.json"
+  "hydrogen_conversion_manifest": "hydrogen_conversion_manifest.json",
+  "industry_conversion_manifest": "industry_conversion_manifest.json"
 }

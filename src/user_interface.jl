@@ -81,17 +81,25 @@ function _prepare_model_inputs(
     _report_progress(progress, "Build 3/12: reading input data from $data_folder")
     gas_enabled = OpenEMPIRE.natural_gas_enabled(config)
     hydrogen_enabled = OpenEMPIRE.hydrogen_enabled(config)
+    industry_enabled = OpenEMPIRE.industry_enabled(config)
     hydrogen_enabled && !gas_enabled && throw(ArgumentError(
         "hydrogen=true requires natural_gas=true",
     ))
     hydrogen_enabled && gas_scenarios != 1 && throw(ArgumentError(
         "Deterministic Hydrogen requires number_of_gas_scenarios=1",
     ))
+    industry_enabled && !gas_enabled && throw(ArgumentError(
+        "industry=true requires natural_gas=true",
+    ))
+    industry_enabled && gas_scenarios != 1 && throw(ArgumentError(
+        "Deterministic Industry requires number_of_gas_scenarios=1",
+    ))
     sets, params = OpenEMPIRE.read_data(
         data_folder;
         format = input_format,
         natural_gas = gas_enabled,
         hydrogen = hydrogen_enabled,
+        industry = industry_enabled,
         weather_scenarios,
         gas_scenarios,
     )
@@ -179,12 +187,14 @@ function create_model(
     _report_progress(progress, "Build 7/12: preprocessing parameters")
     gas_enabled = OpenEMPIRE.natural_gas_enabled(config)
     hydrogen_enabled = OpenEMPIRE.hydrogen_enabled(config)
+    industry_enabled = OpenEMPIRE.industry_enabled(config)
     OpenEMPIRE.preprocess_params(
         params,
         sets,
         periods;
         natural_gas = gas_enabled,
         hydrogen = hydrogen_enabled,
+        industry = industry_enabled,
     )
 
     _report_progress(progress, "Build 8/12: validating parameters")
@@ -203,6 +213,13 @@ function create_model(
             join(hydrogen_issues, "\n  - "),
         ))
     end
+    if industry_enabled
+        industry_issues = OpenEMPIRE.validate_industry(params, sets, periods)
+        isempty(industry_issues) || throw(ArgumentError(
+            "Industry input validation found $(length(industry_issues)) issue(s):\n  - " *
+            join(industry_issues, "\n  - "),
+        ))
+    end
 
     _report_progress(progress, "Build 9/12: initializing JuMP model")
     emp = if isnothing(optimizer)
@@ -218,6 +235,7 @@ function create_model(
         periods;
         natural_gas = gas_enabled,
         hydrogen = hydrogen_enabled,
+        industry = industry_enabled,
         progress,
     )
     _report_progress(progress, "Build 11/12: creating constraints")
@@ -228,6 +246,7 @@ function create_model(
         periods;
         natural_gas = gas_enabled,
         hydrogen = hydrogen_enabled,
+        industry = industry_enabled,
         progress,
     )
     _report_progress(progress, "Build 12/12: creating objective")
@@ -239,6 +258,7 @@ function create_model(
         Discounter(OpenEMPIRE.discount_rate(params), 1, periods);
         natural_gas = gas_enabled,
         hydrogen = hydrogen_enabled,
+        industry = industry_enabled,
         progress,
     )
     _report_progress(progress, "Model build complete")

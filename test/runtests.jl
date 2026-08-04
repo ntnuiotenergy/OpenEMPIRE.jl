@@ -16,6 +16,7 @@ include("test_csv.jl")
 include("test_scenario_csv.jl")
 include("test_natural_gas.jl")
 include("test_hydrogen.jl")
+include("test_industry.jl")
 include("test_out_of_sample.jl")
 include("test_runner_performance.jl")
 #include("test_interface.jl")
@@ -58,6 +59,15 @@ end
     test_hydrogen_sparse_variables()
     test_hydrogen_full_model_smoke()
     test_hydrogen_controlled_solution_parity()
+end
+
+@testset "Industry foundation" begin
+    test_industry_loading_gates_and_active_pathways()
+    test_industry_validation_and_units()
+    test_industry_dataset_validator_negative_controls()
+    test_industry_gas_only_model()
+    test_industry_model_results_and_oos()
+    test_industry_controlled_solution_parity()
 end
 
 @testset "CSV scenarios" begin

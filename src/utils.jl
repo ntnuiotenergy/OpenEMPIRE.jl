@@ -18,9 +18,11 @@ function preprocess_params(
     periods;
     natural_gas::Bool = false,
     hydrogen::Bool = false,
+    industry::Bool = false,
 )
     preprocess_invest_cost(params, sets, periods)
     preprocess_operational_cost(params, sets, periods; natural_gas, hydrogen)
+    industry && preprocess_industry_investment_costs!(params, sets, periods)
     preprocess_initcap_gen(params, sets, periods)
     preprocess_stoch_load(params, sets, periods)
     preprocess_max_installed_cap(params, sets, periods)

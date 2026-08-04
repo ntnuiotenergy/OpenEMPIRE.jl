@@ -183,6 +183,11 @@ function test_hydrogen_full_model_smoke()
         :hydrogen_terminal_import,
         :hydrogen_reformer_operation,
         :hydrogen_transport_shedding,
+        :industry_investment,
+        :industry_steel_operation,
+        :industry_cement_operation,
+        :industry_ammonia_operation,
+        :industry_refinery_shedding,
     )
     mktempdir() do output_dir
         solution_dir = OpenEMPIRE.write_solution_tables(output_dir, model, sets, params, periods)

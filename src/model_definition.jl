@@ -83,6 +83,7 @@ function create_variables(
     periods::TimeStruct.TimeStructure;
     natural_gas::Bool = false,
     hydrogen::Bool = false,
+    industry::Bool = false,
     progress = nothing,
 )
 
@@ -164,6 +165,7 @@ function create_variables(
     end
     natural_gas && create_natural_gas_variables!(emp, sets, periods)
     hydrogen && create_hydrogen_variables!(emp, sets, periods)
+    industry && create_industry_variables!(emp, sets, periods)
     return
 end
 
@@ -175,6 +177,7 @@ function create_objective(
     discounter::Discounter;
     natural_gas::Bool = false,
     hydrogen::Bool = false,
+    industry::Bool = false,
     progress = nothing,
 )
     @info "Creating objective function"
@@ -202,6 +205,15 @@ function create_objective(
         terminal_import = JuMP.AffExpr(0.0),
         reformer_operation = JuMP.AffExpr(0.0),
         transport_shedding = JuMP.AffExpr(0.0),
+    )
+    industry_costs = industry ?
+                     industry_objective_expressions(emp, sets, par, periods, discounter) :
+                     (
+        investment = JuMP.AffExpr(0.0),
+        steel_operation = JuMP.AffExpr(0.0),
+        cement_operation = JuMP.AffExpr(0.0),
+        ammonia_operation = JuMP.AffExpr(0.0),
+        refinery_shedding = JuMP.AffExpr(0.0),
     )
 
     # See the note in `objective_component_expressions`: `sum` over a generator
@@ -238,7 +250,10 @@ function create_objective(
         investment + operation +
         gas_costs.terminal_import + gas_costs.transport_shedding +
         hydrogen_costs.investment + hydrogen_costs.terminal_import +
-        hydrogen_costs.reformer_operation + hydrogen_costs.transport_shedding
+        hydrogen_costs.reformer_operation + hydrogen_costs.transport_shedding +
+        industry_costs.investment + industry_costs.steel_operation +
+        industry_costs.cement_operation + industry_costs.ammonia_operation +
+        industry_costs.refinery_shedding
     )
 end
 
@@ -254,11 +269,7 @@ function create_constraints(
     periods::TimeStructure;
     natural_gas::Bool = false,
     hydrogen::Bool = false,
-    # Forwarded to the Hydrogen module only. Hydrogen pins ten capacity families in
-    # its controlled parity fixture, and its own investment constraints would make
-    # those pins infeasible. The equivalent gating for the generator, storage and
-    # transmission builders lives in the unmerged out-of-sample stack and is
-    # deliberately not reproduced here, so this flag does not affect the base model.
+    industry::Bool = false,
     include_investment_constraints::Bool = true,
     progress = nothing,
 )
@@ -274,8 +285,10 @@ function create_constraints(
     storDischarge = emp[:storDischarge]
     trOp = emp[:transmissionOperational]
     shed = emp[:loadShed]
-    if hydrogen
+    if hydrogen || industry
         _sector_period_context(emp, periods, par.NaturalGas.gasScenarioCount)
+    end
+    if hydrogen
         _hydrogen_electricity_context!(emp, sets, par)
     end
 
@@ -292,14 +305,15 @@ function create_constraints(
                 natural_gas_pipeline_electricity_demand(emp, sets, par, n, t) :
                 0.0
             ) -
-            (hydrogen ? hydrogen_electricity_demand(emp, sets, par, n, t) : 0.0) ==
+            (hydrogen ? hydrogen_electricity_demand(emp, sets, par, n, t) : 0.0) -
+            (industry ? industry_electricity_demand(emp, sets, par, n, t) : 0.0) ==
             load(par, n, t)
     )
 
     create_generator_constraints(emp, sets, par, periods; include_investment_constraints, progress)
     create_storage_constraints(emp, sets, par, periods; include_investment_constraints, progress)
     create_transmission_constraints(emp, sets, par, periods; include_investment_constraints, progress)
-    create_emission_constraints(emp, sets, par, periods; hydrogen, progress)
+    create_emission_constraints(emp, sets, par, periods; hydrogen, industry, progress)
     natural_gas && create_natural_gas_constraints!(emp, sets, par, periods)
     hydrogen && create_hydrogen_constraints!(
         emp,
@@ -307,6 +321,9 @@ function create_constraints(
         par,
         periods;
         include_investment_constraints,
+    )
+    industry && create_industry_constraints!(
+        emp, sets, par, periods; include_investment_constraints,
     )
     return nothing
 
@@ -588,6 +605,7 @@ function create_emission_constraints(
     par,
     periods::TimeStructure;
     hydrogen::Bool = false,
+    industry::Bool = false,
     progress = nothing,
 )
     par.CO2cap === nothing && return nothing
@@ -630,6 +648,15 @@ function create_emission_constraints(
                     if scenario_index == sc
                     for t in scenario;
                     init = 0.0,
+                ) : 0.0) +
+            (industry ?
+                sum(
+                    multiple_strat(sp, t) * industry_emissions(emp, sets, par, n, t)
+                    for rp in repr_periods(sp)
+                    for (scenario_index, scenario) in enumerate(opscenarios(rp))
+                    if scenario_index == sc
+                    for t in scenario;
+                    init = JuMP.AffExpr(0.0),
                 ) : 0.0)
     )
 
@@ -658,6 +685,15 @@ function objective_component_expressions(emp::JuMP.Model, sets, par, periods::Ti
         terminal_import = JuMP.AffExpr(0.0),
         reformer_operation = JuMP.AffExpr(0.0),
         transport_shedding = JuMP.AffExpr(0.0),
+    )
+    industry_costs = has_industry(sets) ?
+                     industry_objective_expressions(emp, sets, par, periods, discounter) :
+                     (
+        investment = JuMP.AffExpr(0.0),
+        steel_operation = JuMP.AffExpr(0.0),
+        cement_operation = JuMP.AffExpr(0.0),
+        ammonia_operation = JuMP.AffExpr(0.0),
+        refinery_shedding = JuMP.AffExpr(0.0),
     )
 
     # `total += coef * var` rebuilds the whole expression each iteration, making an
@@ -739,6 +775,11 @@ function objective_component_expressions(emp::JuMP.Model, sets, par, periods::Ti
         hydrogen_terminal_import = hydrogen_costs.terminal_import,
         hydrogen_reformer_operation = hydrogen_costs.reformer_operation,
         hydrogen_transport_shedding = hydrogen_costs.transport_shedding,
+        industry_investment = industry_costs.investment,
+        industry_steel_operation = industry_costs.steel_operation,
+        industry_cement_operation = industry_costs.cement_operation,
+        industry_ammonia_operation = industry_costs.ammonia_operation,
+        industry_refinery_shedding = industry_costs.refinery_shedding,
     )
 end
 
