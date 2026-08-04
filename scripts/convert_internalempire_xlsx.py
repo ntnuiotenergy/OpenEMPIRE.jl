@@ -495,6 +495,85 @@ def convert_core_tables(source: Path, out: Path, extra_out: Path, periods: int) 
                 write_csv(finalize(extra), extra_out / component / f"{sheet}_extra.csv")
 
 
+# Pyomo Param defaults from InternalEMPIRE's empire.py. Pyomo fills every
+# missing (key, period) cell of a sparse .tab with the parameter's `default=`;
+# a CSV consumer that materializes one profile per key cannot reproduce that
+# per-cell fallback, so the dataset must be explicit. The source workbooks
+# frequently provide only period-1 rows (e.g. genMaxBuiltCap has 578 such keys,
+# storENMaxBuiltCap all 65), which InternalEMPIRE silently completes with these
+# defaults. Note transmissionMaxBuiltCap's default is 10000 in InternalEMPIRE
+# versus 20000 in base OpenEMPIRE — this table follows the fork it was
+# converted from.
+PYOMO_PERIOD_DEFAULTS = {
+    ("Generator", "genMaxBuiltCap"): ("500000.0", False),
+    ("Transmission", "transmissionMaxBuiltCap"): ("10000.0", True),
+    ("Storage", "storENMaxBuiltCap"): ("500000.0", False),
+    ("Storage", "storPWMaxBuiltCap"): ("500000.0", False),
+}
+
+
+def materialize_pyomo_period_defaults(out: Path, periods: int) -> None:
+    """Complete sparse (key, period) tables to the full period grid.
+
+    For each configured table, every key present in the CSV receives explicit
+    rows for all periods 1..`periods`, using the Pyomo default where the
+    workbook supplied no value. When `full_domain` is set, keys absent from the
+    table entirely (bidirectional arcs from Sets/DirectionalLink.csv) are also
+    materialized — Pyomo constrains the whole domain, and for
+    transmissionMaxBuiltCap the reference default (10000) actually binds,
+    unlike a missing-key fallback of "no constraint".
+    """
+    arcs: list[tuple[str, str]] = []
+    seen_arcs: set[frozenset[str]] = set()
+    links = pd.read_csv(out / "Sets" / "DirectionalLink.csv", dtype=str)
+    for _, row in links.iterrows():
+        pair = frozenset((row.iloc[0], row.iloc[1]))
+        if pair not in seen_arcs:
+            seen_arcs.add(pair)
+            arcs.append((row.iloc[0], row.iloc[1]))
+
+    for (component, filename), (default, full_domain) in PYOMO_PERIOD_DEFAULTS.items():
+        path = out / component / f"{filename}.csv"
+        df = pd.read_csv(path, dtype=str)
+        key_cols = list(df.columns[:2])
+        period_col = df.columns[2]
+        value_col = df.columns[3]
+        provided: dict[tuple[str, str], dict[int, str]] = {}
+        for _, row in df.iterrows():
+            provided.setdefault((row[key_cols[0]], row[key_cols[1]]), {})[
+                int(row[period_col])
+            ] = row[value_col]
+
+        keys = list(provided)
+        if full_domain:
+            covered = {frozenset(k) for k in provided}
+            keys += [a for a in arcs if frozenset(a) not in covered]
+
+        records = []
+        added = 0
+        for key in keys:
+            values = provided.get(key, {})
+            for period in range(1, periods + 1):
+                value = values.get(period)
+                if value is None:
+                    value = default
+                    added += 1
+                records.append(
+                    {
+                        key_cols[0]: key[0],
+                        key_cols[1]: key[1],
+                        period_col: period,
+                        value_col: value,
+                    }
+                )
+        write_csv(pd.DataFrame.from_records(records), path)
+        logger.info(
+            "%s/%s.csv: materialized %d default cells (Pyomo default %s) "
+            "across %d keys x %d periods",
+            component, filename, added, default, len(keys), periods,
+        )
+
+
 def convert_core_sets(source: Path, out: Path, extra_out: Path, periods: int) -> None:
     excel = pd.ExcelFile(source / "Sets.xlsx")
     nodes: list[str] | None = None
@@ -943,6 +1022,7 @@ def main() -> None:
     logger.info("Converting %s -> %s", source, out)
     convert_core_sets(source, out, extra_out, args.periods)
     convert_core_tables(source, out, extra_out, args.periods)
+    materialize_pyomo_period_defaults(out, args.periods)
     copy_scenario_data(source, out, extra_out)
     convert_extra_tables(source, extra_out, args.periods)
     if not args.skip_modules:
