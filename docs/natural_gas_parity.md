@@ -100,19 +100,3 @@ so does not exercise `preprocess_operational_cost`; gas marginal cost is covered
 by `test_gas_marginal_cost_without_a_fuel_price` and
 `test_full_model_int_gas_generators_are_priced` instead.
 
-
-Recorded on 2026-07-30:
-
-| Operation | Minimum time | Allocations |
-|---|---:|---:|
-| Full-dataset gas parameter parsing | `1.066 ms` | 17,350 / 1.23 MiB |
-| Period context for 19,440 operational periods | `974.292 μs` | 36 / 8.09 MiB |
-| Weather × gas combined-scenario count | `166.227 ns` | 0 / 0 bytes |
-| Controlled construct + solve + result write | `3.876 ms` | 18,040 / 4.96 MiB |
-
-An initial implementation built three separate dictionaries for strategic,
-weather, and gas indices. Consolidating them into one concrete named-tuple
-dictionary reduced the representative period-map measurement from `2.342 ms`
-and 20.28 MiB to `974.292 μs` and 8.09 MiB. `@code_warntype` infers concrete
-return types for this map, the complete gas parameter reader, and combined
-scenario counting.

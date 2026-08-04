@@ -3,9 +3,10 @@
 # 4 regular seasons of 168 h, 2 peak seasons, 5 scenarios, north sea on).
 # To be used with scripts/run_julia_empire.jl.
 #
-# Note: full_model_int also carries hydrogen/industry/natural-gas/heat data. Those
-# modules are not part of the Julia port yet; their tables live in
-# data_extra/full_model_int/ and are ignored by this run.
+# Note: full_model_int also carries industry and heat data. Those modules are not
+# part of the Julia port yet; their tables live in data_extra/full_model_int/ and are
+# ignored by this run. The natural-gas and Hydrogen/CO2 inputs are in the bundled CSV
+# dataset, and both modules are disabled by default.
 #
 # REQUIRES THE NATURAL-GAS MODULE. InternalEMPIRE prices natural gas through its
 # gas module rather than through Generator!FuelCosts, so this dataset has no
@@ -15,11 +16,13 @@
 # dataset, converter and validator are delivered first so the module can be
 # reviewed against fixed, hash-verified inputs.
 
+
 use_temporary_directory: True                          # Specifies whether to use a temporary directory for operations
 temporary_directory: './'                              # Path to the temporary directory used for certain operations
 forecast_horizon_year: 2055                            # 2020 + 7 periods x 5 years
 number_of_scenarios: 5                                 # Number of scenarios in every investment period
 natural_gas: False                                     # Enable the natural-gas operational module
+hydrogen: False                                        # Requires natural_gas=true; deterministic evidence supports one gas scenario
 number_of_gas_scenarios: 1                             # Terminal-price scenarios (weather × gas is solved)
 length_of_regular_season: 168                          # Number of hours in a regular season
 discount_rate: 0.05                                    # Rate used to discount future cash flows to present value

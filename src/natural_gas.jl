@@ -10,7 +10,7 @@ const FINITE_RESERVE_TERMINALS = Set(("domesticproduction", "pipelineimport"))
 # comparable and the feasible set identical.
 const NATURAL_GAS_ROW_SCALE = 1.0e-3
 
-const NaturalGasPeriodContext = NamedTuple{
+const OperationalPeriodContext = NamedTuple{
     (:strategic, :weather, :gas),
     Tuple{Int, Int, Int},
 }
@@ -26,9 +26,9 @@ _natural_gas_node_generators(sets) = [
     if generator in natural_gas_generators(sets)
 ]
 
-function _natural_gas_period_maps(periods, gas_scenario_count::Int)
+function _sector_period_maps(periods, gas_scenario_count::Int)
     period_type = eltype(periods)
-    context = Dict{period_type, NaturalGasPeriodContext}()
+    context = Dict{period_type, OperationalPeriodContext}()
     for (period_index, strategic_period) in enumerate(strat_periods(periods))
         for representative_period in repr_periods(strategic_period)
             for (combined_scenario, scenario) in
@@ -57,18 +57,24 @@ Constraint building, the objective, and objective-component reporting all need
 the same map; without caching it is rebuilt three times per model (about 8 MiB
 per build at 19,440 operational periods).
 """
-function _natural_gas_period_context(
+function _sector_period_context(
     emp::JuMP.Model,
     periods,
     gas_scenario_count::Int,
 )
-    context_type = Dict{eltype(periods), NaturalGasPeriodContext}
-    cached = get(emp.ext, :natural_gas_period_context, nothing)
+    context_type = Dict{eltype(periods), OperationalPeriodContext}
+    cached = get(emp.ext, :sector_period_context, nothing)
     cached isa context_type && return cached
-    context = _natural_gas_period_maps(periods, gas_scenario_count)::context_type
-    emp.ext[:natural_gas_period_context] = context
+    context = _sector_period_maps(periods, gas_scenario_count)::context_type
+    emp.ext[:sector_period_context] = context
     return context
 end
+
+const NaturalGasPeriodContext = OperationalPeriodContext
+_natural_gas_period_maps(periods, gas_scenario_count::Int) =
+    _sector_period_maps(periods, gas_scenario_count)
+_natural_gas_period_context(emp::JuMP.Model, periods, gas_scenario_count::Int) =
+    _sector_period_context(emp, periods, gas_scenario_count)
 
 function _operational_scenario_at(representative_period, scenario_index::Int)
     for (index, scenario) in enumerate(opscenarios(representative_period))
@@ -323,8 +329,14 @@ function create_natural_gas_constraints!(emp::JuMP.Model, sets, par, periods)
             (from, to) in natural_gas_links(sets),
             operational_period in periods,
         ],
-        transmission[from, to, operational_period] <=
-            natural_gas_pipeline_capacity(par, from, to),
+        transmission[from, to, operational_period] +
+        (haskey(JuMP.object_dictionary(emp), :hydrogenRepurposedGasPipelineCapInstalled) &&
+         (from, to) in hydrogen_sets(sets).RepurposableGasCorridor ?
+            emp[:hydrogenRepurposedGasPipelineCapInstalled][
+                from,
+                to,
+                collect(strat_periods(periods))[period_context[operational_period].strategic],
+            ] : 0.0) <= natural_gas_pipeline_capacity(par, from, to),
     )
     @constraint(
         emp,
@@ -361,6 +373,13 @@ function create_natural_gas_constraints!(emp::JuMP.Model, sets, par, periods)
             if generator in natural_gas_generators(sets);
             init = 0.0,
         ) +
+        (haskey(JuMP.object_dictionary(emp), :reformerNaturalGas) &&
+         node in hydrogen_sets(sets).ReformerLocation ?
+            sum(
+                emp[:reformerNaturalGas][node, plant, operational_period]
+                for plant in hydrogen_sets(sets).ReformerPlant;
+                init = 0.0,
+            ) : 0.0) +
         sum(
             transmission[node, destination, operational_period]
             for destination in natural_gas_outgoing(sets, node);

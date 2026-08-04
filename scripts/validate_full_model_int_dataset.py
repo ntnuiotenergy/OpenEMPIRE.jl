@@ -73,7 +73,69 @@ SCHEMAS = {
         "Natural_gas_demand_[MWh/yr]",
     ),
     "Transport/CurtailCost.csv": ("CurtailCost_(€/MWh)",),
+    "Hydrogen/Constants.csv": ("Parameter", "Value", "Unit", "Source"),
+    "Hydrogen/HydrogenGenerators.csv": ("HydrogenGenerator",),
+    "Hydrogen/ProductionNodes.csv": ("ProductionNodes",),
+    "Hydrogen/ReformerLocations.csv": ("ReformerLocations",),
+    "Hydrogen/ReformerPlants.csv": ("ReformerPlants",),
+    "Hydrogen/H2Storages.csv": ("H2Storages",),
+    "Hydrogen/H2Terminals.csv": ("H2Terminals",),
+    "Hydrogen/H2TerminalNodes.csv": ("H2TerminalNodes",),
+    "Hydrogen/H2TerminalsOfNode.csv": ("H2TerminalNodes", "H2Terminals"),
+    "Hydrogen/duplicate_input_audit.csv": (
+        "Table", "Key", "DiscardedSourceRow", "DiscardedValue",
+        "SelectedSourceRow", "SelectedValue", "ValuesDiffer",
+    ),
+    "Hydrogen/excluded_input_rows.csv": ("Table", "SourceRow", "Key", "Reason"),
+    "Transport/ElectricityDemand.csv": (
+        "Node", "Period", "Electricity_demand_[MWh/yr]",
+    ),
+    "Transport/HydrogenDemand.csv": (
+        "Node", "Period", "Hydrogen_demand_[MWh/yr]",
+    ),
+    "Generator/genCO2Captured.csv": (
+        "GeneratorTechnology", "CO2Capctured_in_tCO2/GJ",
+    ),
+    "CO2/CO2SequestrationNodes.csv": ("CO2SequestrationNodes",),
+    "CO2/generated_default_rows.csv": (
+        "Node", "Period", "Storage_max_injection_capacity_(ton/hour)", "Reason",
+    ),
 }
+
+SCHEMAS.update({
+    "Hydrogen/ElectrolyzerFixedOMCost.csv": ("Period", "eLyzerOMCost"),
+    "Hydrogen/ElectrolyzerLifetime.csv": ("elyzerLifetime",),
+    "Hydrogen/ElectrolyzerPlantCapitalCost.csv": ("Period", "elyzerCapCost_(€/MWe)"),
+    "Hydrogen/ElectrolyzerPowerUse.csv": ("Period", "El_consumption_(MWh/ton)"),
+    "Hydrogen/PipelineCapitalCost.csv": ("Period", "Capital_cost"),
+    "Hydrogen/PipelineOMCostPerKM.csv": ("Period", "O&M_Cost"),
+    "Hydrogen/PipelineCompressorPowerUsage.csv": ("Electricity_usage",),
+    "Hydrogen/ReformerCapitalCost.csv": ("Plant_type", "Period", "Capital_cost_[EUR/MW_H2]"),
+    "Hydrogen/ReformerFixedOMCost.csv": ("Plant_type", "Period", "Fixed_O&M_cost_[EUR/MW_H2]"),
+    "Hydrogen/ReformerVariableOMCost.csv": ("Plant_type", "Period", "Variable_O&M_cost_[EUR/ton_H2]"),
+    "Hydrogen/ReformerEfficiency.csv": ("Plant_type", "Period", "LHV_Efficiency"),
+    "Hydrogen/ReformerElectricityUse.csv": ("Plant_type", "Period", "Electricity_demand_[MWh_/_ton]"),
+    "Hydrogen/ReformerEmissionFactor.csv": ("Plant_type", "Period", "Ton_CO2_emissions_per_ton_H2"),
+    "Hydrogen/ReformerCO2CaptureFactor.csv": ("Plant_type", "Period", "Ton_CO2_emissions_captured_per_ton_H2"),
+    "Hydrogen/ReformerLifetime.csv": ("elyzerLifetime", "SMRLifetime"),
+    "Hydrogen/StorageCapitalCost.csv": ("H2Storage", "Period", "Capital_cost_(EUR/ton)"),
+    "Hydrogen/StorageFixedOMCost.csv": ("H2Storage", "Period", "O&M_cost_per_kg_H2"),
+    "Hydrogen/StorageMaxCapacity.csv": ("Node", "H2Storage", "Max_capacity_[ton]"),
+    "Hydrogen/StorageLifetime.csv": ("H2Storage", "Lifetime"),
+    "Hydrogen/H2TerminalCapitalCost.csv": ("H2TerminalNodes", "H2Terminals", "Period", "CapitalCost_(EUR/ton/h)"),
+    "Hydrogen/H2TerminalFixedOM.csv": ("H2TerminalNodes", "H2Terminals", "Period", "FixedOM_(EUR/ton/h)"),
+    "Hydrogen/H2TerminalLifetime.csv": ("H2Terminals", "importLifetime"),
+    "Hydrogen/H2TerminalPrice.csv": ("H2TerminalNodes", "H2Terminals", "Period", "Cost_(EUR/kg)"),
+    "Hydrogen/H2TerminalCapacity.csv": ("H2TerminalNodes", "H2Terminals", "Period", "Capacity_(ton/hr)"),
+    "CO2/StorageSiteCapitalCost.csv": ("Node", "Site_Development_Cost_euro/(t/hr)"),
+    "CO2/StorageSiteFixedOMCost.csv": ("Node", "Field_Fixed_OM_Cost_euro/(t/hr)"),
+    "CO2/StorageMaxCapacity.csv": ("Node", "Period", "Storage_max_injection_capacity_(ton/hour)"),
+    "CO2/PipelineCapitalCost.csv": ("Capital_cost_(euro/(km_*_tons/hr)",),
+    "CO2/PipelineFixedOM.csv": ("O&M_Cost_(euro/km)",),
+    "CO2/PipelineLifetime.csv": ("Lifetime_(years)",),
+    "CO2/PipelineElectricityUsage.csv": ("Power_usage_[MWh/ton]",),
+    "CO2/MaxSequestrationCapacity.csv": ("Node", "Max_sequestration_capacity_[tons]"),
+})
 
 
 def fail(message: str) -> None:
@@ -466,6 +528,318 @@ def validate_gas_tables(dataset: Path, manifest: dict[str, object]) -> None:
             fail(f"Last-source-row-wins reserve mismatch for node {row['Node']}")
 
 
+def validate_hydrogen_manifest(dataset: Path) -> dict[str, object]:
+    path = dataset / "hydrogen_conversion_manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    listed = set()
+    for entry in manifest["files"]:
+        relative = entry["path"]
+        if relative in listed:
+            fail(f"{path}: duplicate file entry {relative}")
+        listed.add(relative)
+        output = dataset / relative
+        if not output.is_file():
+            fail(f"{path}: missing listed file {relative}")
+        if hashlib.sha256(output.read_bytes()).hexdigest() != entry["sha256"]:
+            fail(f"{path}: SHA-256 mismatch for {relative}")
+    expected = {
+        file.relative_to(dataset).as_posix()
+        for folder in (dataset / "Hydrogen", dataset / "CO2")
+        for file in folder.glob("*.csv")
+    } | {
+        "Transport/ElectricityDemand.csv",
+        "Transport/HydrogenDemand.csv",
+        "Generator/genCO2Captured.csv",
+    }
+    if listed != expected:
+        fail(
+            f"{path}: Hydrogen file inventory mismatch; "
+            f"unlisted={sorted(expected-listed)}, missing={sorted(listed-expected)}"
+        )
+    return manifest
+
+
+def _validate_complete_numeric_table(
+    dataset: Path,
+    relative: str,
+    key_columns: tuple[str, ...],
+    value_column: str,
+    expected: set[tuple[str, ...]],
+    periods: set[int],
+) -> list[dict[str, str]]:
+    rows, keys = unique_keys(dataset, relative, key_columns)
+    finite_nonnegative(dataset, relative, rows, (value_column,))
+    if "Period" in key_columns:
+        integer_column(dataset, relative, rows, "Period", periods)
+    if keys != expected:
+        fail(
+            f"{dataset / relative}: incomplete or unexpected keys; "
+            f"missing={sorted(expected-keys)[:10]}, extra={sorted(keys-expected)[:10]}"
+        )
+    return rows
+
+
+def validate_hydrogen_tables(dataset: Path, base_manifest: dict[str, object]) -> None:
+    manifest = validate_hydrogen_manifest(dataset)
+    periods = set(range(1, int(base_manifest["periods"]) + 1))
+    period_keys = {(str(period),) for period in periods}
+    nodes = single_column_set(dataset, "Sets/Node.csv", "Node")
+    onshore = single_column_set(dataset, "Sets/OnshoreNode.csv", "OnshoreNode")
+    generators = single_column_set(dataset, "Sets/Generator.csv", "Generator")
+    hydrogen_generators = single_column_set(
+        dataset, "Hydrogen/HydrogenGenerators.csv", "HydrogenGenerator"
+    )
+    expected_generators = {
+        generator for generator in generators if "hydrogen" in generator.lower()
+    }
+    if hydrogen_generators != expected_generators:
+        fail("Hydrogen generator set does not match the case-insensitive name rule")
+
+    production_nodes = single_column_set(
+        dataset, "Hydrogen/ProductionNodes.csv", "ProductionNodes"
+    )
+    reformer_locations = single_column_set(
+        dataset, "Hydrogen/ReformerLocations.csv", "ReformerLocations"
+    )
+    reformers = single_column_set(
+        dataset, "Hydrogen/ReformerPlants.csv", "ReformerPlants"
+    )
+    storages = single_column_set(dataset, "Hydrogen/H2Storages.csv", "H2Storages")
+    terminal_nodes = single_column_set(
+        dataset, "Hydrogen/H2TerminalNodes.csv", "H2TerminalNodes"
+    )
+    terminals = single_column_set(dataset, "Hydrogen/H2Terminals.csv", "H2Terminals")
+    sequestration_nodes = single_column_set(
+        dataset, "CO2/CO2SequestrationNodes.csv", "CO2SequestrationNodes"
+    )
+    for name, values, allowed in (
+        ("production", production_nodes, nodes),
+        ("reformer", reformer_locations, production_nodes),
+        ("terminal", terminal_nodes, production_nodes),
+        ("CO2 sequestration", sequestration_nodes, onshore),
+    ):
+        if not values <= allowed:
+            fail(f"Unknown {name} nodes: {sorted(values-allowed)}")
+
+    pair_rows, terminal_pairs = unique_keys(
+        dataset,
+        "Hydrogen/H2TerminalsOfNode.csv",
+        ("H2TerminalNodes", "H2Terminals"),
+    )
+    for row in pair_rows:
+        if row["H2TerminalNodes"] not in terminal_nodes:
+            fail(f"Unknown Hydrogen terminal node: {row}")
+        if row["H2Terminals"] not in terminals:
+            fail(f"Unknown Hydrogen terminal: {row}")
+
+    scalar_rows = read_csv(dataset, "Hydrogen/Constants.csv")
+    scalar_values = {row["Parameter"]: float(row["Value"]) for row in scalar_rows}
+    expected_scalars = {
+        "hydrogen_mwh_per_ton": 33.3,
+        "storage_initial_fraction": 0.5,
+        "storage_compression_mwh_per_ton": 0.333,
+        "pipeline_compressor_static_mwh_per_ton": 1.0,
+        "hydrogen_pipeline_lifetime_years": 40.0,
+        "pipeline_leakage_fraction_per_km": 0.000005,
+        "reformer_ramp_fraction_per_hour": 0.1,
+        "repurpose_cost_factor": 0.25,
+        "repurpose_energy_flow_factor": 0.8,
+        "terminal_eur_per_kg_to_eur_per_ton": 1000.0,
+        "hours_per_year": 8760.0,
+    }
+    if scalar_values != expected_scalars:
+        fail("Hydrogen/Constants.csv differs from the audited formulation constants")
+
+    for relative, value_column in (
+        ("Hydrogen/ElectrolyzerFixedOMCost.csv", "eLyzerOMCost"),
+        ("Hydrogen/ElectrolyzerPlantCapitalCost.csv", "elyzerCapCost_(€/MWe)"),
+        ("Hydrogen/ElectrolyzerPowerUse.csv", "El_consumption_(MWh/ton)"),
+        ("Hydrogen/PipelineCapitalCost.csv", "Capital_cost"),
+        ("Hydrogen/PipelineOMCostPerKM.csv", "O&M_Cost"),
+    ):
+        _validate_complete_numeric_table(
+            dataset, relative, ("Period",), value_column, period_keys, periods
+        )
+
+    for relative, value_column in (
+        ("Hydrogen/ReformerCapitalCost.csv", "Capital_cost_[EUR/MW_H2]"),
+        ("Hydrogen/ReformerFixedOMCost.csv", "Fixed_O&M_cost_[EUR/MW_H2]"),
+        ("Hydrogen/ReformerVariableOMCost.csv", "Variable_O&M_cost_[EUR/ton_H2]"),
+        ("Hydrogen/ReformerEfficiency.csv", "LHV_Efficiency"),
+        ("Hydrogen/ReformerEmissionFactor.csv", "Ton_CO2_emissions_per_ton_H2"),
+        ("Hydrogen/ReformerCO2CaptureFactor.csv", "Ton_CO2_emissions_captured_per_ton_H2"),
+    ):
+        _validate_complete_numeric_table(
+            dataset,
+            relative,
+            ("Plant_type", "Period"),
+            value_column,
+            {(plant, str(period)) for plant in reformers for period in periods},
+            periods,
+        )
+
+    electricity_rows, electricity_keys = unique_keys(
+        dataset,
+        "Hydrogen/ReformerElectricityUse.csv",
+        ("Plant_type", "Period"),
+    )
+    expected_reformer_periods = {
+        (plant, str(period)) for plant in reformers for period in periods
+    }
+    if electricity_keys != expected_reformer_periods:
+        fail("Hydrogen/ReformerElectricityUse.csv is incomplete")
+    for row_number, row in enumerate(electricity_rows, start=2):
+        value = float(row["Electricity_demand_[MWh_/_ton]"])
+        if not math.isfinite(value):
+            fail(f"ReformerElectricityUse.csv row {row_number}: non-finite value")
+        if value < 0 and not (row["Plant_type"] == "SMR" and math.isclose(value, -2 / 3)):
+            fail(f"ReformerElectricityUse.csv row {row_number}: unexpected negative value")
+
+    efficiency_rows = read_csv(dataset, "Hydrogen/ReformerEfficiency.csv")
+    for row in efficiency_rows:
+        efficiency = float(row["LHV_Efficiency"])
+        if not 0 < efficiency <= 1:
+            fail(f"Invalid reformer efficiency: {row}")
+
+    for relative, key_column, value_column, expected_values in (
+        ("Hydrogen/ReformerLifetime.csv", "elyzerLifetime", "SMRLifetime", reformers),
+        ("Hydrogen/StorageLifetime.csv", "H2Storage", "Lifetime", storages),
+        ("Hydrogen/H2TerminalLifetime.csv", "H2Terminals", "importLifetime", terminals),
+    ):
+        _validate_complete_numeric_table(
+            dataset,
+            relative,
+            (key_column,),
+            value_column,
+            {(value,) for value in expected_values},
+            periods,
+        )
+
+    for relative, value_column in (
+        ("Hydrogen/StorageCapitalCost.csv", "Capital_cost_(EUR/ton)"),
+        ("Hydrogen/StorageFixedOMCost.csv", "O&M_cost_per_kg_H2"),
+    ):
+        _validate_complete_numeric_table(
+            dataset,
+            relative,
+            ("H2Storage", "Period"),
+            value_column,
+            {(storage, str(period)) for storage in storages for period in periods},
+            periods,
+        )
+
+    storage_rows, _ = unique_keys(
+        dataset, "Hydrogen/StorageMaxCapacity.csv", ("Node", "H2Storage")
+    )
+    finite_nonnegative(
+        dataset, "Hydrogen/StorageMaxCapacity.csv", storage_rows, ("Max_capacity_[ton]",)
+    )
+    for row in storage_rows:
+        if row["Node"] not in production_nodes or row["H2Storage"] not in storages:
+            fail(f"Hydrogen storage capacity references an unknown key: {row}")
+
+    expected_terminal_periods = {
+        (node, terminal, str(period))
+        for node, terminal in terminal_pairs
+        for period in periods
+    }
+    for relative, value_column in (
+        ("Hydrogen/H2TerminalCapitalCost.csv", "CapitalCost_(EUR/ton/h)"),
+        ("Hydrogen/H2TerminalFixedOM.csv", "FixedOM_(EUR/ton/h)"),
+        ("Hydrogen/H2TerminalPrice.csv", "Cost_(EUR/kg)"),
+        ("Hydrogen/H2TerminalCapacity.csv", "Capacity_(ton/hr)"),
+    ):
+        _validate_complete_numeric_table(
+            dataset,
+            relative,
+            ("H2TerminalNodes", "H2Terminals", "Period"),
+            value_column,
+            expected_terminal_periods,
+            periods,
+        )
+
+    for relative, column in (
+        ("Hydrogen/ElectrolyzerLifetime.csv", "elyzerLifetime"),
+        ("Hydrogen/PipelineCompressorPowerUsage.csv", "Electricity_usage"),
+        ("CO2/PipelineCapitalCost.csv", "Capital_cost_(euro/(km_*_tons/hr)"),
+        ("CO2/PipelineFixedOM.csv", "O&M_Cost_(euro/km)"),
+        ("CO2/PipelineLifetime.csv", "Lifetime_(years)"),
+        ("CO2/PipelineElectricityUsage.csv", "Power_usage_[MWh/ton]"),
+    ):
+        rows = read_csv(dataset, relative)
+        if len(rows) != 1:
+            fail(f"{dataset / relative}: expected one scalar row")
+        finite_nonnegative(dataset, relative, rows, (column,))
+
+    for relative, value_column in (
+        ("CO2/StorageSiteCapitalCost.csv", "Site_Development_Cost_euro/(t/hr)"),
+        ("CO2/StorageSiteFixedOMCost.csv", "Field_Fixed_OM_Cost_euro/(t/hr)"),
+        ("CO2/MaxSequestrationCapacity.csv", "Max_sequestration_capacity_[tons]"),
+    ):
+        _validate_complete_numeric_table(
+            dataset,
+            relative,
+            ("Node",),
+            value_column,
+            {(node,) for node in sequestration_nodes},
+            periods,
+        )
+    _validate_complete_numeric_table(
+        dataset,
+        "CO2/StorageMaxCapacity.csv",
+        ("Node", "Period"),
+        "Storage_max_injection_capacity_(ton/hour)",
+        {(node, str(period)) for node in sequestration_nodes for period in periods},
+        periods,
+    )
+    default_rows = read_csv(dataset, "CO2/generated_default_rows.csv")
+    if len(default_rows) != manifest["pyomo_default_rows_materialized"]:
+        fail("CO2 default-row audit count differs from its conversion manifest")
+    for row in default_rows:
+        if (
+            float(row["Storage_max_injection_capacity_(ton/hour)"]) != 0.0
+            or row["Reason"] != "InternalEMPIRE Param default for absent source key"
+        ):
+            fail(f"CO2 generated-default audit contains an invalid row: {row}")
+
+    for relative, value_column in (
+        ("Transport/ElectricityDemand.csv", "Electricity_demand_[MWh/yr]"),
+        ("Transport/HydrogenDemand.csv", "Hydrogen_demand_[MWh/yr]"),
+    ):
+        _validate_complete_numeric_table(
+            dataset,
+            relative,
+            ("Node", "Period"),
+            value_column,
+            {(node, str(period)) for node in onshore for period in periods},
+            periods,
+        )
+
+    capture_rows, _ = unique_keys(
+        dataset, "Generator/genCO2Captured.csv", ("GeneratorTechnology",)
+    )
+    finite_nonnegative(
+        dataset,
+        "Generator/genCO2Captured.csv",
+        capture_rows,
+        ("CO2Capctured_in_tCO2/GJ",),
+    )
+    if not {row["GeneratorTechnology"] for row in capture_rows} <= generators:
+        fail("Generator/genCO2Captured.csv references an unknown generator")
+
+    audit_rows = read_csv(dataset, "Hydrogen/duplicate_input_audit.csv")
+    if len(audit_rows) != manifest["duplicate_rows_resolved_last_source_row_wins"]:
+        fail("Hydrogen duplicate audit count differs from its conversion manifest")
+    excluded_rows = read_csv(dataset, "Hydrogen/excluded_input_rows.csv")
+    if len(excluded_rows) != manifest["unused_parameter_rows_excluded"]:
+        fail("Hydrogen exclusion audit count differs from its conversion manifest")
+    if any(
+        row["Reason"] != "terminal-node pair is absent from H2TerminalsOfNode"
+        for row in excluded_rows
+    ):
+        fail("Hydrogen exclusion audit contains an unknown exclusion reason")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -478,11 +852,15 @@ def main() -> None:
     dataset = args.dataset.resolve()
     manifest = validate_manifest(dataset)
     validate_gas_tables(dataset, manifest)
+    hydrogen_enabled = (dataset / "hydrogen_conversion_manifest.json").is_file()
+    if hydrogen_enabled:
+        validate_hydrogen_tables(dataset, manifest)
     print(
         "full_model_int validation: PASS "
         f"({len(manifest['files'])} files, {manifest['periods']} periods, "
         f"{manifest['terminal_cost_duplicate_keys_total']} audited terminal-cost "
-        f"duplicates, {manifest['reserve_duplicate_keys']} audited reserve duplicate)"
+        f"duplicates, {manifest['reserve_duplicate_keys']} audited reserve duplicate, "
+        f"hydrogen={'yes' if hydrogen_enabled else 'no'})"
     )
 
 
