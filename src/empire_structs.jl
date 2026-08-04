@@ -162,6 +162,11 @@ const DEFAULT_GEN_MAX_INST_CAP_RAW = 0.0
 const DEFAULT_MAX_BUILD_CAP        = 500000.0
 const DEFAULT_MAX_INST_CAP         = 0.0
 const DEFAULT_TRANS_MAX_BUILD      = nothing
+# Pyomo's `transmissionMaxBuiltCap` Param default (base EMPIRE, `empire.py:255`).
+# Used only to fill periods that a corridor's CSV rows do not cover, mirroring
+# Pyomo's per-cell fallback. Whole-corridor absence keeps `DEFAULT_TRANS_MAX_BUILD`
+# (no constraint) for now - see the tracking notes on aligning that with Pyomo.
+const PYOMO_DEFAULT_TRANS_MAX_BUILD_CAP = 20000.0
 const DEFAULT_TRANS_MAX_INST       = nothing
 const DEFAULT_MAX_HYDRO_NODE       = nothing
 

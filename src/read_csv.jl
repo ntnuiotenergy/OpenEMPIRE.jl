@@ -331,6 +331,13 @@ function _read_strategic_profiles_csv(
     return profiles
 end
 
+# `default_value` fills periods a key does not provide. It must equal the Pyomo
+# parameter's own `default=` for the table being read: Pyomo falls back to that
+# default for every missing (key, period) cell, whereas this reader materializes
+# one profile per key. Padding with a blanket 0.0 silently turned "no row" into
+# "capacity 0" for build-cap tables whose Pyomo default is 500,000 — forbidding
+# investment the reference allows (root cause of the full_model_int North Sea
+# infeasibility at HelgolaenderBucht).
 function _read_strategic_profiles_pair_csv(
         path::AbstractString;
         key_cols::Tuple{Int, Int} = (1, 2),
@@ -685,7 +692,10 @@ function read_params_csv(
     par.genRefInitCap = _read_float_by_pair_csv(_required_csv(dir, generator, "genRefInitCap.csv"))
     par.genScaleInitCap = _read_strategic_profiles_csv(_required_csv(dir, generator, "genScaleInitCap.csv"))
     par.genInitCap = _read_strategic_profiles_pair_csv(_required_csv(dir, generator, "genInitCap.csv"))
-    par.genMaxBuiltCap = _read_strategic_profiles_pair_csv(_required_csv(dir, generator, "genMaxBuiltCap.csv"))
+    par.genMaxBuiltCap = _read_strategic_profiles_pair_csv(
+        _required_csv(dir, generator, "genMaxBuiltCap.csv");
+        default_value = DEFAULT_GEN_MAX_BUILD_CAP,
+    )
     par.genMaxInstalledCapRaw =
         _read_float_by_pair_csv(_required_csv(dir, generator, "genMaxInstalledCapRaw.csv"))
     par.genRampUpCap = _read_float_by_string_csv(_required_csv(dir, generator, "genRampUpCap.csv"))
@@ -697,7 +707,10 @@ function read_params_csv(
     par.transmissionInitCap =
         _read_strategic_profiles_pair_csv(_required_csv(dir, transmission, "transmissionInitCap.csv"))
     par.transmissionMaxBuiltCap =
-        _read_strategic_profiles_pair_csv(_required_csv(dir, transmission, "transmissionMaxBuiltCap.csv"))
+        _read_strategic_profiles_pair_csv(
+        _required_csv(dir, transmission, "transmissionMaxBuiltCap.csv");
+        default_value = PYOMO_DEFAULT_TRANS_MAX_BUILD_CAP,
+    )
     par.transmissionMaxInstalledCap =
         _read_strategic_profiles_pair_csv(_required_csv(dir, transmission, "transmissionMaxInstalledCapRaw.csv"))
     par.transmissionLength =
@@ -718,7 +731,10 @@ function read_params_csv(
     par.storENCapitalCost = _read_strategic_profiles_csv(_required_csv(dir, storage, "storENCapitalCost.csv"))
     par.storENFixedOMCost = _read_strategic_profiles_csv(_required_csv(dir, storage, "storENFixedOMCost.csv"))
     par.storENInitCap = _read_strategic_profiles_pair_csv(_required_csv(dir, storage, "storENInitCap.csv"))
-    par.storENMaxBuiltCap = _read_strategic_profiles_pair_csv(_required_csv(dir, storage, "storENMaxBuiltCap.csv"))
+    par.storENMaxBuiltCap = _read_strategic_profiles_pair_csv(
+        _required_csv(dir, storage, "storENMaxBuiltCap.csv");
+        default_value = DEFAULT_MAX_BUILD_CAP,
+    )
     par.storENMaxInstalledCap =
         _read_float_by_pair_csv(_required_csv(dir, storage, "storENMaxInstalledCapRaw.csv"))
     par.storOperationalInit =
@@ -726,7 +742,10 @@ function read_params_csv(
     par.storPWCapitalCost = _read_strategic_profiles_csv(_required_csv(dir, storage, "storPWCapitalCost.csv"))
     par.storPWFixedOMCost = _read_strategic_profiles_csv(_required_csv(dir, storage, "storPWFixedOMCost.csv"))
     par.storPWInitCap = _read_strategic_profiles_pair_csv(_required_csv(dir, storage, "storPWInitCap.csv"))
-    par.storPWMaxBuiltCap = _read_strategic_profiles_pair_csv(_required_csv(dir, storage, "storPWMaxBuiltCap.csv"))
+    par.storPWMaxBuiltCap = _read_strategic_profiles_pair_csv(
+        _required_csv(dir, storage, "storPWMaxBuiltCap.csv");
+        default_value = DEFAULT_MAX_BUILD_CAP,
+    )
     par.storPWMaxInstalledCap =
         _read_float_by_pair_csv(_required_csv(dir, storage, "storPWMaxInstalledCapRaw.csv"))
     par.storageLifetime = _read_float_by_string_csv(_required_csv(dir, storage, "storageLifetime.csv"))
