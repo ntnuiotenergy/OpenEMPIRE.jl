@@ -1,6 +1,6 @@
 # Natural Gas Implementation Status
 
-Last updated: 2026-08-02 Europe/Oslo
+Last updated: 2026-08-04 Europe/Oslo
 
 ## Objective
 
@@ -10,6 +10,67 @@ scenarios, results, OOS/full-year aggregation, parity evidence, and tests.
 
 This file is a live handoff. Update it after every meaningful implementation or
 verification milestone.
+
+## Delivery status (2026-08-04)
+
+**This module is PR-ready.** The evidence branch was transplanted onto a clean base.
+
+- Delivery branch: `torgrim/deterministic-natural-gas`
+- Worktree: `OpenEMPIRE.jl-natural-gas-pr`
+- Base: PR #30 (`torgrim/full-model-int-dataset`) at `f29c5f6`
+- 12 commits ahead of that base; working tree clean
+- **Not pushed.** No remote branch, no PR opened. Commit signing goes through
+  1Password over SSH and has been intermittently unavailable.
+
+Evidence history remains on `torgrim/natural-gas-workbench`, which must never become
+a PR: it carries the out-of-sample ancestry. The section below documents that work.
+
+### Clean-base transplant fixes
+
+The module was developed on top of the unmerged out-of-sample stack and had absorbed
+dependencies on it. Removing them was the bulk of the transplant:
+
+- `create_constraints(...; include_investment_constraints)` (PR #22). Tests now give
+  the fixture `genMaxInstalledCap` headroom instead. Note the parameter is keyed by
+  `(node, technology)`, not `(node, generator)`; an IIS returning exactly two rows,
+  `max_inst_tech[A,Gas,sp1]` against the fixed value, established that after a first
+  attempt used the generator key.
+- `create_timestruct(...; operational_hours_per_year)` (PR #26). This one is **ported**
+  rather than worked around: it is a self-contained generalisation defaulting to 8760,
+  and the fixture genuinely needs unit multiplicity.
+- `test_natural_gas_oos_compatibility_and_full_year_streaming` used
+  `_oos_structural_config`. Removed with a note; it belongs on a branch carrying both.
+- `scripts/natural_gas_parity_julia.jl` still passed the investment flag, so the
+  documented parity command failed with a `MethodError`. **No test invokes the script**
+  - the controlled parity test shells out to it only when Python with `pyomo` and
+  `highspy` is available, and skips otherwise - so the suite was green while the script
+  was broken.
+
+### Verification on the clean base
+
+Full suite: Excel 66, CSV 91, Natural gas 451, CSV scenarios 446, Validate 16,
+TimeStruct 17, Solve 3. No failures.
+
+Natural-gas Julia/Pyomo parity re-run end to end: 26 metrics, maximum absolute
+difference `4.54747350886e-13`, maximum relative difference `3.5527136788e-16`, PASS.
+
+### Open decisions for the supervisor
+
+1. **The multiple-gas-scenario gate is fatal.** `empire_structs.jl` pushes a validation
+   error when `gasScenarioCount > 1`, so the model refuses to build. The supervisor
+   described the upstream feature as incomplete rather than wrong, and asked that the
+   port mirror Python; a hard block may overshoot a loud warning. The weather x gas
+   combination convention remains unverified against `empire.py` either way.
+2. **CCS costs.** `CCSCostTSFix`, `CCSCostTSVariable` and `CCSRemFrac` are commented out
+   in InternalEMPIRE (`empire.py:461-463`) but live in base EMPIRE, which this port
+   follows. Both are now data-driven and can be zeroed per dataset.
+
+### Sequencing note
+
+`include_investment_constraints` was subsequently ported to the generator, storage and
+transmission builders on the Hydrogen branch, because the controlled parity fixtures pin
+every investment variable to zero and set installed capacity exogenously. **PR #22
+introduces the same flag; whichever merges second will conflict on `create_constraints`.**
 
 ## Safety and branch state
 
