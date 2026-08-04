@@ -193,23 +193,39 @@ function create_objective(
         transport_shedding = JuMP.AffExpr(0.0),
     )
 
+    # See the note in `objective_component_expressions`: `sum` over a generator
+    # folds left, copying the whole partial expression each step, so summing over
+    # every operational period is O(n^2) in time and allocation.
+    investment = JuMP.AffExpr(0.0)
+    for sp in SP
+        weight = objective_weight(sp, discounter)
+        for n in N, g in generators(sets, n)
+            JuMP.add_to_expression!(investment, weight * gen_invest_cost(par, g, sp), genInvCap[n, g, sp])
+        end
+        for (m, n) in bidir_arcs(sets)
+            JuMP.add_to_expression!(investment, weight * trans_invest_cost(par, m, n, sp), transInvCap[m, n, sp])
+        end
+        for n in N, s in storages(sets, n)
+            JuMP.add_to_expression!(investment, weight * stor_pw_invest_cost(par, s, sp), storInvCapPow[n, s, sp])
+            JuMP.add_to_expression!(investment, weight * stor_en_invest_cost(par, s, sp), storInvCapEn[n, s, sp])
+        end
+    end
+    operation = JuMP.AffExpr(0.0)
+    for t in periods
+        weight = objective_weight(t, discounter; type = "avg_year")
+        for n in N
+            JuMP.add_to_expression!(operation, weight * lost_load_cost(par, n, t), shed[n, t])
+            for g in generators(sets, n)
+                JuMP.add_to_expression!(operation, weight * gen_marginal_cost(par, g, t), genOp[n, g, t])
+            end
+        end
+    end
+
     return @objective(
         emp,
         Min,
-        sum(
-            objective_weight(sp, discounter) * (
-                    sum(gen_invest_cost(par, g, sp) * genInvCap[n, g, sp] for n in N, g in generators(sets, n); init = 0) +
-                    sum(trans_invest_cost(par, m, n, sp) * transInvCap[m, n, sp] for (m, n) in bidir_arcs(sets); init = 0) +
-                    sum(stor_pw_invest_cost(par, s, sp) * storInvCapPow[n, s, sp] for n in N, s in storages(sets, n); init = 0) +
-                    sum(stor_en_invest_cost(par, s, sp) * storInvCapEn[n, s, sp] for n in N, s in storages(sets, n); init = 0)
-                ) for sp in SP
-        ) + sum(
-            objective_weight(t, discounter; type = "avg_year") * (
-                    sum(lost_load_cost(par, n, t) * shed[n, t] for n in N; init = 0) +
-                    sum(gen_marginal_cost(par, g, t) * genOp[n, g, t] for n in N for g in generators(sets, n); init = 0)
-                )
-            for t in periods
-        ) + gas_costs.terminal_import + gas_costs.transport_shedding
+        investment + operation +
+        gas_costs.terminal_import + gas_costs.transport_shedding
     )
 end
 
@@ -580,28 +596,51 @@ function objective_component_expressions(emp::JuMP.Model, sets, par, periods::Ti
         return total
     end
 
+    # The same O(n^2) trap applies to the outer sums. `sum` over a generator folds
+    # left, so every step copies the accumulated expression; over all operational
+    # periods that dominated the post-solve diagnostics. Accumulate in place.
+    function accumulate_strategic(term)
+        total = JuMP.AffExpr(0.0)
+        for sp in SP
+            JuMP.add_to_expression!(total, objective_weight(sp, discounter), term(sp))
+        end
+        return total
+    end
+
+    function accumulate_operational(term)
+        total = JuMP.AffExpr(0.0)
+        for t in periods
+            JuMP.add_to_expression!(
+                total,
+                objective_weight(t, discounter; type = "avg_year"),
+                term(t),
+            )
+        end
+        return total
+    end
+
+    function transmission_investment_expr(sp)
+        total = JuMP.AffExpr(0.0)
+        for (m, n) in bidir_arcs(sets)
+            JuMP.add_to_expression!(total, trans_invest_cost(par, m, n, sp), transInvCap[m, n, sp])
+        end
+        return total
+    end
+
+    function load_shedding_expr(t)
+        total = JuMP.AffExpr(0.0)
+        for n in N
+            JuMP.add_to_expression!(total, lost_load_cost(par, n, t), shed[n, t])
+        end
+        return total
+    end
+
     return (
-        generator_investment = sum(
-            objective_weight(sp, discounter) * generator_investment_expr(sp)
-            for sp in SP
-        ),
-        storage_investment = sum(
-            objective_weight(sp, discounter) * storage_investment_expr(sp) for sp in SP
-        ),
-        transmission_investment = sum(
-            objective_weight(sp, discounter) *
-            sum(trans_invest_cost(par, m, n, sp) * transInvCap[m, n, sp] for (m, n) in bidir_arcs(sets); init = 0)
-            for sp in SP
-        ),
-        load_shedding = sum(
-            objective_weight(t, discounter; type = "avg_year") *
-            sum(lost_load_cost(par, n, t) * shed[n, t] for n in N; init = 0)
-            for t in periods
-        ),
-        generator_operation = sum(
-            objective_weight(t, discounter; type = "avg_year") * generator_operation_expr(t)
-            for t in periods
-        ),
+        generator_investment = accumulate_strategic(generator_investment_expr),
+        storage_investment = accumulate_strategic(storage_investment_expr),
+        transmission_investment = accumulate_strategic(transmission_investment_expr),
+        load_shedding = accumulate_operational(load_shedding_expr),
+        generator_operation = accumulate_operational(generator_operation_expr),
         natural_gas_terminal_import = gas_costs.terminal_import,
         natural_gas_transport_shedding = gas_costs.transport_shedding,
     )

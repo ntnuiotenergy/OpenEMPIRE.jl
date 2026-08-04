@@ -389,28 +389,31 @@ function natural_gas_objective_expressions(
     gas = par.NaturalGas
     period_context = _natural_gas_period_context(emp, periods, gas.gasScenarioCount)
 
-    terminal_import_cost = sum(
-        objective_weight(operational_period, discounter; type = "avg_year") *
-        natural_gas_terminal_cost(
-            par,
-            node,
-            terminal,
-            period_context[operational_period].strategic,
-            period_context[operational_period].gas,
-        ) *
-        terminal_import[node, terminal, operational_period]
-        for (node, terminal) in natural_gas_terminal_nodes(sets)
-        for operational_period in periods;
-        init = JuMP.AffExpr(0.0),
-    )
-    transport_shedding_cost = sum(
-        objective_weight(operational_period, discounter; type = "avg_year") *
-        gas.transportCurtailCost *
-        transport_shed[node, operational_period]
-        for node in _natural_gas_onshore_nodes(sets)
-        for operational_period in periods;
-        init = JuMP.AffExpr(0.0),
-    )
+    # `sum` over a generator folds left, so each step copies the whole partial
+    # expression: an n-term sum costs O(n^2). Over every operational period that
+    # is the dominant cost of the post-solve diagnostics. `add_to_expression!`
+    # appends in place. See the same note in `objective_component_expressions`.
+    terminal_import_cost = JuMP.AffExpr(0.0)
+    for (node, terminal) in natural_gas_terminal_nodes(sets),
+        operational_period in periods
+
+        context = period_context[operational_period]
+        JuMP.add_to_expression!(
+            terminal_import_cost,
+            objective_weight(operational_period, discounter; type = "avg_year") *
+            natural_gas_terminal_cost(par, node, terminal, context.strategic, context.gas),
+            terminal_import[node, terminal, operational_period],
+        )
+    end
+    transport_shedding_cost = JuMP.AffExpr(0.0)
+    for node in _natural_gas_onshore_nodes(sets), operational_period in periods
+        JuMP.add_to_expression!(
+            transport_shedding_cost,
+            objective_weight(operational_period, discounter; type = "avg_year") *
+            gas.transportCurtailCost,
+            transport_shed[node, operational_period],
+        )
+    end
     return (
         terminal_import = terminal_import_cost,
         transport_shedding = transport_shedding_cost,
