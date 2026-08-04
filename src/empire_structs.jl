@@ -317,7 +317,6 @@ end
 lost_load_cost(par, n, t) = haskey(par.nodeLostLoadCost, n) ? par.nodeLostLoadCost[n][t] : DEFAULT_LOST_LOAD_COST
 sload(par, n, t) = haskey(par.sload, n) ? par.sload[n][t] : DEFAULT_LOAD
 gen_marginal_cost(par, g, t) = haskey(par.genMargCost, g) ? par.genMargCost[g][t] : DEFAULT_GEN_MARGINAL_COST
-natural_gas_params(par::EmpireParams) = par.NaturalGas
 natural_gas_pipeline_capacity(par::EmpireParams, from, to) =
     get(par.NaturalGas.pipelineCapacity, (from, to), 0.0)
 natural_gas_storage_capacity(par::EmpireParams, node) =
@@ -460,6 +459,15 @@ function _check_natural_gas_params!(
     gas.gasScenarioCount > 0 ||
         push!(errs, "NaturalGas.gasScenarioCount must be positive")
 
+    # Missing functionality, deliberately gated rather than shipped half-verified:
+    # the stochastic gas-price axis (gasScenarioCount > 1) is implemented on the
+    # evidence branches, but the weather x gas scenario-combination convention has
+    # never been verified against InternalEMPIRE's `empire.py`, and no
+    # two-price-scenario reference parity exists. Until that evidence exists the
+    # deterministic delivery refuses to build rather than risk silently mis-weighting
+    # scenarios. Lifting the gate requires: (1) verifying the combination order
+    # against the reference, (2) a stochastic parity comparison, (3) removing this
+    # validation error.
     gas.gasScenarioCount == 1 || push!(
         errs,
         "NaturalGas.gasScenarioCount must equal 1: multiple gas-price scenarios " *
