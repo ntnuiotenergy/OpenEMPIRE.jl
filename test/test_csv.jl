@@ -134,9 +134,11 @@ function test_read_bundled_csv_datasets()
     @test length(europe_params.genCapitalCost) == 23
 end
 
-# The converted InternalEMPIRE dataset must load through the standard CSV reader,
-# and its documented dependency on a natural-gas module must surface as a clear
-# error rather than an opaque BoundsError from an empty StrategicProfile.
+# The converted InternalEMPIRE dataset must load through the standard CSV reader
+# and be runnable with or without the natural-gas module. InternalEMPIRE prices gas
+# endogenously, so its workbook has no fuel cost for any gas technology; the
+# converter fills those rows from europe_v51 (base OpenEMPIRE's own values) so a
+# module-off run prices gas properly instead of at Pyomo's 0 default.
 function test_read_full_model_int_dataset()
     data_root = joinpath(pkgdir(OpenEMPIRE), "data")
     dataset = joinpath(data_root, "full_model_int")
@@ -149,18 +151,35 @@ function test_read_full_model_int_dataset()
     @test length(OpenEMPIRE.generators(sets)) == 33
     @test length(OpenEMPIRE.arcs(sets)) == 436
 
-    # InternalEMPIRE prices natural gas through its gas module, so these five
-    # generators carry no genFuelCost row anywhere in the dataset.
+    # The workbook carries no fuel cost for these five; the converter supplies the
+    # europe_v51 values so the dataset is usable with the gas module off.
     gas_generators = ["GasCCGT", "GasCCS", "GasCCSadv", "GasOCGT", "Gasexisting"]
     for generator in gas_generators
         @test generator in OpenEMPIRE.generators(sets)
-        @test !haskey(params.genFuelCost, generator)
+        @test haskey(params.genFuelCost, generator)
         @test haskey(params.genEfficiency, generator)
     end
 
     periods = OpenEMPIRE.create_timestruct(7, 5, 4, 24, 2, 24, 1)
+
+    # Module off: gas is priced from its fuel cost like any other thermal unit.
+    # It must never fall through to DEFAULT_GEN_MARGINAL_COST, which would make
+    # gas generation free.
+    OpenEMPIRE.preprocess_operational_cost(params, sets, periods)
+    first_period = first(periods)
+    for generator in gas_generators
+        @test haskey(params.genMargCost, generator)
+        @test params.genMargCost[generator][first_period] > 0
+    end
+
+    # A dataset that genuinely omits the fuel cost must still fail loudly rather
+    # than silently pricing gas at zero.
+    stripped_sets, stripped_params = OpenEMPIRE.read_data(dataset; format = :csv)
+    for generator in gas_generators
+        delete!(stripped_params.genFuelCost, generator)
+    end
     err = try
-        OpenEMPIRE.preprocess_operational_cost(params, sets, periods)
+        OpenEMPIRE.preprocess_operational_cost(stripped_params, stripped_sets, periods)
         nothing
     catch caught
         caught
