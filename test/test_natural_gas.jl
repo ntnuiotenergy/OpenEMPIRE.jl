@@ -380,10 +380,11 @@ function test_natural_gas_scenario_mapping_and_costs()
     @test parameters.genMargCost["GasCCGT"][first(periods)] ≈ 19.4
 end
 
-# InternalEMPIRE prices natural gas through the gas module, so its workbooks
-# carry no `genFuelCost` row for gas-fired generators at all. That is the real
-# shipped condition, and it must still yield variable O&M plus carbon costs
-# rather than silently falling back to DEFAULT_GEN_MARGINAL_COST.
+# InternalEMPIRE prices natural gas through the gas module, so its workbooks carry
+# no `genFuelCost` row for gas-fired generators at all. `full_model_int` now fills
+# those rows from europe_v51 so the dataset is also runnable with the module off,
+# but a dataset that omits them entirely must still yield variable O&M plus carbon
+# costs rather than silently falling back to DEFAULT_GEN_MARGINAL_COST.
 function test_gas_marginal_cost_without_a_fuel_price()
     sets = OpenEMPIRE.EmpireSets(
         Node = ["A"],
