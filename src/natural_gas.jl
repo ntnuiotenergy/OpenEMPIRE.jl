@@ -399,7 +399,7 @@ function create_natural_gas_constraints!(
         (
             transport_demand && node in natural_gas_onshore_nodes(sets) ?
             transport_met[node, operational_period] : 0.0
-        ),
+        ) + industry_natural_gas_demand(emp, sets, par, node, operational_period),
     )
     return nothing
 end

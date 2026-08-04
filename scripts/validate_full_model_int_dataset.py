@@ -137,6 +137,58 @@ SCHEMAS.update({
     "CO2/MaxSequestrationCapacity.csv": ("Node", "Max_sequestration_capacity_[tons]"),
 })
 
+SCHEMAS.update({
+    "Sets/SteelProducers.csv": ("SteelProducers",),
+    "Sets/CementProducers.csv": ("CementProducers",),
+    "Sets/AmmoniaProducers.csv": ("AmmoniaProducers",),
+    "Sets/OilProducers.csv": ("OilProducers",),
+    "General/availableBioEnergy.csv": ("Period", "Available_bioenergy_(GJ)"),
+    "Industry/SteelPlants.csv": ("SteelPlants",),
+    "Industry/CementPlants.csv": ("CementPlants",),
+    "Industry/AmmoniaPlants.csv": ("AmmoniaPlants",),
+    "Industry/Constants.csv": ("Parameter", "Value", "Unit", "Source"),
+    "Industry/ShedCost.csv": ("ShedCost_(€/ton)",),
+    "Industry/SteelPlantLifetime.csv": ("PlantType", "Lifetime"),
+    "Industry/SteelInitialCapacity.csv": ("Node", "PlantType", "Initial_capacity_(ton/hr)"),
+    "Industry/SteelScaleFactorInitialCap.csv": ("PlantType", "Period", "RetirementFactor"),
+    "Industry/SteelInvCost.csv": ("PlantType", "Period", "InvCost_(eur/(t/h)_crude_steel)"),
+    "Industry/SteelFixedOM.csv": ("PlantType", "Period", "InvCost_(eur/(t/h)_crude_steel)"),
+    "Industry/SteelVarOpex.csv": ("PlantType", "Period", "VarOpex_(eur/(t/h)_crude_steel)"),
+    "Industry/SteelCoalConsumption.csv": ("SteelPlant", "Period", "Coal_Consumption"),
+    "Industry/SteelHydrogenConsumption.csv": ("SteelPlant", "Period", "Hydrogen_Consumption"),
+    "Industry/SteelBioConsumption.csv": ("SteelPlant", "Period", "FuelConsumption"),
+    "Industry/SteelOilConsumption.csv": ("SteelPlant", "Period", "FuelConsumption"),
+    "Industry/SteelElConsumption.csv": ("SteelPlant", "Period", "ElectricityConsumption"),
+    "Industry/SteelCO2Emissions.csv": ("SteelPlant", "CO2_emissions_(ton_CO2/ton_crude_steel)"),
+    "Industry/SteelCO2Captured.csv": ("SteelPlant", "CO2_captured_(ton_CO2/ton_crude_steel)"),
+    "Industry/SteelYearlyProduction.csv": ("Node", "Period", "Production_(ton/yr)"),
+    "Industry/CementPlantLifetime.csv": ("PlantType", "Lifetime"),
+    "Industry/CementInitialCapacity.csv": ("Node", "CementPlant", "Capacity_(ton/hr)"),
+    "Industry/CementScaleFactorInitialCap.csv": ("PlantType", "Period", "RetirementFactor"),
+    "Industry/CementInvCost.csv": ("PlantType", "Period", "InvCost_(EUR/(ton/hr))"),
+    "Industry/CementFixedOM.csv": ("PlantType", "Period", "Fixed_O&M_(EUR/(ton/hr))"),
+    "Industry/CementFuelConsumption.csv": ("CementPlant", "Period", "FuelConsumption"),
+    "Industry/CementCO2CaptureRate.csv": ("CementPlant", "CaptureRate"),
+    "Industry/CementElConsumption.csv": ("CementPlant", "Period", "ElectricityConsumption"),
+    "Industry/CementYearlyProduction.csv": ("Node", "Production"),
+    "Industry/AmmoniaPlantLifetime.csv": ("PlantType", "Lifetime"),
+    "Industry/AmmoniaInitialCapacity.csv": ("Node", "AmmoniaPlant", "Capacity_(ton/hr)"),
+    "Industry/AmmoniaScaleFactorInitialCap.csv": ("PlantType", "Period", "RetirementFactor"),
+    "Industry/AmmoniaInvCost.csv": ("PlantType", "Period", "InvCost_(EUR/(ton/hr))"),
+    "Industry/AmmoniaFixedOM.csv": ("PlantType", "Period", "Fixed_O&M_(EUR/(ton/hr))"),
+    "Industry/AmmoniaFeedstockConsumption.csv": ("Ammonia_Plant", "Feedstock_Consumption_(kg_feedstock_/_t_ammonia)"),
+    "Industry/AmmoniaElConsumption.csv": ("Ammonia_plant", "Electricity_consumption_(MWh_/_t_ammonia)"),
+    "Industry/AmmoniaYearlyProduction.csv": ("Node", "Period", "Yearly_production_(tons/yr)"),
+    "Industry/RefineryHydrogenConsumption.csv": ("Hydrogen_consumption_(ton/k_bbl)",),
+    "Industry/RefineryHeatConsumption.csv": ("Heat_Consumption_(MWh/k_bbl)",),
+    "Industry/RefineryYearlyProduction.csv": ("Node", "Period", "Yearly_production_of_oil_(k_bbl/yr)"),
+    "Industry/duplicate_input_audit.csv": (
+        "Table", "Key", "DiscardedSourceRow", "DiscardedValue",
+        "SelectedSourceRow", "SelectedValue", "ValuesDiffer",
+    ),
+    "Industry/generated_default_rows.csv": ("Table", "Key", "Value", "Reason"),
+})
+
 
 def fail(message: str) -> None:
     raise ValueError(message)
@@ -840,6 +892,240 @@ def validate_hydrogen_tables(dataset: Path, base_manifest: dict[str, object]) ->
         fail("Hydrogen exclusion audit contains an unknown exclusion reason")
 
 
+def validate_industry_manifest(dataset: Path) -> dict[str, object]:
+    path = dataset / "industry_conversion_manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    listed: set[str] = set()
+    for entry in manifest["files"]:
+        relative = entry["path"]
+        if relative in listed:
+            fail(f"{path}: duplicate file entry {relative}")
+        listed.add(relative)
+        output = dataset / relative
+        if not output.is_file():
+            fail(f"{path}: missing listed file {relative}")
+        payload = output.read_bytes()
+        if hashlib.sha256(payload).hexdigest() != entry["sha256"]:
+            fail(f"{path}: SHA-256 mismatch for {relative}")
+        if len(payload) != entry["bytes"]:
+            fail(f"{path}: byte-count mismatch for {relative}")
+        with output.open(newline="", encoding="utf-8") as handle:
+            rows = sum(1 for _ in csv.reader(handle)) - 1
+        if rows != entry["rows"]:
+            fail(f"{path}: row-count mismatch for {relative}")
+    expected = {
+        file.relative_to(dataset).as_posix()
+        for file in (dataset / "Industry").glob("*.csv")
+    } | {
+        "Sets/SteelProducers.csv",
+        "Sets/CementProducers.csv",
+        "Sets/AmmoniaProducers.csv",
+        "Sets/OilProducers.csv",
+        "General/availableBioEnergy.csv",
+    }
+    if listed != expected:
+        fail(
+            f"{path}: Industry file inventory mismatch; "
+            f"unlisted={sorted(expected-listed)}, missing={sorted(listed-expected)}"
+        )
+    return manifest
+
+
+def _validate_fraction_table(
+    dataset: Path,
+    relative: str,
+    rows: Iterable[dict[str, str]],
+    column: str,
+) -> None:
+    for row_number, row in enumerate(rows, start=2):
+        value = float(row[column])
+        if value > 1:
+            fail(
+                f"{dataset / relative}: row {row_number} column {column} "
+                f"must be no larger than one: {row[column]!r}"
+            )
+
+
+def validate_industry_tables(dataset: Path, base_manifest: dict[str, object]) -> None:
+    manifest = validate_industry_manifest(dataset)
+    periods = set(range(1, int(base_manifest["periods"]) + 1))
+    period_keys = {str(period) for period in periods}
+    nodes = single_column_set(dataset, "Sets/Node.csv", "Node")
+    steel_producers = single_column_set(
+        dataset, "Sets/SteelProducers.csv", "SteelProducers"
+    )
+    cement_producers = single_column_set(
+        dataset, "Sets/CementProducers.csv", "CementProducers"
+    )
+    ammonia_producers = single_column_set(
+        dataset, "Sets/AmmoniaProducers.csv", "AmmoniaProducers"
+    )
+    oil_producers = single_column_set(dataset, "Sets/OilProducers.csv", "OilProducers")
+    for name, producers in (
+        ("steel", steel_producers),
+        ("cement", cement_producers),
+        ("ammonia", ammonia_producers),
+        ("oil", oil_producers),
+    ):
+        if not producers <= nodes:
+            fail(f"Unknown {name} producer nodes: {sorted(producers-nodes)}")
+
+    steel = single_column_set(dataset, "Industry/SteelPlants.csv", "SteelPlants")
+    cement = single_column_set(dataset, "Industry/CementPlants.csv", "CementPlants")
+    ammonia = single_column_set(dataset, "Industry/AmmoniaPlants.csv", "AmmoniaPlants")
+    expected_steel = {
+        "BF-BOF", "BF-BOF-BioCarbon", "H2-DRI", "EAF", "Scrap", "BF-BOF-CCS",
+    }
+    expected_cement = {"NG-Cement", "H2-Cement", "NG-CCS-Cement"}
+    expected_ammonia = {"NG-Ammonia", "H2-Ammonia"}
+    if steel != expected_steel or cement != expected_cement or ammonia != expected_ammonia:
+        fail("Industry plant sets differ from the audited InternalEMPIRE inventory")
+
+    scalar_rows = read_csv(dataset, "Industry/Constants.csv")
+    finite_nonnegative(dataset, "Industry/Constants.csv", scalar_rows, ("Value",))
+    scalar_values = {row["Parameter"]: float(row["Value"]) for row in scalar_rows}
+    if scalar_values != {
+        "ramp_fraction_per_hour": 0.1,
+        "maximum_scrap_share": 0.45,
+        "hours_per_year": 8760.0,
+        "oil_shed_cost": 1_000_000.0,
+    }:
+        fail("Industry/Constants.csv differs from the audited formulation constants")
+
+    for relative, column in (
+        ("Industry/ShedCost.csv", "ShedCost_(€/ton)"),
+        ("Industry/RefineryHydrogenConsumption.csv", "Hydrogen_consumption_(ton/k_bbl)"),
+        ("Industry/RefineryHeatConsumption.csv", "Heat_Consumption_(MWh/k_bbl)"),
+    ):
+        rows = read_csv(dataset, relative)
+        if len(rows) != 1:
+            fail(f"{dataset / relative}: expected exactly one data row")
+        finite_nonnegative(dataset, relative, rows, (column,))
+
+    plant_period_tables = (
+        ("Industry/SteelInvCost.csv", "PlantType", "InvCost_(eur/(t/h)_crude_steel)", steel),
+        ("Industry/SteelFixedOM.csv", "PlantType", "InvCost_(eur/(t/h)_crude_steel)", steel),
+        ("Industry/SteelVarOpex.csv", "PlantType", "VarOpex_(eur/(t/h)_crude_steel)", steel),
+        ("Industry/SteelCoalConsumption.csv", "SteelPlant", "Coal_Consumption", steel),
+        ("Industry/SteelHydrogenConsumption.csv", "SteelPlant", "Hydrogen_Consumption", steel),
+        ("Industry/SteelBioConsumption.csv", "SteelPlant", "FuelConsumption", steel),
+        ("Industry/SteelOilConsumption.csv", "SteelPlant", "FuelConsumption", steel),
+        ("Industry/SteelElConsumption.csv", "SteelPlant", "ElectricityConsumption", steel),
+        ("Industry/CementInvCost.csv", "PlantType", "InvCost_(EUR/(ton/hr))", cement),
+        ("Industry/CementFixedOM.csv", "PlantType", "Fixed_O&M_(EUR/(ton/hr))", cement),
+        ("Industry/CementFuelConsumption.csv", "CementPlant", "FuelConsumption", cement),
+        ("Industry/CementElConsumption.csv", "CementPlant", "ElectricityConsumption", cement),
+        ("Industry/AmmoniaInvCost.csv", "PlantType", "InvCost_(EUR/(ton/hr))", ammonia),
+        ("Industry/AmmoniaFixedOM.csv", "PlantType", "Fixed_O&M_(EUR/(ton/hr))", ammonia),
+    )
+    for relative, plant_column, value_column, plants in plant_period_tables:
+        _validate_complete_numeric_table(
+            dataset,
+            relative,
+            (plant_column, "Period"),
+            value_column,
+            {(plant, period) for plant in plants for period in period_keys},
+            periods,
+        )
+
+    for relative, plant_column, value_column, plants in (
+        ("Industry/SteelPlantLifetime.csv", "PlantType", "Lifetime", steel),
+        ("Industry/SteelCO2Emissions.csv", "SteelPlant", "CO2_emissions_(ton_CO2/ton_crude_steel)", steel),
+        ("Industry/SteelCO2Captured.csv", "SteelPlant", "CO2_captured_(ton_CO2/ton_crude_steel)", steel),
+        ("Industry/CementPlantLifetime.csv", "PlantType", "Lifetime", cement),
+        ("Industry/CementCO2CaptureRate.csv", "CementPlant", "CaptureRate", cement),
+        ("Industry/AmmoniaPlantLifetime.csv", "PlantType", "Lifetime", ammonia),
+        ("Industry/AmmoniaFeedstockConsumption.csv", "Ammonia_Plant", "Feedstock_Consumption_(kg_feedstock_/_t_ammonia)", ammonia),
+        ("Industry/AmmoniaElConsumption.csv", "Ammonia_plant", "Electricity_consumption_(MWh_/_t_ammonia)", ammonia),
+    ):
+        rows = _validate_complete_numeric_table(
+            dataset,
+            relative,
+            (plant_column,),
+            value_column,
+            {(plant,) for plant in plants},
+            periods,
+        )
+        if "Lifetime" in value_column and any(float(row[value_column]) <= 0 for row in rows):
+            fail(f"{dataset / relative}: plant lifetimes must be positive")
+        if value_column == "CaptureRate":
+            _validate_fraction_table(dataset, relative, rows, value_column)
+
+    initial_specs = (
+        ("Industry/SteelInitialCapacity.csv", "PlantType", "Initial_capacity_(ton/hr)", steel_producers, steel),
+        ("Industry/CementInitialCapacity.csv", "CementPlant", "Capacity_(ton/hr)", cement_producers, cement),
+        ("Industry/AmmoniaInitialCapacity.csv", "AmmoniaPlant", "Capacity_(ton/hr)", ammonia_producers, ammonia),
+    )
+    for relative, plant_column, value_column, producers, plants in initial_specs:
+        _validate_complete_numeric_table(
+            dataset,
+            relative,
+            ("Node", plant_column),
+            value_column,
+            {(node, plant) for node in producers for plant in plants},
+            periods,
+        )
+
+    for relative, plants in (
+        ("Industry/SteelScaleFactorInitialCap.csv", steel),
+        ("Industry/CementScaleFactorInitialCap.csv", cement),
+        ("Industry/AmmoniaScaleFactorInitialCap.csv", ammonia),
+    ):
+        rows = _validate_complete_numeric_table(
+            dataset,
+            relative,
+            ("PlantType", "Period"),
+            "RetirementFactor",
+            {(plant, period) for plant in plants for period in period_keys},
+            periods,
+        )
+        _validate_fraction_table(dataset, relative, rows, "RetirementFactor")
+
+    for relative, value_column, producers in (
+        ("Industry/SteelYearlyProduction.csv", "Production_(ton/yr)", steel_producers),
+        ("Industry/AmmoniaYearlyProduction.csv", "Yearly_production_(tons/yr)", ammonia_producers),
+        ("Industry/RefineryYearlyProduction.csv", "Yearly_production_of_oil_(k_bbl/yr)", oil_producers),
+    ):
+        _validate_complete_numeric_table(
+            dataset,
+            relative,
+            ("Node", "Period"),
+            value_column,
+            {(node, period) for node in producers for period in period_keys},
+            periods,
+        )
+    _validate_complete_numeric_table(
+        dataset,
+        "Industry/CementYearlyProduction.csv",
+        ("Node",),
+        "Production",
+        {(node,) for node in cement_producers},
+        periods,
+    )
+    _validate_complete_numeric_table(
+        dataset,
+        "General/availableBioEnergy.csv",
+        ("Period",),
+        "Available_bioenergy_(GJ)",
+        {(period,) for period in period_keys},
+        periods,
+    )
+
+    duplicate_rows = read_csv(dataset, "Industry/duplicate_input_audit.csv")
+    if len(duplicate_rows) != manifest["duplicate_rows_resolved_last_source_row_wins"]:
+        fail("Industry duplicate audit count differs from its conversion manifest")
+    generated_rows, generated_keys = unique_keys(
+        dataset, "Industry/generated_default_rows.csv", ("Table", "Key")
+    )
+    if len(generated_rows) != manifest["pyomo_default_rows_materialized"]:
+        fail("Industry generated-default audit count differs from its conversion manifest")
+    for row in generated_rows:
+        if float(row["Value"]) != 0 or row["Reason"] != (
+            "InternalEMPIRE Pyomo Param default for absent source key"
+        ):
+            fail(f"Industry generated-default audit contains an invalid row: {row}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -855,12 +1141,16 @@ def main() -> None:
     hydrogen_enabled = (dataset / "hydrogen_conversion_manifest.json").is_file()
     if hydrogen_enabled:
         validate_hydrogen_tables(dataset, manifest)
+    industry_enabled = (dataset / "industry_conversion_manifest.json").is_file()
+    if industry_enabled:
+        validate_industry_tables(dataset, manifest)
     print(
         "full_model_int validation: PASS "
         f"({len(manifest['files'])} files, {manifest['periods']} periods, "
         f"{manifest['terminal_cost_duplicate_keys_total']} audited terminal-cost "
         f"duplicates, {manifest['reserve_duplicate_keys']} audited reserve duplicate, "
-        f"hydrogen={'yes' if hydrogen_enabled else 'no'})"
+        f"hydrogen={'yes' if hydrogen_enabled else 'no'}, "
+        f"industry={'yes' if industry_enabled else 'no'})"
     )
 
 

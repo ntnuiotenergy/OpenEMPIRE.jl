@@ -65,6 +65,7 @@ function read_data(
     format::Symbol = :auto,
     natural_gas::Bool = false,
     hydrogen::Bool = false,
+    industry::Bool = false,
     weather_scenarios::Int = 1,
     gas_scenarios::Int = 1,
 )
@@ -74,18 +75,25 @@ function read_data(
     hydrogen && gas_scenarios != 1 && throw(ArgumentError(
         "Deterministic Hydrogen requires number_of_gas_scenarios=1",
     ))
+    industry && !natural_gas && throw(ArgumentError(
+        "industry=true requires natural_gas=true",
+    ))
+    industry && gas_scenarios != 1 && throw(ArgumentError(
+        "Deterministic Industry requires number_of_gas_scenarios=1",
+    ))
     actual_format = format === :auto ? _detect_input_format(input) : format
     if actual_format === :csv
         return read_data_csv(
             input;
             natural_gas,
             hydrogen,
+            industry,
             weather_scenarios,
             gas_scenarios,
         )
     elseif actual_format === :xlsx
-        (natural_gas || hydrogen) && throw(ArgumentError(
-            "The natural-gas and Hydrogen modules require the validated CSV dataset layout",
+        (natural_gas || hydrogen || industry) && throw(ArgumentError(
+            "The natural-gas, Hydrogen, and Industry modules require the validated CSV dataset layout",
         ))
         return read_data_xlsx(input)
     end
@@ -97,6 +105,7 @@ function read_data(
     format::Symbol = :csv,
     natural_gas::Bool = false,
     hydrogen::Bool = false,
+    industry::Bool = false,
     weather_scenarios::Int = 1,
     gas_scenarios::Int = 1,
 )
@@ -106,6 +115,7 @@ function read_data(
         dataset_path(dataset);
         natural_gas,
         hydrogen,
+        industry,
         weather_scenarios,
         gas_scenarios,
     )
@@ -116,13 +126,14 @@ function read_data(
     format::Symbol = :xlsx,
     natural_gas::Bool = false,
     hydrogen::Bool = false,
+    industry::Bool = false,
     weather_scenarios::Int = 1,
     gas_scenarios::Int = 1,
 )
     format in (:auto, :xlsx) ||
         throw(ArgumentError("XlsxDataset can only be read with format :auto or :xlsx, got: $format"))
-    (natural_gas || hydrogen) && throw(ArgumentError(
-        "The natural-gas and Hydrogen modules require the validated CSV dataset layout",
+    (natural_gas || hydrogen || industry) && throw(ArgumentError(
+        "The natural-gas, Hydrogen, and Industry modules require the validated CSV dataset layout",
     ))
     return read_data_xlsx(dataset_path(dataset))
 end
@@ -284,6 +295,39 @@ function _read_hydrogen_sets_csv(dir, generators, links, gas_sets)
         DirectionalLink = hydrogen_links,
         CO2DirectionalLink = co2_links,
         RepurposableGasCorridor = repurposable_links,
+    )
+end
+
+function _read_industry_sets_csv(dir; hydrogen::Bool)
+    component = "Industry"
+    sets_component = "Sets"
+    return IndustrySets(
+        SteelProducer = _read_sector_vector(
+            _required_csv(dir, sets_component, "SteelProducers.csv"),
+            "SteelProducers", component,
+        ),
+        CementProducer = _read_sector_vector(
+            _required_csv(dir, sets_component, "CementProducers.csv"),
+            "CementProducers", component,
+        ),
+        AmmoniaProducer = _read_sector_vector(
+            _required_csv(dir, sets_component, "AmmoniaProducers.csv"),
+            "AmmoniaProducers", component,
+        ),
+        OilProducer = _read_sector_vector(
+            _required_csv(dir, sets_component, "OilProducers.csv"),
+            "OilProducers", component,
+        ),
+        SteelPlant = _read_sector_vector(
+            _required_csv(dir, component, "SteelPlants.csv"), "SteelPlants", component,
+        ),
+        CementPlant = _read_sector_vector(
+            _required_csv(dir, component, "CementPlants.csv"), "CementPlants", component,
+        ),
+        AmmoniaPlant = _read_sector_vector(
+            _required_csv(dir, component, "AmmoniaPlants.csv"), "AmmoniaPlants", component,
+        ),
+        hydrogen = hydrogen,
     )
 end
 
@@ -621,6 +665,7 @@ function read_sets_csv(
     dir::AbstractString;
     natural_gas::Bool = false,
     hydrogen::Bool = false,
+    industry::Bool = false,
 )
     @info "Reading CSV sets from $dir"
 
@@ -648,6 +693,7 @@ function read_sets_csv(
     hydrogen_sets = hydrogen ?
                     _read_hydrogen_sets_csv(dir, generators, base_links, gas_sets) :
                     HydrogenSets()
+    industry_sets_value = industry ? _read_industry_sets_csv(dir; hydrogen) : IndustrySets()
 
     return OpenEMPIRE.EmpireSets(
         Generator = generators,
@@ -669,6 +715,7 @@ function read_sets_csv(
         StoragesOfNode = _read_tuple2_csv(_required_csv(dir, sets_dir, "StoragesOfNode.csv")),
         NaturalGas = gas_sets,
         Hydrogen = hydrogen_sets,
+        Industry = industry_sets_value,
     )
 end
 
@@ -1162,6 +1209,180 @@ function _read_hydrogen_params_csv(dir::AbstractString)
     return hydrogen
 end
 
+function _read_industry_constants(path)
+    sector = "Industry"
+    rows = _validated_sector_rows(path, ("Parameter", "Value", "Unit", "Source"), sector)
+    values = Dict{String, Float64}()
+    for (index, row) in enumerate(rows)
+        row_number = index + 1
+        key = _sector_string(path, row_number, "Parameter", row[1], sector)
+        value = _sector_nonnegative(path, row_number, "Value", row[2], sector)
+        _sector_string(path, row_number, "Unit", row[3], sector)
+        _sector_string(path, row_number, "Source", row[4], sector)
+        _insert_unique_sector!(values, key, value, path, row_number, sector)
+    end
+    expected = Set((
+        "ramp_fraction_per_hour", "maximum_scrap_share", "hours_per_year",
+        "oil_shed_cost",
+    ))
+    Set(keys(values)) == expected || throw(ArgumentError(
+        "Industry constants inventory mismatch in $path",
+    ))
+    return values
+end
+
+function _read_industry_params_csv(dir::AbstractString)
+    component = "Industry"
+    path(filename) = _required_csv(dir, component, filename)
+    constants = _read_industry_constants(path("Constants.csv"))
+    return IndustryParams(
+        steelLifetime = _read_sector_string_values(
+            path("SteelPlantLifetime.csv"), ("PlantType", "Lifetime"), component;
+            positive = true,
+        ),
+        steelInitialCapacity = _read_sector_pair_values(
+            path("SteelInitialCapacity.csv"),
+            ("Node", "PlantType", "Initial_capacity_(ton/hr)"), component,
+        ),
+        steelRetirementFactor = _read_sector_plant_period_values(
+            path("SteelScaleFactorInitialCap.csv"),
+            ("PlantType", "Period", "RetirementFactor"), component,
+        ),
+        steelCapitalCost = _read_sector_plant_period_values(
+            path("SteelInvCost.csv"),
+            ("PlantType", "Period", "InvCost_(eur/(t/h)_crude_steel)"), component,
+        ),
+        steelFixedOMCost = _read_sector_plant_period_values(
+            path("SteelFixedOM.csv"),
+            ("PlantType", "Period", "InvCost_(eur/(t/h)_crude_steel)"), component,
+        ),
+        steelVariableOMCost = _read_sector_plant_period_values(
+            path("SteelVarOpex.csv"),
+            ("PlantType", "Period", "VarOpex_(eur/(t/h)_crude_steel)"), component,
+        ),
+        steelCoalConsumption = _read_sector_plant_period_values(
+            path("SteelCoalConsumption.csv"),
+            ("SteelPlant", "Period", "Coal_Consumption"), component,
+        ),
+        steelHydrogenConsumption = _read_sector_plant_period_values(
+            path("SteelHydrogenConsumption.csv"),
+            ("SteelPlant", "Period", "Hydrogen_Consumption"), component,
+        ),
+        steelBiomassConsumption = _read_sector_plant_period_values(
+            path("SteelBioConsumption.csv"),
+            ("SteelPlant", "Period", "FuelConsumption"), component,
+        ),
+        steelOilConsumption = _read_sector_plant_period_values(
+            path("SteelOilConsumption.csv"),
+            ("SteelPlant", "Period", "FuelConsumption"), component,
+        ),
+        steelElectricityConsumption = _read_sector_plant_period_values(
+            path("SteelElConsumption.csv"),
+            ("SteelPlant", "Period", "ElectricityConsumption"), component,
+        ),
+        steelCO2Emissions = _read_sector_string_values(
+            path("SteelCO2Emissions.csv"),
+            ("SteelPlant", "CO2_emissions_(ton_CO2/ton_crude_steel)"), component,
+        ),
+        steelCO2Captured = _read_sector_string_values(
+            path("SteelCO2Captured.csv"),
+            ("SteelPlant", "CO2_captured_(ton_CO2/ton_crude_steel)"), component,
+        ),
+        steelYearlyProduction = _read_sector_node_period_values(
+            path("SteelYearlyProduction.csv"),
+            ("Node", "Period", "Production_(ton/yr)"), component,
+        ),
+        cementLifetime = _read_sector_string_values(
+            path("CementPlantLifetime.csv"), ("PlantType", "Lifetime"), component;
+            positive = true,
+        ),
+        cementInitialCapacity = _read_sector_pair_values(
+            path("CementInitialCapacity.csv"),
+            ("Node", "CementPlant", "Capacity_(ton/hr)"), component,
+        ),
+        cementRetirementFactor = _read_sector_plant_period_values(
+            path("CementScaleFactorInitialCap.csv"),
+            ("PlantType", "Period", "RetirementFactor"), component,
+        ),
+        cementCapitalCost = _read_sector_plant_period_values(
+            path("CementInvCost.csv"),
+            ("PlantType", "Period", "InvCost_(EUR/(ton/hr))"), component,
+        ),
+        cementFixedOMCost = _read_sector_plant_period_values(
+            path("CementFixedOM.csv"),
+            ("PlantType", "Period", "Fixed_O&M_(EUR/(ton/hr))"), component,
+        ),
+        cementFuelConsumption = _read_sector_plant_period_values(
+            path("CementFuelConsumption.csv"),
+            ("CementPlant", "Period", "FuelConsumption"), component,
+        ),
+        cementCO2CaptureRate = _read_sector_string_values(
+            path("CementCO2CaptureRate.csv"), ("CementPlant", "CaptureRate"), component,
+        ),
+        cementElectricityConsumption = _read_sector_plant_period_values(
+            path("CementElConsumption.csv"),
+            ("CementPlant", "Period", "ElectricityConsumption"), component,
+        ),
+        cementYearlyProduction = _read_sector_string_values(
+            path("CementYearlyProduction.csv"), ("Node", "Production"), component,
+        ),
+        ammoniaLifetime = _read_sector_string_values(
+            path("AmmoniaPlantLifetime.csv"), ("PlantType", "Lifetime"), component;
+            positive = true,
+        ),
+        ammoniaInitialCapacity = _read_sector_pair_values(
+            path("AmmoniaInitialCapacity.csv"),
+            ("Node", "AmmoniaPlant", "Capacity_(ton/hr)"), component,
+        ),
+        ammoniaRetirementFactor = _read_sector_plant_period_values(
+            path("AmmoniaScaleFactorInitialCap.csv"),
+            ("PlantType", "Period", "RetirementFactor"), component,
+        ),
+        ammoniaCapitalCost = _read_sector_plant_period_values(
+            path("AmmoniaInvCost.csv"),
+            ("PlantType", "Period", "InvCost_(EUR/(ton/hr))"), component,
+        ),
+        ammoniaFixedOMCost = _read_sector_plant_period_values(
+            path("AmmoniaFixedOM.csv"),
+            ("PlantType", "Period", "Fixed_O&M_(EUR/(ton/hr))"), component,
+        ),
+        ammoniaFeedstockConsumption = _read_sector_string_values(
+            path("AmmoniaFeedstockConsumption.csv"),
+            ("Ammonia_Plant", "Feedstock_Consumption_(kg_feedstock_/_t_ammonia)"), component,
+        ),
+        ammoniaElectricityConsumption = _read_sector_string_values(
+            path("AmmoniaElConsumption.csv"),
+            ("Ammonia_plant", "Electricity_consumption_(MWh_/_t_ammonia)"), component,
+        ),
+        ammoniaYearlyProduction = _read_sector_node_period_values(
+            path("AmmoniaYearlyProduction.csv"),
+            ("Node", "Period", "Yearly_production_(tons/yr)"), component,
+        ),
+        refineryYearlyProduction = _read_sector_node_period_values(
+            path("RefineryYearlyProduction.csv"),
+            ("Node", "Period", "Yearly_production_of_oil_(k_bbl/yr)"), component,
+        ),
+        availableBioEnergy = _read_sector_period_values(
+            _required_csv(dir, "General", "availableBioEnergy.csv"),
+            ("Period", "Available_bioenergy_(GJ)"), component,
+        ),
+        industryShedCost = _read_sector_scalar(
+            path("ShedCost.csv"), "ShedCost_(€/ton)", component,
+        ),
+        refineryHydrogenConsumption = _read_sector_scalar(
+            path("RefineryHydrogenConsumption.csv"),
+            "Hydrogen_consumption_(ton/k_bbl)", component,
+        ),
+        refineryHeatConsumption = _read_sector_scalar(
+            path("RefineryHeatConsumption.csv"), "Heat_Consumption_(MWh/k_bbl)", component,
+        ),
+        rampFractionPerHour = constants["ramp_fraction_per_hour"],
+        maximumScrapShare = constants["maximum_scrap_share"],
+        hoursPerYear = constants["hours_per_year"],
+        oilShedCost = constants["oil_shed_cost"],
+    )
+end
+
 """
     read_params_csv(dir)
 
@@ -1172,6 +1393,7 @@ function read_params_csv(
     dir::AbstractString;
     natural_gas::Bool = false,
     hydrogen::Bool = false,
+    industry::Bool = false,
     weather_scenarios::Int = 1,
     gas_scenarios::Int = 1,
 )
@@ -1285,6 +1507,7 @@ function read_params_csv(
         )
     end
     hydrogen && (par.Hydrogen = _read_hydrogen_params_csv(dir))
+    industry && (par.Industry = _read_industry_params_csv(dir))
 
     return par
 end
@@ -1298,6 +1521,7 @@ function read_data_csv(
     dir::AbstractString;
     natural_gas::Bool = false,
     hydrogen::Bool = false,
+    industry::Bool = false,
     weather_scenarios::Int = 1,
     gas_scenarios::Int = 1,
 )
@@ -1305,7 +1529,13 @@ function read_data_csv(
     hydrogen && gas_scenarios != 1 && throw(ArgumentError(
         "Deterministic Hydrogen requires number_of_gas_scenarios=1",
     ))
-    sets = read_sets_csv(dir; natural_gas, hydrogen)
-    par = read_params_csv(dir; natural_gas, hydrogen, weather_scenarios, gas_scenarios)
+    industry && !natural_gas && throw(ArgumentError("industry=true requires natural_gas=true"))
+    industry && gas_scenarios != 1 && throw(ArgumentError(
+        "Deterministic Industry requires number_of_gas_scenarios=1",
+    ))
+    sets = read_sets_csv(dir; natural_gas, hydrogen, industry)
+    par = read_params_csv(
+        dir; natural_gas, hydrogen, industry, weather_scenarios, gas_scenarios,
+    )
     return (sets, par)
 end

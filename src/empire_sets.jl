@@ -13,6 +13,58 @@ const TechGen = Tuple{TechId, GenId}
 const NaturalGasTerminalNode = Tuple{NodeId, String}
 const HydrogenTerminalNode = Tuple{NodeId, String}
 
+"""Typed Industry sets, including the technology subset active for this run."""
+struct IndustrySets
+    SteelProducer::Vector{NodeId}
+    CementProducer::Vector{NodeId}
+    AmmoniaProducer::Vector{NodeId}
+    OilProducer::Vector{NodeId}
+    SteelPlant::Vector{String}
+    CementPlant::Vector{String}
+    AmmoniaPlant::Vector{String}
+    ActiveSteelPlant::Vector{String}
+    ActiveCementPlant::Vector{String}
+    ActiveAmmoniaPlant::Vector{String}
+    FinalSteelPlant::Set{String}
+    InactivePathways::Dict{String, String}
+    RefineryActive::Bool
+end
+
+function IndustrySets(
+    ;
+    SteelProducer::AbstractVector{<:AbstractString} = String[],
+    CementProducer::AbstractVector{<:AbstractString} = String[],
+    AmmoniaProducer::AbstractVector{<:AbstractString} = String[],
+    OilProducer::AbstractVector{<:AbstractString} = String[],
+    SteelPlant::AbstractVector{<:AbstractString} = String[],
+    CementPlant::AbstractVector{<:AbstractString} = String[],
+    AmmoniaPlant::AbstractVector{<:AbstractString} = String[],
+    hydrogen::Bool = false,
+)
+    steel = String.(SteelPlant)
+    cement = String.(CementPlant)
+    ammonia = String.(AmmoniaPlant)
+    inactive = Dict{String, String}()
+    if !hydrogen
+        for plant in ("H2-DRI", "BF-BOF-CCS", "H2-Cement", "NG-CCS-Cement", "H2-Ammonia")
+            inactive[plant] = "requires the Hydrogen/CO2 module"
+        end
+        inactive["OilRefinery"] = "requires Hydrogen; Heat demand is deferred"
+    end
+    active_steel = [plant for plant in steel if !haskey(inactive, plant)]
+    active_cement = [plant for plant in cement if !haskey(inactive, plant)]
+    active_ammonia = [plant for plant in ammonia if !haskey(inactive, plant)]
+    final_steel = Set(
+        plant for plant in active_steel
+        if occursin("eaf", lowercase(plant)) || occursin("bof", lowercase(plant))
+    )
+    return IndustrySets(
+        String.(SteelProducer), String.(CementProducer), String.(AmmoniaProducer),
+        String.(OilProducer), steel, cement, ammonia, active_steel, active_cement,
+        active_ammonia, final_steel, inactive, hydrogen,
+    )
+end
+
 """
     NaturalGasSets
 
@@ -271,6 +323,7 @@ struct EmpireSets
     Corridors::Vector{Arc}
     NaturalGas::NaturalGasSets
     Hydrogen::HydrogenSets
+    Industry::IndustrySets
 end
 
 function EmpireSets(
@@ -292,6 +345,7 @@ function EmpireSets(
     StoragesOfNode::Vector{NodeStor};
     NaturalGas::NaturalGasSets = NaturalGasSets(),
     Hydrogen::HydrogenSets = HydrogenSets(),
+    Industry::IndustrySets = IndustrySets(),
     validate::Bool = true,
 )
     generators_by_node = Dict{NodeId, Vector{GenId}}()
@@ -352,6 +406,7 @@ function EmpireSets(
         corridors,
         NaturalGas,
         Hydrogen,
+        Industry,
     )
 
     validate && validate!(sets)
@@ -379,6 +434,7 @@ function EmpireSets(
     StoragesOfNode::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString}} = Tuple{String, String}[],
     NaturalGas::NaturalGasSets = NaturalGasSets(),
     Hydrogen::HydrogenSets = HydrogenSets(),
+    Industry::IndustrySets = IndustrySets(),
     validate::Bool = true,
 )
     return EmpireSets(
@@ -400,6 +456,7 @@ function EmpireSets(
         NodeStor[(String(n), String(s)) for (n, s) in StoragesOfNode];
         NaturalGas,
         Hydrogen,
+        Industry,
         validate = validate,
     )
 end
@@ -448,6 +505,8 @@ hydrogen_sets(sets::EmpireSets) = sets.Hydrogen
 hydrogen_nodes(sets::EmpireSets) = sets.Hydrogen.ProductionNode
 hydrogen_generators(sets::EmpireSets) = sets.Hydrogen.Generator
 has_hydrogen(sets::EmpireSets) = !isempty(hydrogen_nodes(sets))
+industry_sets(sets::EmpireSets) = sets.Industry
+has_industry(sets::EmpireSets) = !isempty(sets.Industry.SteelProducer)
 
 function _check_unique(name::AbstractString, items)
     seen = Set{eltype(items)}()
@@ -653,6 +712,54 @@ function validate!(sets::EmpireSets)
             throw(ArgumentError("All CO2 sequestration nodes must be onshore nodes"))
         isempty(setdiff(Set(hydrogen.TerminalNode), hydrogen_node_set)) ||
             throw(ArgumentError("All Hydrogen terminal nodes must be production nodes"))
+    end
+
+    industry = industry_sets(sets)
+    for (name, values) in (
+        ("Industry.SteelProducer", industry.SteelProducer),
+        ("Industry.CementProducer", industry.CementProducer),
+        ("Industry.AmmoniaProducer", industry.AmmoniaProducer),
+        ("Industry.OilProducer", industry.OilProducer),
+        ("Industry.SteelPlant", industry.SteelPlant),
+        ("Industry.CementPlant", industry.CementPlant),
+        ("Industry.AmmoniaPlant", industry.AmmoniaPlant),
+    )
+        _check_unique(name, values)
+        _check_no_empty(name, values)
+    end
+    for (name, producers) in (
+        ("steel", industry.SteelProducer),
+        ("cement", industry.CementProducer),
+        ("ammonia", industry.AmmoniaProducer),
+        ("oil", industry.OilProducer),
+    )
+        isempty(setdiff(Set(producers), node_set)) || throw(ArgumentError(
+            "All $name producer nodes must exist in Node",
+        ))
+    end
+    isempty(setdiff(Set(industry.ActiveSteelPlant), Set(industry.SteelPlant))) ||
+        throw(ArgumentError("Active steel plants must exist in Industry.SteelPlant"))
+    isempty(setdiff(Set(industry.ActiveCementPlant), Set(industry.CementPlant))) ||
+        throw(ArgumentError("Active cement plants must exist in Industry.CementPlant"))
+    isempty(setdiff(Set(industry.ActiveAmmoniaPlant), Set(industry.AmmoniaPlant))) ||
+        throw(ArgumentError("Active ammonia plants must exist in Industry.AmmoniaPlant"))
+    isempty(setdiff(industry.FinalSteelPlant, Set(industry.ActiveSteelPlant))) ||
+        throw(ArgumentError("Final steel plants must be active Industry steel plants"))
+    industry_producers = Set(vcat(
+        industry.SteelProducer,
+        industry.CementProducer,
+        industry.AmmoniaProducer,
+        industry.OilProducer,
+    ))
+    if !isempty(industry_producers)
+        isempty(setdiff(industry_producers, gas_node_set)) || throw(ArgumentError(
+            "All Industry producer nodes must be natural-gas nodes",
+        ))
+        if industry.RefineryActive
+            isempty(setdiff(industry_producers, hydrogen_node_set)) || throw(ArgumentError(
+                "All active Hydrogen-dependent Industry producer nodes must be Hydrogen nodes",
+            ))
+        end
     end
 
     # Every generator belongs to at least one technology

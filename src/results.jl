@@ -316,7 +316,189 @@ function write_solution_tables(result_dir::AbstractString, emp::JuMP.Model, sets
     has_hydrogen(sets) &&
         haskey(JuMP.object_dictionary(emp), :electrolyzerCapBuilt) &&
         write_hydrogen_csvs(output_dir, emp, sets, par, periods)
+    has_industry(sets) &&
+        haskey(JuMP.object_dictionary(emp), :steelPlantBuiltCapacity) &&
+        write_industry_csvs(output_dir, emp, sets, par, periods)
 
+    return output_dir
+end
+
+function _write_industry_capacity_tables(output_dir, emp, sets, periods)
+    industry = industry_sets(sets)
+    strategic_periods = collect(enumerate(strat_periods(periods)))
+    specs = (
+        ("steel", industry.SteelProducer, industry.ActiveSteelPlant,
+         :steelPlantBuiltCapacity, :steelPlantInstalledCapacity),
+        ("cement", industry.CementProducer, industry.ActiveCementPlant,
+         :cementPlantBuiltCapacity, :cementPlantInstalledCapacity),
+        ("ammonia", industry.AmmoniaProducer, industry.ActiveAmmoniaPlant,
+         :ammoniaPlantBuiltCapacity, :ammoniaPlantInstalledCapacity),
+    )
+    for (sector, nodes, plants, built_name, installed_name) in specs
+        title = uppercasefirst(sector)
+        built_column = "$(sector)PlantBuiltCapacity"
+        installed_column = "$(sector)PlantInstalledCapacity"
+        built_file = "$(sector)PlantBuiltCapacity.csv"
+        installed_file = "$(sector)PlantInstalledCapacity.csv"
+        _write_hydrogen_table(
+            output_dir, (built_file,), ["Node", "$(title)Plant", "Period", built_column],
+        ) do io
+            for node in nodes, plant in plants, (period, strategic_period) in strategic_periods
+                _write_csv_row(io, [
+                    node, plant, period,
+                    _solution_value(emp[built_name][node, plant, strategic_period]),
+                ])
+            end
+        end
+        _write_hydrogen_table(
+            output_dir, (installed_file,), ["Node", "$(title)Plant", "Period", installed_column],
+        ) do io
+            for node in nodes, plant in plants, (period, strategic_period) in strategic_periods
+                _write_csv_row(io, [
+                    node, plant, period,
+                    _solution_value(emp[installed_name][node, plant, strategic_period]),
+                ])
+            end
+        end
+        _write_hydrogen_table(
+            output_dir,
+            ("industry$(title)Capacity.csv", "results_industry_$(sector)_investments.csv"),
+            ["Node", "Period", "Technology", "Built_ton_per_h", "Installed_ton_per_h"],
+        ) do io
+            for node in nodes, plant in plants, (period, strategic_period) in strategic_periods
+                _write_csv_row(io, [
+                    node, period, plant,
+                    _solution_value(emp[built_name][node, plant, strategic_period]),
+                    _solution_value(emp[installed_name][node, plant, strategic_period]),
+                ])
+            end
+        end
+    end
+    return nothing
+end
+
+function _industry_result_contexts(f, par, periods)
+    return _foreach_natural_gas_operational_context(
+        (period, strategic_period, scenario, weather, gas, representative, season, hour, t) ->
+            f((period, scenario, weather, gas, season, hour), strategic_period, t),
+        par,
+        periods,
+    )
+end
+
+function _write_industry_operational_table(
+    output_dir, emp, sets, par, periods, sector::Symbol, nodes, plants,
+    produced_name::Symbol, shed_name::Symbol,
+)
+    industry_params = par.Industry
+    prefix = String(sector)
+    title = uppercasefirst(prefix)
+    filename = "industry$(title)Operations.csv"
+    aliases = (filename, "results_industry_$(prefix)_production.csv")
+    header = [
+        "Node", "Technology", "Period", "Scenario", "WeatherScenario", "GasScenario",
+        "Season", "Hour", "Production_ton_per_h", "SeasonScaledProduction_ton",
+        "DemandShed_ton_per_h", "SeasonScaledDemandShed_ton", "Electricity_MW",
+        "NaturalGas_ton_per_h", "Hydrogen_ton_per_h", "Biomass_GJ_per_h",
+        "Emissions_tonCO2_per_h", "CapturedCO2_ton_per_h",
+    ]
+    return _write_hydrogen_table(output_dir, aliases, header) do io
+        _industry_result_contexts(par, periods) do context, strategic_period, operational_period
+            period = context[1]
+            scale = multiple_strat(strategic_period, operational_period)
+            for node in nodes, plant in plants
+                production = _solution_value(emp[produced_name][node, plant, operational_period])
+                shed = _solution_value(emp[shed_name][node, operational_period])
+                electricity = 0.0
+                natural_gas = 0.0
+                hydrogen = 0.0
+                biomass = 0.0
+                emissions = 0.0
+                captured = 0.0
+                if sector === :steel
+                    electricity = industry_params.steelElectricityConsumption[(plant, period)] * production
+                    hydrogen = INDUSTRY_H2_KG_TO_TON * industry_params.steelHydrogenConsumption[(plant, period)] * production
+                    biomass = industry_params.steelBiomassConsumption[(plant, period)] * production
+                    emissions = industry_params.steelCO2Emissions[plant] * production
+                    captured = industry_params.steelCO2Captured[plant] * production
+                elseif sector === :cement
+                    electricity = industry_params.cementElectricityConsumption[(plant, period)] * production
+                    if occursin("ng", lowercase(plant))
+                        natural_gas = INDUSTRY_H2_KG_TO_TON * industry_params.cementFuelConsumption[(plant, period)] * production
+                    elseif occursin("h2", lowercase(plant))
+                        hydrogen = INDUSTRY_H2_KG_TO_TON * industry_params.cementFuelConsumption[(plant, period)] * production
+                    end
+                    emissions = _industry_cement_emission_factor(par, plant, period) * production
+                    captured = _industry_cement_emission_factor(par, plant, period; captured = true) * production
+                else
+                    electricity = industry_params.ammoniaElectricityConsumption[plant] * production
+                    if occursin("ng", lowercase(plant))
+                        natural_gas = INDUSTRY_H2_KG_TO_TON * industry_params.ammoniaFeedstockConsumption[plant] * production
+                    elseif occursin("h2", lowercase(plant))
+                        hydrogen = INDUSTRY_H2_KG_TO_TON * industry_params.ammoniaFeedstockConsumption[plant] * production
+                    end
+                    emissions = _industry_ammonia_emission_factor(par, plant) * production
+                end
+                _write_csv_row(io, vcat(
+                    [node, plant], collect(context),
+                    [production, scale * production, shed, scale * shed, electricity,
+                     natural_gas, hydrogen, biomass, emissions, captured],
+                ))
+            end
+        end
+    end
+end
+
+"""Write Industry investments, operations, couplings, and objective components."""
+function write_industry_csvs(output_dir, emp, sets, par, periods)
+    industry = industry_sets(sets)
+    _write_industry_capacity_tables(output_dir, emp, sets, periods)
+    _write_industry_operational_table(
+        output_dir, emp, sets, par, periods, :steel, industry.SteelProducer,
+        industry.ActiveSteelPlant, :steelProduced, :steelLoadShed,
+    )
+    _write_industry_operational_table(
+        output_dir, emp, sets, par, periods, :cement, industry.CementProducer,
+        industry.ActiveCementPlant, :cementProduced, :cementLoadShed,
+    )
+    _write_industry_operational_table(
+        output_dir, emp, sets, par, periods, :ammonia, industry.AmmoniaProducer,
+        industry.ActiveAmmoniaPlant, :ammoniaProduced, :ammoniaLoadShed,
+    )
+    if industry.RefineryActive
+        _write_hydrogen_table(
+            output_dir,
+            ("industryRefineryOperations.csv", "results_industry_refinery_production.csv"),
+            ["Node", "Period", "Scenario", "WeatherScenario", "GasScenario", "Season", "Hour",
+             "Refined_ton_per_h", "SeasonScaledRefined_ton", "DemandShed_ton_per_h",
+             "SeasonScaledDemandShed_ton", "Hydrogen_ton_per_h", "RecordedHeatDemand_MWh_per_h"],
+        ) do io
+            _industry_result_contexts(par, periods) do context, strategic_period, operational_period
+                scale = multiple_strat(strategic_period, operational_period)
+                for node in industry.OilProducer
+                    refined = _solution_value(emp[:oilRefined][node, operational_period])
+                    shed = _solution_value(emp[:oilLoadShed][node, operational_period])
+                    _write_csv_row(io, vcat([node], collect(context), [
+                        refined, scale * refined, shed, scale * shed,
+                        par.Industry.refineryHydrogenConsumption * refined,
+                        par.Industry.refineryHeatConsumption * refined,
+                    ]))
+                end
+            end
+        end
+    end
+    costs = industry_objective_expressions(
+        emp, sets, par, periods, Discounter(discount_rate(par), 1, periods),
+    )
+    _write_hydrogen_table(
+        output_dir,
+        ("industryObjectiveComponents.csv", "results_industry_objective.csv"),
+        ["Component", "DiscountedCost_EUR"],
+    ) do io
+        for (name, expression) in pairs(costs)
+            _write_csv_row(io, [String(name), JuMP.value(expression)])
+        end
+    end
     return output_dir
 end
 

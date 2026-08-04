@@ -1,0 +1,15 @@
+PlantType,Period,RetirementFactor
+H2-Ammonia,1,0.0
+H2-Ammonia,2,0.0
+H2-Ammonia,3,0.0
+H2-Ammonia,4,0.0
+H2-Ammonia,5,0.0
+H2-Ammonia,6,0.0
+H2-Ammonia,7,0.0
+NG-Ammonia,1,0.48
+NG-Ammonia,2,0.6000000000000001
+NG-Ammonia,3,0.7200000000000001
+NG-Ammonia,4,0.8400000000000001
+NG-Ammonia,5,0.96
+NG-Ammonia,6,1.0
+NG-Ammonia,7,1.0
