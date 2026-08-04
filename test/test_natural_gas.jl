@@ -1095,10 +1095,3 @@ function test_multiple_gas_scenarios_rejected_until_verified()
     OpenEMPIRE._check_natural_gas_params!(errs2, quiet, nothing, nothing)
     @test isempty(errs2)
 end
-
-function test_gas_comparator_negative_controls()
-    python = something(Sys.which("python3"), Sys.which("python"), nothing)
-    python === nothing && return @test_skip "Python is unavailable"
-    script = joinpath(pkgdir(OpenEMPIRE), "scripts", "test_gas_comparators.py")
-    @test success(run(ignorestatus(`$python $script`)))
-end

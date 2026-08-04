@@ -226,9 +226,11 @@ CO2 transport-and-storage cost charged on CCS generator investment, EUR/tCO2.
 Matches the value InternalEMPIRE declares at `empire.py:461`
 (`CCSCostTSFix = Param(initialize=1149873.72) #NB! Hard-coded`). Note that the
 reference has that declaration, and its variable counterpart at `empire.py:462`,
-**commented out**, so InternalEMPIRE charges neither. OpenEMPIRE.jl charges both, which
-is a documented difference rather than an accident -- see
-`docs/natural_gas_reference_comparison.md`.
+**commented out**, so InternalEMPIRE charges neither. OpenEMPIRE.jl charges both,
+which is a documented difference rather than an accident: base OpenEMPIRE charges
+CCS transport-and-storage costs, and this port follows the base. Whether these
+costs should apply is a modelling decision for the dataset owner; both values are
+data-driven and can be zeroed per dataset.
 """
 const DEFAULT_CCS_COST_FIXED = 1149873.72
 

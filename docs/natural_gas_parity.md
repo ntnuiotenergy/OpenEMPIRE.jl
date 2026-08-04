@@ -89,7 +89,8 @@ misreading of InternalEMPIRE would pass both.
 
 **That gap has since been closed** by a direct comparison against `empire.py` itself:
 all 62,446 natural-gas rows and 171,936 coefficients on a 52-node instance agree
-bit-for-bit with the reference's own LP. See `natural_gas_reference_comparison.md`.
+bit-for-bit with the reference's own LP. That comparison requires the private
+InternalEMPIRE checkout, so its tooling and evidence live outside this repository.
 This fixture remains useful as a fast, hand-inspectable regression check.
 
 The Julia side is not a reimplementation: `natural_gas_parity_julia.jl` calls the
@@ -99,25 +100,6 @@ so does not exercise `preprocess_operational_cost`; gas marginal cost is covered
 by `test_gas_marginal_cost_without_a_fuel_price` and
 `test_full_model_int_gas_generators_are_priced` instead.
 
-## Performance diagnostics
-
-`BenchmarkTools` is kept out of the runtime dependency set. Run the
-representative benchmarks in a temporary Julia environment:
-
-```bash
-julia --project=. -e '
-    using Pkg
-    Pkg.activate(; temp=true)
-    Pkg.develop(path=pwd())
-    Pkg.add(["BenchmarkTools", "CSV", "HiGHS", "JuMP", "TimeStruct"])
-    include("scripts/benchmark_natural_gas.jl")
-'
-```
-
-The script measures full-dataset gas parsing, weather × gas period mapping, the
-scalar combined-scenario helper, and a controlled construction/solve/result
-writing cycle. It uses `BenchmarkTools.@btime`, excludes first-run compilation,
-and reports allocations.
 
 Recorded on 2026-07-30:
 

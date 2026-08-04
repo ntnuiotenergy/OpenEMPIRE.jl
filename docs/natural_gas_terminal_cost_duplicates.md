@@ -145,8 +145,9 @@ formatting differences on an unrelated `LNGImport` value).
 This local workbook is intentionally modified relative to InternalEMPIRE commit
 `14675a7`; the comparison therefore describes **unmodified InternalEMPIRE code run
 against the corrected, hash-recorded workbook**, not an entirely clean reference
-checkout. `scripts/gas_reference_build.py` records the exact workbook hashes in
-`reference_provenance.json` and never writes into the source checkout.
+checkout. The reference-build tooling (kept outside this repository, since it
+requires the private InternalEMPIRE checkout) records the exact workbook hashes
+in `reference_provenance.json` and never writes into the source checkout.
 
 Python and Julia consequently read identical terminal costs, and no correction
 needs to be applied to generated `.tab` files during comparison runs. The owner
