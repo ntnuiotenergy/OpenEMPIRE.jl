@@ -512,6 +512,65 @@ PYOMO_PERIOD_DEFAULTS = {
 }
 
 
+# InternalEMPIRE prices natural gas endogenously through its gas module, so its
+# Generator!FuelCosts sheet has no row for any gas technology. Pyomo's genFuelCost
+# default is 0, which means "gas is free" for anyone running with the gas module
+# off — the failure mode the model owner asked us to close. Per his instruction
+# ("Legg inn FuelCost fra v51 hvis det mangler"), the missing rows are filled from
+# base OpenEMPIRE's europe_v51 fuel costs, which is what genFuelCost means in
+# base EMPIRE. Only genuinely missing (technology, period) rows are added; every
+# value the workbook provides is left untouched.
+#
+# This does not change any run with natural_gas=true: that path drops the ordinary
+# fuel term for gas-fuelled generators and prices them through the module instead.
+FUEL_COST_FALLBACK_DATASET = "europe_v51"
+
+
+def fill_missing_gas_fuel_costs(out: Path, periods: int) -> None:
+    target = out / "Generator" / "genFuelCost.csv"
+    # Always read the reference costs from the repository's own dataset, not from
+    # the (possibly temporary) output root used for a regeneration check.
+    source = OPENEMPIRE_ROOT / "data" / FUEL_COST_FALLBACK_DATASET / "Generator" / "genFuelCost.csv"
+    if not source.is_file():
+        logger.warning("No %s fuel costs at %s; leaving genFuelCost.csv untouched",
+                       FUEL_COST_FALLBACK_DATASET, source)
+        return
+
+    df = pd.read_csv(target, dtype=str)
+    tech_col, period_col, value_col = df.columns[0], df.columns[1], df.columns[2]
+    have = {(r[tech_col], int(r[period_col])) for _, r in df.iterrows()}
+    present_techs = {t for t, _ in have}
+
+    generators = set(pd.read_csv(out / "Sets" / "Generator.csv", dtype=str).iloc[:, 0])
+    missing_techs = sorted(generators - present_techs)
+    if not missing_techs:
+        logger.info("genFuelCost.csv: every generator already has fuel costs")
+        return
+
+    ref = pd.read_csv(source, dtype=str)
+    ref_lookup = {(r.iloc[0], int(r.iloc[1])): r.iloc[2] for _, r in ref.iterrows()}
+
+    added, unresolved = [], []
+    for tech in missing_techs:
+        rows = [(tech, p, ref_lookup[(tech, p)]) for p in range(1, periods + 1)
+                if (tech, p) in ref_lookup]
+        if len(rows) == periods:
+            added.extend(rows)
+        else:
+            unresolved.append(tech)
+
+    if unresolved:
+        raise SystemExit(
+            f"{target}: no {FUEL_COST_FALLBACK_DATASET} fuel cost for {unresolved}; "
+            "supply them explicitly rather than leaving them at Pyomo's 0 default"
+        )
+
+    extra = pd.DataFrame(added, columns=[tech_col, period_col, value_col])
+    write_csv(pd.concat([df, extra], ignore_index=True), target)
+    logger.info("genFuelCost.csv: added %d rows for %s from %s (was missing entirely)",
+                len(added), ", ".join(missing_techs), FUEL_COST_FALLBACK_DATASET)
+
+
 def materialize_pyomo_period_defaults(out: Path, periods: int) -> None:
     """Complete sparse (key, period) tables to the full period grid.
 
@@ -1023,6 +1082,7 @@ def main() -> None:
     convert_core_sets(source, out, extra_out, args.periods)
     convert_core_tables(source, out, extra_out, args.periods)
     materialize_pyomo_period_defaults(out, args.periods)
+    fill_missing_gas_fuel_costs(out, args.periods)
     copy_scenario_data(source, out, extra_out)
     convert_extra_tables(source, extra_out, args.periods)
     if not args.skip_modules:

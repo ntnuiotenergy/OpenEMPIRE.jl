@@ -161,9 +161,9 @@
     },
     {
       "path": "Generator/genFuelCost.csv",
-      "bytes": 4642,
-      "rows": 196,
-      "sha256": "7dc6c0cd2fb0335187e66deeccb6b07d2d89d10b22857fefd7979be07f4a6649"
+      "bytes": 5672,
+      "rows": 231,
+      "sha256": "dfae511e3f58201d77cc230ed327e6cfacacd71bbd6cbbb479c92ee74e77b4b2"
     },
     {
       "path": "Generator/genInitCap.csv",
