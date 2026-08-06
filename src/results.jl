@@ -672,8 +672,107 @@ function write_hydrogen_csvs(output_dir, emp, sets, par, periods)
             _write_csv_row(io, [String(name), JuMP.value(expression)])
         end
     end
+    # ---- tables InternalEMPIRE writes that the port previously omitted ----
+    # The "SCALED" columns follow InternalEMPIRE's seasScale weighting, which in
+    # this port is carried by TimeStruct: multiple_strat(sp, t) is the number of
+    # times an operational period repeats within its strategic period.
+
+    onshore = natural_gas_onshore_nodes(sets)
+    met = emp[:transportElectricityDemandMet]
+    shed = emp[:transportElectricityDemandShed]
+    _write_hydrogen_table(
+        output_dir,
+        ("transportElectricity.csv", "results_transport_electricity_operations.csv"),
+        ["Node", "Period", "Scenario", "Season", "Hour",
+         "DemandMet_MWh", "DemandMetScaled_MWh", "DemandShed_MWh", "DemandShedScaled_MWh"],
+    ) do io
+        for (period, sp) in strategic_periods
+            for (representative, rp) in enumerate(repr_periods(sp))
+                season = season_name(par, representative)
+                for (scenario, sc) in enumerate(opscenarios(rp))
+                    for (hour, t) in enumerate(sc)
+                        scale = multiple_strat(sp, t)
+                        for node in onshore
+                            m = _value_or_zero(met, node, t)
+                            h = _value_or_zero(shed, node, t)
+                            _write_csv_row(io, [node, period, scenario, season, hour,
+                                                m, scale * m, h, scale * h])
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    reformer_gas = emp[:reformerNaturalGas]
+    reformer_h2 = emp[:reformerHydrogenTon]
+    _write_hydrogen_table(
+        output_dir,
+        ("naturalGasForHydrogen.csv", "results_natural_gas_hydrogen.csv"),
+        ["Node", "Period", "Scenario", "Season", "Hour", "Reformer",
+         "NaturalGasForHydrogen_ton", "HydrogenProduced_ton"],
+    ) do io
+        _foreach_operational_index(par, periods) do period, scenario, season, hour, t
+            for node in hydrogen.ProductionNode, plant in hydrogen.ReformerPlant
+                _write_csv_row(io, [node, period, scenario, season, hour, plant,
+                                    _value_or_zero(reformer_gas, node, plant, t),
+                                    _value_or_zero(reformer_h2, node, plant, t)])
+            end
+        end
+    end
+
+    # Combined per-node hydrogen picture: where the hydrogen comes from and
+    # where it goes, in one row per node-hour.
+    elyzer_h2 = emp[:electrolyzerHydrogen]
+    stor_charge = emp[:hydrogenStorageCharge]
+    stor_discharge = emp[:hydrogenStorageDischarge]
+    h2_for_power = emp[:hydrogenForPower]
+    import_ton = emp[:hydrogenImportTon]
+    pipeline_flow = emp[:hydrogenPipelineFlow]
+    transport_met = emp[:transportHydrogenDemandMet]
+    _write_hydrogen_table(
+        output_dir,
+        ("hydrogenUse.csv", "results_hydrogen_use.csv"),
+        ["Node", "Period", "Scenario", "Season", "Hour",
+         "Produced_ton", "Stored_ton", "WithdrawnFromStorage_ton",
+         "BurnedForPower_ton", "Exported_ton", "Imported_ton", "ForTransport_ton"],
+    ) do io
+        outgoing = Dict(node => [to for (from, to) in hydrogen.Corridor if from == node]
+                        for node in hydrogen.ProductionNode)
+        _foreach_operational_index(par, periods) do period, scenario, season, hour, t
+            for node in hydrogen.ProductionNode
+                produced = _value_or_zero(elyzer_h2, node, t)
+                for plant in hydrogen.ReformerPlant
+                    produced += _value_or_zero(reformer_h2, node, plant, t)
+                end
+                stored = 0.0
+                withdrawn = 0.0
+                for storage in hydrogen.Storage
+                    stored += _value_or_zero(stor_charge, node, storage, t)
+                    withdrawn += _value_or_zero(stor_discharge, node, storage, t)
+                end
+                burned = 0.0
+                for generator in hydrogen.Generator
+                    burned += _value_or_zero(h2_for_power, node, generator, t)
+                end
+                exported = 0.0
+                for destination in get(outgoing, node, String[])
+                    exported += _value_or_zero(pipeline_flow, node, destination, t)
+                end
+                imported = 0.0
+                for terminal in hydrogen.Terminal
+                    imported += _value_or_zero(import_ton, node, terminal, t)
+                end
+                _write_csv_row(io, [node, period, scenario, season, hour,
+                                    produced, stored, withdrawn, burned, exported, imported,
+                                    _value_or_zero(transport_met, node, t)])
+            end
+        end
+    end
+
     JuMP.has_duals(emp) && write_hydrogen_dual_csvs(output_dir, emp, sets, par, periods)
     return output_dir
+
 end
 
 function write_hydrogen_dual_csvs(output_dir, emp, sets, par, periods)
