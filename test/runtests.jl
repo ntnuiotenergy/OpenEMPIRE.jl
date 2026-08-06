@@ -46,6 +46,8 @@ end
     test_create_model_accepts_optimizer_type()
     test_storage_constraints_match_python_formulation()
     test_create_model_adds_storage_max_constraints()
+    test_north_sea_transmission_cap_is_config_gated()
+    test_north_sea_cap_pins_generatorless_offshore_node_to_zero()
     test_emission_constraints_match_python_formulation()
     test_native_dual_weight_normalization()
     test_create_model_respects_emission_cap_config()

@@ -25,7 +25,7 @@ compute_operational_duals: False                       # Barrier without crossov
 print_in_iamc_format: False                            # Output should be printed in a IAMC-compatible format
 write_in_lp_format: False                              # Problem should be written in Linear Programming format
 serialize_instance: False                              # Serialize the data structure or model for later use
-north_sea: False                                       # Disabled for parity because Julia does not implement this optional constraint
+north_sea: True                                        # Enable the North Sea offshore transmission cap; parity confirmed at this scale
 leap_years_investment: 5                               # Number of years per period (default: 5)
 time_format: "%d/%m/%Y %H:%M"                          # Time format for scenario data files
 

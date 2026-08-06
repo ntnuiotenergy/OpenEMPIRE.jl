@@ -163,6 +163,32 @@ and scenario settings used to generate it. Internally, the script reuses
 `data/<dataset>/ScenarioData` and then copied into the corresponding
 `OutOfSample/<dataset>/oos_treeN/ScenarioData` folder.
 
+### North Sea / offshore transmission cap
+
+The Python reference model has an optional North Sea transmission cap, and the
+Julia port implements it. When `north_sea: true` is set in the run config *and*
+the dataset provides `Sets/OffshoreNode.csv`, the `wind_farm_transmission_cap`
+constraint family is created. It caps each offshore-adjacent transmission
+corridor by the installed generation capacity at the offshore endpoint, keeping
+the Python implementation's ordered-arc row structure (both directions of a
+corridor are emitted, pointing at the same canonical corridor capacity).
+
+When `north_sea: false`, the offshore set may still exist in the data but no cap
+constraints are created. This is deliberate: the config flag, not the data
+layout, decides whether the optional formulation is active.
+
+**`OffshoreNode` must list only nodes whose generation should limit their
+corridors.** The cap's right-hand side is a sum over the offshore endpoint's
+generators, so an entry with *no* generators yields an empty sum and the
+constraint becomes `transmissionInstalledCap <= 0`, disconnecting that node.
+This matches the Python behaviour exactly — Python computes the same empty sum —
+but it makes the set's contents load-bearing. `europe_v51` lists exactly the 14
+offshore wind farms. Datasets that derive the set as "all nodes minus onshore
+nodes" can sweep in energy hubs or platforms that carry no generators; those
+belong in a separate formulation (the Python internal model gives energy hubs
+their own converter capacity constraints), not in this one. A warning is logged
+for any offshore node that ends up with an empty right-hand side.
+
 ### Comparable multi-seed Julia/Python parity runs
 
 Scenario draws are **not** cross-language reproducible (Julia's RNG differs from
@@ -179,6 +205,21 @@ run both implementations on identical scenarios:
 
 Repeat with different seeds to build confidence that the two implementations stay
 equivalent beyond a single sampled tree.
+
+North-sea-on parity at europe_v51 2060/5sce/168h (38,120,648 variables,
+54,452,000 constraints, all `OPTIMAL`, `wind_farm_transmission_cap: 1728` in
+every Julia build log):
+
+| seed | Julia | Python | relative difference |
+| ---- | ----- | ------ | ------------------- |
+| 3 | `4.634430286661141e12` | `4.63443031e12` | 5.0e-9 |
+| 4 | `4.662211214996041e12` | `4.66221071e12` | 1.1e-7 |
+| 5 | `4.724774434584402e12` | `4.72477447e12` | 7.5e-9 |
+| 6 | `4.661684419314461e12` | `4.66168444e12` | 4.4e-9 |
+
+Python values are as printed by the solver log. Baseline north-sea-*off* parity
+is closed for matched configs at the same scale, and north-sea-on 2045/3sce/168h
+agrees to solver tolerance as well.
 
 ## Running on Solstorm
 
@@ -299,7 +340,7 @@ valid index tuples lets the model:
 ## Status and roadmap
 
 Items that are known to be missing or under investigation compared to the
-Python reference implementation are tracked in [TODO.md](TODO.md). Notable
-open points include the North Sea extensions and the implementation of
-emission limits, as well as a documented discrepancy in the annuity / present
-value calculation for investment costs.
+Python reference implementation are tracked in [TODO.md](TODO.md). The North Sea
+offshore transmission cap is implemented (see above). Notable remaining open
+points include the implementation of emission limits, as well as a documented
+discrepancy in the annuity / present value calculation for investment costs.
