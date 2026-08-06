@@ -253,6 +253,9 @@ const SCENARIO_ARTIFACT_CONFIG_KEYS = (
     "filter_make",
     "filter_use",
     "n_cluster",
+    "copula_clusters_make",
+    "copula_clusters_use",
+    "copulas_to_use",
 )
 
 function _insert_if_not_nothing!(dict, key::AbstractString, value)
@@ -264,13 +267,15 @@ end
 """
     write_scenario_artifacts(result_dir, data_folder, config; kwargs...)
 
-Archive the scenario sampling key, optional scenario filter, and run metadata
-under `joinpath(result_dir, "Input")` when scenario generation is enabled.
+Archive the scenario sampling key, optional scenario filter or copula clusters,
+and run metadata under `joinpath(result_dir, "Input")` when scenario generation
+is enabled.
 
 The archived `Input/ScenarioData/sampling_key.csv` is enough to replay the
 exact sampled scenario tree together with the run config and original dataset.
 When filtering is enabled and `filter_result.csv` exists, the exact candidate
-catalog is archived beside the sampling key.
+catalog is archived beside the sampling key; likewise for
+`copula_clusters.csv` when copula clustering is enabled.
 Returns the archived sampling-key path, or `nothing` when no sampling key is
 available or scenario generation is disabled.
 """
@@ -306,6 +311,17 @@ function write_scenario_artifacts(
         nothing
     end
 
+    source_copula = _copula_cluster_path(data_folder)
+    copula_enabled =
+        get(config, "copula_clusters_make", false) || get(config, "copula_clusters_use", false)
+    archived_copula = if copula_enabled && isfile(source_copula)
+        destination = joinpath(scenario_dir, "copula_clusters.csv")
+        cp(source_copula, destination; force = true)
+        destination
+    else
+        nothing
+    end
+
     if config_file !== nothing && isfile(config_file)
         cp(config_file, joinpath(input_dir, "config.yaml"); force = true)
     end
@@ -329,6 +345,10 @@ function write_scenario_artifacts(
     if archived_filter !== nothing
         metadata["source_filter_result"] = source_filter
         metadata["archived_filter_result"] = relpath(archived_filter, result_dir)
+    end
+    if archived_copula !== nothing
+        metadata["source_copula_clusters"] = source_copula
+        metadata["archived_copula_clusters"] = relpath(archived_copula, result_dir)
     end
     for key in SCENARIO_ARTIFACT_CONFIG_KEYS
         haskey(config, key) && (metadata[key] = config[key])

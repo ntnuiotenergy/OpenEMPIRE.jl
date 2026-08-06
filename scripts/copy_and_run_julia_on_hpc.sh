@@ -55,15 +55,15 @@ fi
 
 echo "Creating transfer archive..."
 tar $TAR_FLAGS \
-	--exclude='./.git' \
-	--exclude='./.git/*' \
-	--exclude='./.vscode' \
-	--exclude='./.vscode/*' \
-	--exclude='./results' \
-	--exclude='./results/*' \
-	--exclude='./logs' \
-	--exclude='./logs/*' \
-	--exclude='./Manifest.toml' \
+	--exclude='.git' \
+	--exclude='.git/*' \
+	--exclude='.vscode' \
+	--exclude='.vscode/*' \
+	--exclude='results' \
+	--exclude='results/*' \
+	--exclude='logs' \
+	--exclude='logs/*' \
+	--exclude='Manifest.toml' \
 	--exclude='*/._*' \
 	--exclude='*__pycache__*' \
 	-cvzf openempire_jl.tar.gz *
