@@ -195,6 +195,39 @@ function test_hydrogen_full_model_smoke()
         @test length(CSV.File(joinpath(solution_dir, "co2Operations.csv"))) ==
               length(sets.Hydrogen.CO2DirectionalLink) +
               length(sets.Hydrogen.CO2SequestrationNode)
+
+        # Tables added to match InternalEMPIRE's output set. Each has one row per
+        # (node, operational period) family, and each writes both the native name
+        # and the Python-style alias.
+        operational_periods = length(collect(periods))
+        for (native, alias, rows) in (
+            ("transportElectricity.csv", "results_transport_electricity_operations.csv",
+             length(OpenEMPIRE.natural_gas_onshore_nodes(sets)) * operational_periods),
+            ("naturalGasForHydrogen.csv", "results_natural_gas_hydrogen.csv",
+             length(sets.Hydrogen.ProductionNode) * length(sets.Hydrogen.ReformerPlant) *
+             operational_periods),
+            ("hydrogenUse.csv", "results_hydrogen_use.csv",
+             length(sets.Hydrogen.ProductionNode) * operational_periods),
+        )
+            @test length(CSV.File(joinpath(solution_dir, native))) == rows
+            @test read(joinpath(solution_dir, native), String) ==
+                  read(joinpath(solution_dir, alias), String)
+        end
+
+        # hydrogenUse aggregates quantities the module already reports separately;
+        # production must agree with the electrolyser + reformer totals.
+        use_rows = CSV.File(joinpath(solution_dir, "hydrogenUse.csv"))
+        produced = sum(row.Produced_ton for row in use_rows)
+        elyzer = sum(
+            OpenEMPIRE._solution_value(model[:electrolyzerHydrogen][n, t])
+            for n in sets.Hydrogen.ProductionNode, t in periods
+        )
+        reformed = sum(
+            OpenEMPIRE._solution_value(model[:reformerHydrogenTon][n, p, t])
+            for n in sets.Hydrogen.ProductionNode, p in sets.Hydrogen.ReformerPlant,
+                t in periods
+        )
+        @test produced ≈ elyzer + reformed atol = 1e-6
         # The out-of-sample tail of this test is deliberately absent. It asserted the
         # 14 Hydrogen/CO2 fixed-investment alias files and round-tripped them through
         # fix_investments_from_results!, which relies on the Hydrogen additions to
