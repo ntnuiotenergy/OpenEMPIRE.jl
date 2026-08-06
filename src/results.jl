@@ -119,11 +119,49 @@ function _foreach_natural_gas_operational_context(
     return nothing
 end
 
+"""
+    _log_write(path)
+
+Announce a solution table on stdout with a wall-clock timestamp, mirroring
+InternalEMPIRE's `HH:MM:SS: Writing ... to <file>` lines. Writing the full
+`full_model_int` output set takes tens of minutes, so a run that prints nothing
+between "solve finished" and "run complete" looks hung. Every table goes through
+either this or [`_write_csv_table`], so one call site here covers all of them.
+"""
+function _log_write(path::AbstractString)
+    println(Dates.format(Dates.now(), "HH:MM:SS"), ": Writing ", basename(path))
+    flush(stdout)
+    return nothing
+end
+
 function _write_csv_rows(path::AbstractString, rows)
     mkpath(dirname(path))
+    _log_write(path)
     CSV.write(path, rows)
     return path
 end
+
+"""
+    _stream_csv_table(path, header, emit)
+
+Write a table row by row without materialising it.
+
+`emit` receives a callback and calls it once per row. Building the whole table
+first — `push!` into a `Vector{NamedTuple}`, then `CSV.write` — costs memory
+proportional to the row count: `genOperational` alone is 13,048,560 rows, about
+0.9 GB resident before a single byte reaches disk, and the operational tables are
+written back to back. Streaming keeps that flat.
+"""
+function _stream_csv_table(path::AbstractString, header, emit::Function)
+    _write_csv_table(path, header) do io
+        emit(row -> _write_csv_row(io, row))
+    end
+    return path
+end
+
+# `do` blocks pass the function first, matching `_write_csv_table`'s two orders.
+_stream_csv_table(emit::Function, path::AbstractString, header) =
+    _stream_csv_table(path, header, emit)
 
 function _csv_field(value)
     if value isa AbstractFloat && isnan(value)
@@ -143,6 +181,7 @@ end
 
 function _write_csv_table(path::AbstractString, header, write_rows::Function)
     mkpath(dirname(path))
+    _log_write(path)
     open(path, "w") do io
         _write_csv_row(io, header)
         write_rows(io)
@@ -917,114 +956,64 @@ function write_investment_csvs(output_dir::AbstractString, emp::JuMP.Model, sets
 end
 
 function write_operational_csvs(output_dir::AbstractString, emp::JuMP.Model, sets, par::EmpireParams, periods::TimeStructure)
+    # Streamed rather than accumulated: these are the largest tables the port
+    # writes (genOperational reaches 13,048,560 rows on full_model_int), and
+    # building them as Vector{NamedTuple} before handing them to CSV.write held
+    # roughly a gigabyte per table with several written back to back.
     gen_op = emp[:genOperational]
-    gen_rows = NamedTuple{
-        (:Node, :Generator, :Period, :Scenario, :Season, :Hour, :genOperational),
-        Tuple{String, String, Int, Int, String, Int, Float64},
-    }[]
-    _foreach_operational_index(par, periods) do period, scenario, season, hour, t
-        for (n, g) in node_generators(sets)
-            push!(gen_rows, (
-                Node = n,
-                Generator = g,
-                Period = period,
-                Scenario = scenario,
-                Season = season,
-                Hour = hour,
-                genOperational = _solution_value(gen_op[n, g, t]),
-            ))
+    _stream_csv_table(
+        joinpath(output_dir, "genOperational.csv"),
+        ["Node", "Generator", "Period", "Scenario", "Season", "Hour", "genOperational"],
+    ) do row
+        _foreach_operational_index(par, periods) do period, scenario, season, hour, t
+            for (n, g) in node_generators(sets)
+                row([n, g, period, scenario, season, hour, _solution_value(gen_op[n, g, t])])
+            end
         end
     end
-    _write_csv_rows(joinpath(output_dir, "genOperational.csv"), gen_rows)
 
     trans_op = emp[:transmissionOperational]
-    trans_rows = NamedTuple{
-        (:FromNode, :ToNode, :Period, :Scenario, :Season, :Hour, :transmissionOperational),
-        Tuple{String, String, Int, Int, String, Int, Float64},
-    }[]
-    _foreach_operational_index(par, periods) do period, scenario, season, hour, t
-        for (m, n) in arcs(sets)
-            push!(trans_rows, (
-                FromNode = m,
-                ToNode = n,
-                Period = period,
-                Scenario = scenario,
-                Season = season,
-                Hour = hour,
-                transmissionOperational = _solution_value(trans_op[m, n, t]),
-            ))
+    _stream_csv_table(
+        joinpath(output_dir, "transmissionOperational.csv"),
+        ["FromNode", "ToNode", "Period", "Scenario", "Season", "Hour", "transmissionOperational"],
+    ) do row
+        _foreach_operational_index(par, periods) do period, scenario, season, hour, t
+            for (m, n) in arcs(sets)
+                row([m, n, period, scenario, season, hour, _solution_value(trans_op[m, n, t])])
+            end
         end
     end
-    _write_csv_rows(joinpath(output_dir, "transmissionOperational.csv"), trans_rows)
 
-    stor_charge = emp[:storCharge]
-    stor_discharge = emp[:storDischarge]
-    stor_operation = emp[:storOperational]
-    stor_charge_rows = NamedTuple{
-        (:Node, :Storage, :Period, :Scenario, :Season, :Hour, :storCharge),
-        Tuple{String, String, Int, Int, String, Int, Float64},
-    }[]
-    stor_discharge_rows = NamedTuple{
-        (:Node, :Storage, :Period, :Scenario, :Season, :Hour, :storDischarge),
-        Tuple{String, String, Int, Int, String, Int, Float64},
-    }[]
-    stor_operation_rows = NamedTuple{
-        (:Node, :Storage, :Period, :Scenario, :Season, :Hour, :storageOperational),
-        Tuple{String, String, Int, Int, String, Int, Float64},
-    }[]
-    _foreach_operational_index(par, periods) do period, scenario, season, hour, t
-        for (n, s) in node_storages(sets)
-            push!(stor_charge_rows, (
-                Node = n,
-                Storage = s,
-                Period = period,
-                Scenario = scenario,
-                Season = season,
-                Hour = hour,
-                storCharge = _solution_value(stor_charge[n, s, t]),
-            ))
-            push!(stor_discharge_rows, (
-                Node = n,
-                Storage = s,
-                Period = period,
-                Scenario = scenario,
-                Season = season,
-                Hour = hour,
-                storDischarge = _solution_value(stor_discharge[n, s, t]),
-            ))
-            push!(stor_operation_rows, (
-                Node = n,
-                Storage = s,
-                Period = period,
-                Scenario = scenario,
-                Season = season,
-                Hour = hour,
-                storageOperational = _solution_value(stor_operation[n, s, t]),
-            ))
+    # One pass per file keeps memory flat; the three storage tables share an
+    # index walk but not a buffer.
+    for (filename, column, container) in (
+        ("storCharge.csv", "storCharge", emp[:storCharge]),
+        ("storDischarge.csv", "storDischarge", emp[:storDischarge]),
+        ("storageOperational.csv", "storageOperational", emp[:storOperational]),
+    )
+        _stream_csv_table(
+            joinpath(output_dir, filename),
+            ["Node", "Storage", "Period", "Scenario", "Season", "Hour", column],
+        ) do row
+            _foreach_operational_index(par, periods) do period, scenario, season, hour, t
+                for (n, s) in node_storages(sets)
+                    row([n, s, period, scenario, season, hour, _solution_value(container[n, s, t])])
+                end
+            end
         end
     end
-    _write_csv_rows(joinpath(output_dir, "storCharge.csv"), stor_charge_rows)
-    _write_csv_rows(joinpath(output_dir, "storDischarge.csv"), stor_discharge_rows)
-    _write_csv_rows(joinpath(output_dir, "storageOperational.csv"), stor_operation_rows)
 
     load_shed = emp[:loadShed]
-    load_shed_rows = NamedTuple{
-        (:Node, :Period, :Scenario, :Season, :Hour, :loadShed),
-        Tuple{String, Int, Int, String, Int, Float64},
-    }[]
-    _foreach_operational_index(par, periods) do period, scenario, season, hour, t
-        for n in nodes(sets)
-            push!(load_shed_rows, (
-                Node = n,
-                Period = period,
-                Scenario = scenario,
-                Season = season,
-                Hour = hour,
-                loadShed = _solution_value(load_shed[n, t]),
-            ))
+    _stream_csv_table(
+        joinpath(output_dir, "loadShed.csv"),
+        ["Node", "Period", "Scenario", "Season", "Hour", "loadShed"],
+    ) do row
+        _foreach_operational_index(par, periods) do period, scenario, season, hour, t
+            for n in nodes(sets)
+                row([n, period, scenario, season, hour, _solution_value(load_shed[n, t])])
+            end
         end
     end
-    _write_csv_rows(joinpath(output_dir, "loadShed.csv"), load_shed_rows)
 
     return output_dir
 end
