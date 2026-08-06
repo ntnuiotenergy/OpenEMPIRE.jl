@@ -37,7 +37,11 @@ query memberships in O(1).
   capacity is linked to its power capacity.
 - `Technology::Vector{TechId}`: all technology ids.
 - `Node::Vector{NodeId}`: all node ids.
-- `OffshoreNode::Set{NodeId}`: subset of `Node` with offshore wind hubs.
+- `OffshoreNode::Set{NodeId}`: subset of `Node` holding offshore wind farms whose
+  own installed generation caps the transmission corridors adjacent to them. A
+  member with no generators pins those corridors to zero capacity, so nodes that
+  merely sit offshore without generating (energy hubs, platforms) do not belong
+  here.
 - `DirectionalLink::Vector{Arc}`: directed transmission arcs `(from, to)`.
   Bidirectional corridors appear as two entries.
 - `TransmissionType::Vector{TransmissionTypeId}`: available transmission

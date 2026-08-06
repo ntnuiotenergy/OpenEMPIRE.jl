@@ -1253,6 +1253,44 @@ function test_north_sea_transmission_cap_is_config_gated()
     end
 end
 
+function test_north_sea_cap_pins_generatorless_offshore_node_to_zero()
+    # An offshore node with no generators of its own gives the cap an empty
+    # right-hand side, so the corridor is forced to zero capacity. Python does
+    # exactly the same, so this documents the behaviour rather than guarding
+    # against it -- what the port adds is a warning, because the failure is
+    # otherwise silent and disconnects the node.
+    sets = OpenEMPIRE.EmpireSets(
+        Generator = ["Windoffshore"],
+        Technology = ["Wind"],
+        Node = ["Hub", "Onshore"],
+        OffshoreNode = ["Hub"],
+        DirectionalLink = [("Hub", "Onshore"), ("Onshore", "Hub")],
+        TransmissionType = ["HVDC"],
+        TransmissionTypeOfDirectionalLink = [
+            ("Hub", "Onshore", "HVDC"),
+            ("Onshore", "Hub", "HVDC"),
+        ],
+        GeneratorsOfTechnology = [("Wind", "Windoffshore")],
+        GeneratorsOfNode = Tuple{String, String}[],
+    )
+    periods = OpenEMPIRE.create_timestruct(1, 5, 1, 2, 0, 0, 1)
+    sp = first(strat_periods(periods))
+    params = OpenEMPIRE.EmpireParams()
+
+    emp = JuMP.Model()
+    OpenEMPIRE.create_variables(emp, sets, periods)
+    @test_logs (:warn,) match_mode = :any OpenEMPIRE.create_transmission_constraints(
+        emp, sets, params, periods; north_sea = true,
+    )
+
+    cap = emp[:transmissionInstalledCap]["Hub", "Onshore", sp]
+    for arc in (("Hub", "Onshore"), ("Onshore", "Hub"))
+        constraint = emp[:wind_farm_transmission_cap][arc, sp]
+        @test JuMP.normalized_coefficient(constraint, cap) == 1.0
+        @test JuMP.normalized_rhs(constraint) == 0.0
+    end
+end
+
 function test_emission_constraints_match_python_formulation()
     sets = OpenEMPIRE.EmpireSets(
         Generator = ["gas", "wind"],
