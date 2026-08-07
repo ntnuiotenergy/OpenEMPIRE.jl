@@ -191,6 +191,32 @@ EXTRA_CORE_TABLES: dict[str, list[tuple[str, list[int], str, str]]] = {
     ],
 }
 
+# --------------------------------------------------------------------------------------
+# Offshore node classification
+#
+# InternalEMPIRE does not record this in the workbooks: `run_EMPIRE_int.py` carries two
+# hardcoded Python lists, `windfarmNodes` and `offshoreNodesList`, and strips spaces from
+# both before matching node ids.  They are mirrored here (already space-free) because
+# "every node that is not onshore" mixes three things that are modelled differently:
+# wind farms whose corridors are capped by their own generation, energy hubs capped by
+# converter capacity instead, and platforms that get neither.
+# --------------------------------------------------------------------------------------
+
+WIND_FARM_NODES: frozenset[str] = frozenset({
+    "MorayFirth", "FirthofForth", "DoggerBank", "Hornsea", "OuterDowsing", "Norfolk",
+    "EastAnglia", "Borssele", "HollandseeKust", "HelgoländerBucht", "Nordsøen",
+    "UtsiraNord", "SørligeNordsjøI", "SørligeNordsjøII", "BalticCountries_BalticSea",
+    "BE_PrincessElisabeth", "DE_NorthSea", "DE_BalticSea", "DK_NorthSea", "FI_BalticSea",
+    "FR_ChannelSea", "FR_Atlantic", "IE_Atlantic", "NL_Lagelander", "NO_Vestavind",
+    "NO_Sørvest", "PL_BalticSea", "SE_BotnieGulf", "SE_BalticSea", "SE_Luleå",
+    "GB_DoggerBank", "GB_ScotlandEast", "GB_SheppeyIsland", "GB_IrelandSea",
+    "GB_CelticSea",
+})
+
+ENERGY_HUB_NODES: frozenset[str] = frozenset({
+    "EnergyhubGreatBritain", "EnergyhubNorway", "EnergyhubEU",
+})
+
 # Set-style sheets of the core workbooks that belong to the internal modules.
 EXTRA_CORE_SET_SHEETS: dict[str, list[str]] = {
     "Sets.xlsx": [
@@ -681,8 +707,37 @@ def convert_core_sets(source: Path, out: Path, extra_out: Path, periods: int) ->
     if unknown:
         raise ValueError(f"OnshoreNode entries missing from Node: {unknown}")
     offshore = [n for n in nodes if n not in set(onshore)]
-    write_csv(pd.DataFrame({"OffshoreNode": offshore}), out / "Sets" / "OffshoreNode.csv")
-    logger.info("Derived Sets/OffshoreNode.csv: %d nodes (Node minus OnshoreNode)", len(offshore))
+
+    # "Node minus OnshoreNode" is not a usable offshore classification: it mixes wind
+    # farms, energy hubs and gas platforms, and the three are modelled differently.
+    # InternalEMPIRE keeps the split in two hardcoded lists in run_EMPIRE_int.py rather
+    # than in the workbooks, so they are mirrored here. Anything offshore that is in
+    # neither list (Sleipner, Draupner - GasOCGT platforms) is an ordinary node.
+    wind_farms = [n for n in offshore if n in WIND_FARM_NODES]
+    hubs = [n for n in offshore if n in ENERGY_HUB_NODES]
+
+    # Read GeneratorsOfNode straight from the workbook: convert_core_tables, which writes
+    # the CSV, has not run yet at this point.
+    gen_raw = read_sheet(excel, "GeneratorsOfNode", skiprows=2)
+    gen_nodes = set(strip_cell_whitespace(gen_raw.iloc[:, [0]].dropna()).iloc[:, 0])
+    barren = [n for n in wind_farms if n not in gen_nodes]
+    if barren:
+        # The cap sums the farm's own generation, so this would force its corridors to
+        # zero capacity and disconnect the node.
+        raise ValueError(f"Offshore wind farms with no generators: {barren}")
+    both = sorted(set(wind_farms) & set(hubs))
+    if both:
+        raise ValueError(f"Nodes listed as both wind farm and energy hub: {both}")
+
+    write_csv(pd.DataFrame({"OffshoreWindFarmNode": wind_farms}),
+              out / "Sets" / "OffshoreWindFarmNode.csv")
+    write_csv(pd.DataFrame({"OffshoreEnergyHub": hubs}),
+              out / "Sets" / "OffshoreEnergyHub.csv")
+    unclassified = [n for n in offshore if n not in set(wind_farms) | set(hubs)]
+    logger.info(
+        "Derived offshore sets: %d wind farms, %d energy hubs, %d other offshore nodes (%s)",
+        len(wind_farms), len(hubs), len(unclassified), ", ".join(unclassified) or "none",
+    )
 
     write_csv(pd.DataFrame({"Horizon": range(1, periods + 1)}), out / "Sets" / "Period.csv")
     logger.info("Derived Sets/Period.csv: 1..%d", periods)
@@ -1017,9 +1072,13 @@ def write_readme(source: Path, extra_out: Path, dataset: str, periods: int) -> N
         "",
         "## Derived in the core dataset",
         "",
-        "- `Sets/OffshoreNode.csv` = `Sets.xlsx!Nodes!Node` minus `!OnshoreNode`",
-        "  (the internal workbooks have no `OffshoreNodes` sheet). The source",
-        "  `OnshoreNode` column is kept here as `Sets/OnshoreNode.csv`.",
+        "- `Sets/OffshoreWindFarmNode.csv` and `Sets/OffshoreEnergyHub.csv` split the",
+        "  offshore nodes (`Sets.xlsx!Nodes!Node` minus `!OnshoreNode`) using the two",
+        "  hardcoded lists in `run_EMPIRE_int.py` — the internal workbooks record the",
+        "  classification nowhere. Wind farms have their corridors capped by their own",
+        "  generation; hubs are capped by converter capacity instead; offshore nodes in",
+        "  neither list (the Sleipner and Draupner gas platforms) get neither treatment.",
+        "  The source `OnshoreNode` column is kept here as `Sets/OnshoreNode.csv`.",
         f"- `Sets/Period.csv` = 1..{periods} (the internal workbooks have no `Horizon` sheet).",
         "- `Sets/ThermalGenerators.csv` = `Sets.xlsx!Generators!RampingGenerators`, which is",
         "  the same set under the name the open dataset and the Julia port use.",
