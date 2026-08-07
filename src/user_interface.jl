@@ -18,6 +18,30 @@ function _config_bool(config, key::AbstractString, default::Bool)
 end
 
 """
+    _offshore_transmission_cap_setting(config)
+
+Resolve the `offshore_transmission_cap` run-config key, which defaults to `true`.
+
+The cap used to be gated by `north_sea`, defaulting to `false`. That flag is gone:
+InternalEMPIRE has no north-sea module, only a separate treatment of offshore wind,
+and an offshore wind farm should not be allowed to build more transmission capacity
+than it has generation. A leftover `north_sea` key is therefore *ignored*, and warned
+about rather than silently accepted -- the port previously ran production jobs with
+`north_sea: true` set against a build that never read it.
+"""
+function _offshore_transmission_cap_setting(config)
+    if haskey(config, "north_sea")
+        @warn(
+            "Ignoring the obsolete `north_sea` config key. The offshore transmission cap " *
+            "is now always applied unless `offshore_transmission_cap: false` is set. " *
+            "Remove `north_sea` from the config.",
+            north_sea = config["north_sea"],
+        )
+    end
+    return _config_bool(config, "offshore_transmission_cap", true)
+end
+
+"""
     _prepare_model_inputs(config_file, data_folder; input_format, scenario_rng, progress)
 
 Run the data-preparation stages shared by `create_model` and `generate_scenarios`
@@ -180,7 +204,7 @@ function create_model(
         sets,
         params,
         periods;
-        north_sea = _config_bool(config, "north_sea", false),
+        offshore_transmission_cap = _offshore_transmission_cap_setting(config),
         progress,
     )
     _report_progress(progress, "Build 12/12: creating objective")

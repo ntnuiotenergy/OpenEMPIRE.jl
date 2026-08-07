@@ -25,6 +25,5 @@ compute_operational_duals: True                        # Resolve empire with fix
 print_in_iamc_format: True                             # Output should be printed in a IAMC-compatible format
 write_in_lp_format: False                              # Problem should be written in Linear Programming format
 serialize_instance: False                              # Serialize the data structure or model for later use
-north_sea: False                                       # Whether the north sea is modelled or not
 leap_years_investment: 5                               # Number of years per period (default: 5)
 time_format: "%d/%m/%Y %H:%M"                          # Time format for scenario data files
