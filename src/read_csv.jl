@@ -334,6 +334,13 @@ function read_params_csv(dir::AbstractString)
     par.lineEfficiency = _read_float_by_pair_csv(_required_csv(dir, transmission, "lineEfficiency.csv"))
     par.transmissionLifetime =
         _read_float_by_pair_csv(_required_csv(dir, transmission, "transmissionLifetime.csv"))
+    # Optional: only datasets with offshore energy hubs carry converter costs.
+    let p = _optional_csv(dir, transmission, "OffshoreConverterCapitalCost.csv")
+        isnothing(p) || (par.offshoreConvCapitalCost = _read_strategic_profile_csv(p))
+    end
+    let p = _optional_csv(dir, transmission, "OffshoreConverterOMCost.csv")
+        isnothing(p) || (par.offshoreConvOMCost = _read_strategic_profile_csv(p))
+    end
 
     storage = "Storage"
     par.storageBleedEff = _read_float_by_string_csv(_required_csv(dir, storage, "storageBleedEff.csv"))

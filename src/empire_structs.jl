@@ -51,6 +51,13 @@ Base.@kwdef mutable struct EmpireParams
     lineEfficiency::Dict{Tuple{String, String}, Float64}                  = Dict{Tuple{String, String}, Float64}()
     transmissionLifetime::Dict{Tuple{String, String}, Float64}            = Dict{Tuple{String, String}, Float64}()
 
+    # Offshore energy-hub converters. Capital and O&M costs are per MW of converter
+    # capacity and are not corridor-specific, so unlike transmission they carry no
+    # length term. `offshoreConvInvCost` is derived in `preprocess_investment_costs`.
+    offshoreConvCapitalCost::Union{TimeProfile, Nothing}                  = nothing
+    offshoreConvOMCost::Union{TimeProfile, Nothing}                       = nothing
+    offshoreConvInvCost::Union{TimeProfile, Nothing}                      = nothing
+
     # Storage inputs from file
     storageBleedEff::Dict{String, Float64}                      = Dict{String, Float64}()
     storageChargeEff::Dict{String, Float64}                     = Dict{String, Float64}()
@@ -149,6 +156,8 @@ const DEFAULT_STORAGE_INIT = 0.0
 const DEFAULT_GEN_LIFETIME     = 40
 const DEFAULT_STORAGE_LIFETIME = 40
 const DEFAULT_TRANS_LIFETIME   = 40
+# InternalEMPIRE: `model.offshoreConvLifetime = Param(default=40)` (empire.py:508).
+const DEFAULT_OFFSHORE_CONV_LIFETIME = 40
 
 # Investment / marginal costs default to zero
 const DEFAULT_GEN_INVEST_COST     = 0.0
@@ -258,6 +267,12 @@ function trans_invest_cost(par, m, n, sp)
     p = _corridor_profile(par.transmissionInvCost, m, n)
     return p === nothing ? DEFAULT_TRANS_INVEST_COST : p[sp]
 end
+
+# Annuitised capital + O&M cost per MW of offshore energy-hub converter capacity.
+# `nothing` when the dataset ships no converter costs, which is how a dataset says
+# it has no hub converters to invest in.
+offshore_conv_invest_cost(par, sp) =
+    par.offshoreConvInvCost === nothing ? nothing : par.offshoreConvInvCost[sp]
 
 lost_load_cost(par, n, t) = haskey(par.nodeLostLoadCost, n) ? par.nodeLostLoadCost[n][t] : DEFAULT_LOST_LOAD_COST
 sload(par, n, t) = haskey(par.sload, n) ? par.sload[n][t] : DEFAULT_LOAD
