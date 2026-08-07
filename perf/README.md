@@ -59,6 +59,75 @@ On the node this wraps the run in `memwatch.py` (→ `logs/perf_mem_<JOB_ID>.csv
 sh scripts/perf/collect_qacct.sh <JOB_ID>     # → logs/perf_<JOB_ID>.txt
 ```
 
+## Launching matched Julia/Python runs
+
+Use the comparison runner when the goal is a fair same-dataset, same-config,
+same-sampling-key Julia/Python launch:
+
+```bash
+scripts/run_python_julia_comparison.sh \
+    --profile config/launch_profiles/2060_5sce_northsea.yaml \
+    --generate-key \
+    --perf
+```
+
+Run the same setup with another scenario seed by overriding the profile:
+
+```bash
+scripts/run_python_julia_comparison.sh \
+    --profile config/launch_profiles/2060_5sce_northsea.yaml \
+    --seed 4 \
+    --generate-key \
+    --perf
+```
+
+The script validates both repos, installs the same `sampling_key.csv` into the
+Julia `data/<dataset>/ScenarioData/` folder and Python
+`input_data/<dataset>/ScenarioData/` folder, writes a manifest under
+`results/comparison_runs/`, and then calls the existing copy/submit launchers.
+
+The two ports' config files are never byte-identical (different headers, the
+Julia `solver_*` block, the `use_fixed_sample` flag), so the runner does **not**
+compare checksums. Instead it checks that the **model-relevant keys** agree
+(`forecast_horizon_year`, `number_of_scenarios`, `length_of_regular_season`,
+`discount_rate`, `wacc`, `use_emission_cap`, `leap_years_investment`,
+`north_sea`, `time_format`) and fails on a difference unless
+`--allow-config-mismatch`. Solver settings (`solver_method`, `solver_crossover`,
+`solver_presolve`, `solver_threads`, `optimization_solver`) are reported as a
+**warning**, not a hard failure, because the Python reference may source Gurobi
+parameters outside its YAML — verify these match by hand for a fair run.
+
+For Julia, a launch profile is passed through to
+`copy_and_run_julia_on_hpc.sh`, and explicit comparison flags (`--seed`,
+`--perf`, `--perf-interval`, etc.) override the profile. The comparison runner
+always launches Julia in fixed-sample mode so both languages use the same
+`sampling_key.csv`.
+
+For Python, `OpenEMPIRE-csv/config/cluster.json` still provides the remote
+server and remote directory, but the comparison runner now constructs the Python
+`SCHEDULER_SCRIPT` from the selected dataset/config and passes it as an override
+to `copy_and_run_empire_on_hpc.sh`. That keeps old cluster settings from
+silently launching the wrong model. The generated Python command always includes
+`USE_FIXED_SAMPLE=true` and `TEST_RUN=false`. The written manifest records both
+repos' git commit, the Julia launch profile, both scheduler commands, the
+config-parity result, and any solver differences, so a comparison is
+reproducible after the fact.
+
+## Comparing two runs
+
+- **Same** dataset / config / seed, and the **same Gurobi parameters** —
+  `Method=2`, `Crossover=0`, `Presolve`, and a **pinned `solver_threads`**
+  (thread count drives barrier memory; leave it equal on both sides).
+- Same high-memory node class (`compute-4-5x`); same physical host where possible.
+- Deterministic operational tie-break **off** for perf runs.
+- Repeat N≈3 and report the median + spread.
+- Report the **build-phase peak** (Pyomo `create_instance` / JuMP construction)
+  separately from the **solve-phase peak** (Gurobi barrier factorisation) — that
+  split is the headline insight: model construction is often the memory peak, not
+  the solve.
+- Note: Julia RSS is a high-water mark the GC may not return to the OS — report
+  both `Sys.maxrss` (peak) and `gc_live_bytes` (live).
+
 ## Comparing two runs
 
 ```bash
