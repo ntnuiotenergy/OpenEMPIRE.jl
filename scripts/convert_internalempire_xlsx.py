@@ -91,6 +91,8 @@ CORE_TABLES: dict[str, list[tuple[str, list[int], str, str]]] = {
         ("Lifetime", [0, 1], "Generator", "genLifetime"),
     ],
     "Transmission.xlsx": [
+        ("OffshoreConverterCapitalCost", [0, 1], "Transmission", "OffshoreConverterCapitalCost"),
+        ("OffshoreConverterOMCost", [0, 1], "Transmission", "OffshoreConverterOMCost"),
         ("lineEfficiency", [0, 1, 2], "Transmission", "lineEfficiency"),
         ("MaxInstallCapacityRaw", [0, 1, 2, 3], "Transmission", "transmissionMaxInstalledCapRaw"),
         ("MaxBuiltCapacity", [0, 1, 2, 3], "Transmission", "transmissionMaxBuiltCap"),
@@ -179,8 +181,6 @@ EXTRA_CORE_TABLES: dict[str, list[tuple[str, list[int], str, str]]] = {
         ("CO2Captured", [0, 1], "Generator", "CO2Captured"),
     ],
     "Transmission.xlsx": [
-        ("OffshoreConverterCapitalCost", [0, 1], "Transmission", "OffshoreConverterCapitalCost"),
-        ("OffshoreConverterOMCost", [0, 1], "Transmission", "OffshoreConverterOMCost"),
     ],
     "Node.xlsx": [
         ("Latitude", [0, 1], "Node", "Latitude"),
@@ -1062,7 +1062,7 @@ def write_readme(source: Path, extra_out: Path, dataset: str, periods: int) -> N
         "  read (sources, commentary, intermediate calculations), prefixed by the sheet's",
         "  key columns. The other files are sheets of the core workbooks that only the",
         "  internal modules read (`MaxInstalledCapacityByPeriod`, `AvailableBioEnergy`,",
-        "  `OffshoreConverter*`, `Latitude`/`Longitude`, the natural-gas and industry sets).",
+        "  `Latitude`/`Longitude`, the natural-gas and industry sets).",
         "- `CO2/`, `NaturalGas/`, `Hydrogen/`, `Industry/`, `Transport/`, `HeatModule/` —",
         "  module tables, extracted with the exact sheet/column selections in",
         "  `InternalEMPIRE/reader.py`.",

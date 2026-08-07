@@ -52,6 +52,13 @@ function create_variables(emp::JuMP.Model, sets, periods::TimeStruct.TimeStructu
     @variable(emp, transmissionInvCap[N, N, SP] >= 0; container = IndexedVarArray)
     @variable(emp, transmissionInstalledCap[N, N, SP] >= 0; container = IndexedVarArray)
 
+    # Investment in offshore energy-hub converter capacity and tracking installed capacity.
+    # Hubs generate nothing, so what limits the power they can route is the converter
+    # equipment on the platform, which has to be built and paid for.
+    HUB = collect(offshore_energy_hubs(sets))
+    @variable(emp, offshoreConvInvCap[HUB, SP] >= 0; container = IndexedVarArray)
+    @variable(emp, offshoreConvInstalledCap[HUB, SP] >= 0; container = IndexedVarArray)
+
     # Investment in new storage capacity and tracking installed capacity
     @variable(emp, storPWInvCap[N, S, SP] >= 0; container = IndexedVarArray)
     @variable(emp, storPWInstalledCap[N, S, SP] >= 0; container = IndexedVarArray)
@@ -76,6 +83,10 @@ function create_variables(emp::JuMP.Model, sets, periods::TimeStruct.TimeStructu
     for (n, m) in bidir_arcs(sets), sp in SP
         unsafe_insertvar!(transmissionInvCap, n, m, sp)
         unsafe_insertvar!(transmissionInstalledCap, n, m, sp)
+    end
+    for n in HUB, sp in SP
+        unsafe_insertvar!(offshoreConvInvCap, n, sp)
+        unsafe_insertvar!(offshoreConvInstalledCap, n, sp)
     end
     for (n, s) in node_storages(sets), sp in SP
         unsafe_insertvar!(storPWInvCap, n, s, sp)
@@ -157,6 +168,32 @@ end
 
 # Calculate the total duration of all strategic periods from spp to sp (inclusive)
 # Return Inf if spp < sp
+"""
+    offshore_conv_investment_expr(emp, sets, par, sp)
+
+Annuitised investment cost of offshore energy-hub converter capacity built in `sp`.
+
+Zero when the dataset has no hubs. If it has hubs but ships no converter costs the
+capacity would be unpriced rather than unavailable, so that case warns instead of
+silently building free converters.
+"""
+function offshore_conv_investment_expr(emp::JuMP.Model, sets, par, sp)
+    hubs = offshore_energy_hubs(sets)
+    isempty(hubs) && return zero(JuMP.AffExpr)
+    cost = offshore_conv_invest_cost(par, sp)
+    if cost === nothing
+        @warn(
+            "Offshore energy hubs are present but the dataset has no " *
+            "Transmission/OffshoreConverterCapitalCost.csv, so converter capacity is " *
+            "free. Add the cost table, or remove the hubs from Sets/OffshoreEnergyHub.csv.",
+            maxlog = 1,
+        )
+        return zero(JuMP.AffExpr)
+    end
+    convInv = emp[:offshoreConvInvCap]
+    return sum(cost * convInv[n, sp] for n in hubs; init = zero(JuMP.AffExpr))
+end
+
 function duration_aggr(sp, spp, strat_periods)
     spp < sp && return Inf
     return sum(duration_strat(p) for p in strat_periods if p >= sp && p < spp; init = 0)
@@ -400,6 +437,47 @@ function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::Ti
         transCap[m, n, sp] <= trans_max_inst_cap(par, m, n, sp)
     )
 
+    # Offshore energy-hub converter constraints.
+    #
+    # Ports InternalEMPIRE's offshore_hub_capacity_in / _out (empire.py:2424-2429) and
+    # installedCapDefinitionConv (:2748). A hub has no generation of its own, so what
+    # bounds the power it can route is the converter capacity installed on it, in each
+    # direction separately. Without these a hub is free, unlimited transmission.
+    HUB = collect(offshore_energy_hubs(sets))
+    if !isempty(HUB)
+        @info " - offshore energy-hub converter constraints"
+        _report_progress(progress, "Creating offshore energy-hub converter constraints")
+        convCap = emp[:offshoreConvInstalledCap]
+        convInv = emp[:offshoreConvInvCap]
+        # Neighbours of each hub, so the in/out sums iterate only over real arcs.
+        # Mirrors InternalEMPIRE's model.NodesLinked[n].
+        hub_in = Dict(n => [m for (m, k) in arcs(sets) if k == n] for n in HUB)
+        hub_out = Dict(n => [m for (k, m) in arcs(sets) if k == n] for n in HUB)
+
+        # Power flowing into the hub, and out of it, each capped by converter capacity.
+        @constraint(
+            emp,
+            offshore_hub_capacity_in[n in HUB, sp in SP, t in sp],
+            sum(transOp[m, n, t] for m in hub_in[n]; init = 0) <= convCap[n, sp]
+        )
+        @constraint(
+            emp,
+            offshore_hub_capacity_out[n in HUB, sp in SP, t in sp],
+            sum(transOp[n, m, t] for m in hub_out[n]; init = 0) <= convCap[n, sp]
+        )
+
+        # Installed converter capacity is what was built within the lifetime window,
+        # the same accumulation the transmission and generator families use.
+        @constraint(
+            emp,
+            offshore_conv_track_cap[n in HUB, sp in SP],
+            sum(
+                convInv[n, spp] for spp in SP
+                if duration_aggr(spp, sp, SP) <= DEFAULT_OFFSHORE_CONV_LIFETIME - duration_strat(sp)
+            ) == convCap[n, sp]
+        )
+    end
+
     if offshore_transmission_cap
         @info " - offshore wind-farm transmission capacity constraints"
         _report_progress(progress, "Creating offshore wind-farm transmission capacity constraints")
@@ -512,6 +590,10 @@ function objective_component_expressions(emp::JuMP.Model, sets, par, periods::Ti
         transmission_investment = sum(
             objective_weight(sp, discounter) *
             sum(trans_invest_cost(par, m, n, sp) * transInvCap[m, n, sp] for (m, n) in bidir_arcs(sets); init = 0)
+            for sp in SP
+        ),
+        offshore_converter_investment = sum(
+            objective_weight(sp, discounter) * offshore_conv_investment_expr(emp, sets, par, sp)
             for sp in SP
         ),
         load_shedding = sum(

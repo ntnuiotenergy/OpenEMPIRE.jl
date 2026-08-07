@@ -592,6 +592,7 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
             :generator_investment,
             :storage_investment,
             :transmission_investment,
+            :offshore_converter_investment,
             :load_shedding,
             :generator_operation,
         )]
