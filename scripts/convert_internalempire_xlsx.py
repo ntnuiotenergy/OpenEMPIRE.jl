@@ -763,7 +763,35 @@ def normalize_time_column(path: Path, target: Path) -> bool:
         shutil.copy2(path, target)
         return False
 
-    parsed = pd.to_datetime(frame["time"], format="mixed", dayfirst=True)
+    # The fallback path is only reached when the column is *not* already
+    # ``dd/mm/yyyy``, which for these datasets means ISO ``yyyy-mm-dd``. Parse it as
+    # ISO explicitly: `format="mixed", dayfirst=True` silently reads an ISO date as
+    # year-day-month, turning 2015-02-01 (1 February) into 2 January and shifting
+    # every date whose day is <= 12. That corrupted hydroror/hydroseasonal -- the only
+    # two files this function rewrites -- and put roughly half the run-of-river hours
+    # on the wrong day.
+    parsed = pd.to_datetime(frame["time"], format="ISO8601", errors="coerce")
+    if parsed.isna().any():
+        bad = frame.loc[parsed.isna(), "time"].head(3).tolist()
+        raise ValueError(
+            f"{path.name}: 'time' is neither {TIME_FORMAT} nor ISO 8601; first "
+            f"unparsable values: {bad}"
+        )
+
+    # These files carry their own month/hour columns derived from the original
+    # timestamps. They are redundant, but that makes them a free cross-check: if the
+    # reparse disagrees with them, the timestamps have been misread.
+    for column, attribute in (("month", parsed.dt.month), ("hour", parsed.dt.hour)):
+        if column not in frame.columns:
+            continue
+        stated = pd.to_numeric(frame[column], errors="coerce")
+        mismatched = int((stated != attribute).sum())
+        if mismatched:
+            raise ValueError(
+                f"{path.name}: parsed 'time' disagrees with the '{column}' column in "
+                f"{mismatched} of {len(frame)} rows. The timestamps are being misread."
+            )
+
     frame["time"] = parsed.dt.strftime(TIME_FORMAT)
     frame.to_csv(target, index=False, encoding=ENCODING)
     return True
