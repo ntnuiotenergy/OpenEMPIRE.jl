@@ -28,6 +28,7 @@ end
 @testset "CSV" begin
     test_read_csv_dataset()
     test_read_bundled_csv_datasets()
+    test_read_full_model_int_dataset()
     test_native_timestruct_operational_weights()
     test_write_solution_csv_tables()
     test_europe_summary_uses_per_scenario_totals()

@@ -162,13 +162,25 @@ end
 function preprocess_operational_cost(params::EmpireParams, sets, periods)
     params.genMargCost = Dict{String, StrategicProfile}()
     for g in sets.Generator
+        # Without an efficiency profile there is no marginal-cost basis, so the
+        # generator keeps the documented accessor fallback. Never fall through to
+        # an empty StrategicProfile: validation and model evaluation index it and
+        # fail with an opaque BoundsError.
+        haskey(params.genEfficiency, g) || continue
+
+        # A generator with an efficiency but no fuel price cannot be costed here.
+        # `full_model_int` is the motivating case: it deliberately omits gas fuel
+        # prices because InternalEMPIRE prices gas through its natural-gas module,
+        # so that dataset needs the gas module rather than a silent zero cost.
+        haskey(params.genFuelCost, g) || throw(ArgumentError(
+            "Generator $g has a genEfficiency profile but no genFuelCost entry. " *
+            "Add its fuel cost, or use a dataset whose fuels are all priced in " *
+            "genFuelCost.",
+        ))
+
         values = Float64[]
         for sp in strat_periods(periods)
             # Variable cost in €/MWh
-            if !haskey(params.genFuelCost, g) || !haskey(params.genEfficiency, g)
-                continue
-            end
-
             ccs_remove_frac = 0.9
 
             if ("CCS", g) in sets.GeneratorsOfTechnology

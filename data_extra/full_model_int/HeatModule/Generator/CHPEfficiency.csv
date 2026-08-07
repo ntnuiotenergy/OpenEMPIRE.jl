@@ -1,0 +1,15 @@
+GeneratorTechnology,Period,generatorEfficiency
+WasteToEnergyCHP,1,0.235
+WasteToEnergyCHP,2,0.2374
+WasteToEnergyCHP,3,0.241
+WasteToEnergyCHP,4,0.241
+WasteToEnergyCHP,5,0.241
+WasteToEnergyCHP,6,0.241
+WasteToEnergyCHP,7,0.2446
+BioWoodChipCHP,1,0.303
+BioWoodChipCHP,2,0.3034
+BioWoodChipCHP,3,0.304
+BioWoodChipCHP,4,0.304
+BioWoodChipCHP,5,0.304
+BioWoodChipCHP,6,0.304
+BioWoodChipCHP,7,0.3016

@@ -1,0 +1,4 @@
+ThermalGenerators,RampRate
+WasteToEnergyCHP,0.1
+WasteToEnergyHOP,0.1
+BioWoodChipCHP,0.7
