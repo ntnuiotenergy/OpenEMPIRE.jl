@@ -21,9 +21,13 @@ Horizon: 7 investment periods (`NoOfPeriods` in `run_EMPIRE_int.py`).
 
 ## Derived in the core dataset
 
-- `Sets/OffshoreNode.csv` = `Sets.xlsx!Nodes!Node` minus `!OnshoreNode`
-  (the internal workbooks have no `OffshoreNodes` sheet). The source
-  `OnshoreNode` column is kept here as `Sets/OnshoreNode.csv`.
+- `Sets/OffshoreWindFarmNode.csv` and `Sets/OffshoreEnergyHub.csv` split the
+  offshore nodes (`Sets.xlsx!Nodes!Node` minus `!OnshoreNode`) using the two
+  hardcoded lists in `run_EMPIRE_int.py` — the internal workbooks record the
+  classification nowhere. Wind farms have their corridors capped by their own
+  generation; hubs are capped by converter capacity instead; offshore nodes in
+  neither list (the Sleipner and Draupner gas platforms) get neither treatment.
+  The source `OnshoreNode` column is kept here as `Sets/OnshoreNode.csv`.
 - `Sets/Period.csv` = 1..7 (the internal workbooks have no `Horizon` sheet).
 - `Sets/ThermalGenerators.csv` = `Sets.xlsx!Generators!RampingGenerators`, which is
   the same set under the name the open dataset and the Julia port use.
