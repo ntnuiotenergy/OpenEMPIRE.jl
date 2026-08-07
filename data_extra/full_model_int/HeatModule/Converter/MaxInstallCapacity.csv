@@ -1,0 +1,11 @@
+Node,ConverterTechnology,ConverterMaxInstallCapacity_in_MW
+NO1,Convector,200000
+NO2,Convector,200000
+NO3,Convector,200000
+NO4,Convector,200000
+NO5,Convector,200000
+NO1,HeatPumpAir,200000
+NO2,HeatPumpAir,200000
+NO3,HeatPumpAir,200000
+NO4,HeatPumpAir,200000
+NO5,HeatPumpAir,200000

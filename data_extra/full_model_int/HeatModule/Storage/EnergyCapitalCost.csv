@@ -1,0 +1,15 @@
+StorageTypes,Period,EnergyCapitalCost_in_euro_per_kWh
+HotWaterTankLarge,1,3
+HotWaterTankLarge,2,3
+HotWaterTankLarge,3,3
+HotWaterTankLarge,4,3
+HotWaterTankLarge,5,3
+HotWaterTankLarge,6,3
+HotWaterTankLarge,7,3
+HotWaterTankSmall,1,410
+HotWaterTankSmall,2,410
+HotWaterTankSmall,3,410
+HotWaterTankSmall,4,410
+HotWaterTankSmall,5,410
+HotWaterTankSmall,6,410
+HotWaterTankSmall,7,410
