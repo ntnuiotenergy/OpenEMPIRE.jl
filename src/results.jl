@@ -258,14 +258,24 @@ function _insert_if_not_nothing!(dict, key::AbstractString, value)
     return dict
 end
 
+function _is_same_or_child_path(path::AbstractString, parent::AbstractString)
+    relative = relpath(abspath(path), abspath(parent))
+    escapes_parent = relative == ".." || startswith(relative, "../") || startswith(relative, "..\\")
+    return relative == "." || !escapes_parent
+end
+
 """
     write_scenario_artifacts(result_dir, data_folder, config; kwargs...)
 
 Archive the scenario sampling key and run metadata under
 `joinpath(result_dir, "Input")` when scenario generation is enabled.
 
-The archived `Input/ScenarioData/sampling_key.csv` is enough to replay the
-exact sampled scenario tree together with the run config and original dataset.
+When `data_folder` is already staged under `joinpath(result_dir, "Input")`, the
+existing staged `ScenarioData/sampling_key.csv` is referenced directly instead
+of duplicated under `Input/ScenarioData`.
+
+The archived sampling key is enough to replay the exact sampled scenario tree
+together with the run config and original dataset.
 Returns the archived sampling-key path, or `nothing` when no sampling key is
 available or scenario generation is disabled.
 """
@@ -284,14 +294,22 @@ function write_scenario_artifacts(
     isfile(source_key) || return nothing
 
     input_dir = joinpath(result_dir, "Input")
-    scenario_dir = joinpath(input_dir, "ScenarioData")
-    mkpath(scenario_dir)
-
-    archived_key = joinpath(scenario_dir, "sampling_key.csv")
-    cp(source_key, archived_key; force = true)
+    is_staged_input = _is_same_or_child_path(data_folder, input_dir)
+    archived_key = if is_staged_input
+        source_key
+    else
+        scenario_dir = joinpath(input_dir, "ScenarioData")
+        mkpath(scenario_dir)
+        copied_key = joinpath(scenario_dir, "sampling_key.csv")
+        cp(source_key, copied_key; force = true)
+        copied_key
+    end
 
     if config_file !== nothing && isfile(config_file)
-        cp(config_file, joinpath(input_dir, "config.yaml"); force = true)
+        archived_config = joinpath(input_dir, "config.yaml")
+        if abspath(config_file) != abspath(archived_config)
+            cp(config_file, archived_config; force = true)
+        end
     end
 
     generated_files = Dict(
@@ -304,6 +322,7 @@ function write_scenario_artifacts(
         "scenario_data_folder" => joinpath(data_folder, "ScenarioData"),
         "source_sampling_key" => source_key,
         "archived_sampling_key" => relpath(archived_key, result_dir),
+        "staged_input" => is_staged_input,
         "generated_scenario_files_present" => generated_files,
     )
     _insert_if_not_nothing!(metadata, "dataset", dataset)
