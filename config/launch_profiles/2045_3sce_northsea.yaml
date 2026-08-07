@@ -1,0 +1,9 @@
+dataset: europe_v51
+model_config: config/run_2045_3sce.yaml
+format: csv
+solver: Gurobi
+seed: 1
+fixed_sample: true
+optimize: true
+perf: true
+perf_interval: 2.0
