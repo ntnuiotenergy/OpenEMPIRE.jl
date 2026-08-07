@@ -1,0 +1,13 @@
+GeneratorTechnology,CO2Content_[tCO2/GJ]
+WasteToEnergyCHP,0.037
+WasteToEnergyHOP,0.037
+DistrictHeatGasBoiler,0.0561
+BioWoodChipCHP,0.0
+BioWoodChipHOP,0.0
+IndividualOilBoiler,0.07740000000000001
+IndividualGasBoiler,0.0561
+DistrictHeatGeo,0.0
+DistrictHeatHydrogenBoiler,0.0
+IndividualHydrogenBoiler,0.0
+NaturalGasIndustrialBurner,0.0561
+HydrogenIndustrialBurner,0.0

@@ -1,0 +1,13 @@
+GeneratorTechnology,generatorVariableOMcosts_in_euro_per_MWh-th
+WasteToEnergyCHP,5.9
+WasteToEnergyHOP,8.4
+DistrictHeatGasBoiler,1.0
+BioWoodChipCHP,1.1
+BioWoodChipHOP,3.4
+IndividualOilBoiler,0.0
+IndividualGasBoiler,0.0
+DistrictHeatGeo,8.4
+DistrictHeatHydrogenBoiler,1.0
+IndividualHydrogenBoiler,0.0
+NaturalGasIndustrialBurner,0.28
+HydrogenIndustrialBurner,0.28

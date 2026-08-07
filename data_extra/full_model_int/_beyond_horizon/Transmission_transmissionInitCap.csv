@@ -1,0 +1,13 @@
+InterconnectorLinks,ToNode,Period,TransmissionInitialCapacity
+NO2,Belgium,8,0.0
+NO2,Denmark,8,1640.0
+NO2,Germany,8,1400.0
+NO2,GreatBrit.,8,1400.0
+NO2,Netherlands,8,700.0
+NO2,NO1,8,3500.0
+NO3,NO1,8,500.0
+NO4,Finland,8,100.0
+NO4,NO3,8,1200.0
+NO5,NO1,8,3900.0
+NO5,NO2,8,600.0
+NO5,NO3,8,650.0
