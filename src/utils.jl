@@ -1,6 +1,18 @@
 
+# Corridor data is stored once per corridor, in whichever direction the input file
+# lists it, so a lookup must try both orders.
+_pair_value(dict, m, n) = haskey(dict, (m, n)) ? dict[(m, n)] : get(dict, (n, m), nothing)
+
+# Annuity (capital recovery) factor.
+#
+# Matches InternalEMPIRE, which uses the exponent `1 - life` rather than `-life`
+# (empire.py:1086 and the eleven other investment types). That spreads the capital over
+# `life - 1` payments instead of `life`, so the annual charge is slightly larger: +0.8%
+# at a 40-year lifetime, +8.6% at 10 years. Whether that is deliberate is an open
+# question with Stian (issues_for_stian.md); the port follows the reference until it is
+# settled, because the two cannot agree on an objective while they disagree here.
 function annuity_factor(wacc, life)
-    return (1 - (1 + wacc)^(-life)) / wacc
+    return (1 - (1 + wacc)^(1 - life)) / wacc
 end
 
 function present_value(cost, discount_rate, years; at_start = true)
@@ -101,24 +113,43 @@ function preprocess_invest_cost(params::EmpireParams, sets, periods)
         end
     end
 
-    # Transmission investment costs
+    # Transmission investment costs. Length and lifetime are stored once per
+    # corridor, while the type mapping contains both directions, so every lookup
+    # must accept either ordering. InternalEMPIRE defaults missing lifetimes to 40.
     params.transmissionInvCost = Dict{Tuple{String,String}, StrategicProfile}()
+    unpriced = Set{Tuple{String,String}}()
     for (m, n, tt) in sets.TransmissionTypeOfDirectionalLink
-        if haskey(params.transmissionTypeCapitalCost, tt) && haskey(params.transmissionLifetime, (m,n))
-            cap_cost = params.transmissionTypeCapitalCost[tt] # in €/(MW * km)
-            life = params.transmissionLifetime[(m,n)]
-            trans_length = params.transmissionLength[(m,n)] # in km
-            om_cost = get(params.transmissionTypeFixedOMCost, tt, 0.0) # in €/MW/year
-            profiles = FixedProfile[]
-            for sp in SP
-                cost_per_year = trans_length * cap_cost[sp] / annuity_factor(wacc, life) + om_cost[sp]
-                y = min(life, sum(duration_strat(spp) for spp in SP if spp >= sp))
-                invest_cost = present_value(cost_per_year, ρ, y; at_start = true) # in €/MW
-                push!(profiles, FixedProfile(invest_cost))
-            end
-            params.transmissionInvCost[(m, n)] = StrategicProfile(profiles)
+        life = trans_lifetime(params, m, n)
+        trans_length = _pair_value(params.transmissionLength, m, n)
+        if !haskey(params.transmissionTypeCapitalCost, tt) || trans_length === nothing
+            push!(unpriced, is_bidir(m, n) ? (m, n) : (n, m))
+            continue
         end
+        cap_cost = params.transmissionTypeCapitalCost[tt] # in €/(MW * km)
+        om_cost = get(params.transmissionTypeFixedOMCost, tt, 0.0) # in €/(MW * km * year)
+        profiles = FixedProfile[]
+        for sp in SP
+            # InternalEMPIRE multiplies both capex and fixed O&M by corridor length.
+            cost_per_year =
+                trans_length * (cap_cost[sp] / annuity_factor(wacc, life) + om_cost[sp])
+            y = min(life, sum(duration_strat(spp) for spp in SP if spp >= sp))
+            invest_cost = present_value(cost_per_year, ρ, y; at_start = true) # in €/MW
+            push!(profiles, FixedProfile(invest_cost))
+        end
+        params.transmissionInvCost[(m, n)] = StrategicProfile(profiles)
     end
+
+    # A corridor is only genuinely unpriced if neither direction could be derived.
+    still_unpriced = sort([
+        corridor for corridor in unpriced
+        if _pair_value(params.transmissionInvCost, corridor[1], corridor[2]) === nothing
+    ])
+    isempty(still_unpriced) || @warn(
+        "No investment cost could be derived for these transmission corridors, so they " *
+        "fall back to a cost of 0 and are free to build. Check transmissionLength and " *
+        "transmissionTypeCapitalCost for them.",
+        corridors = still_unpriced,
+    )
 
     # Offshore energy-hub converter investment cost.
     #
