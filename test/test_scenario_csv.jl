@@ -1392,6 +1392,27 @@ Period,Scenario,Season,Year,Month,Hour
             "scenario_metadata.yaml",
         ))
         @test !haskey(unfiltered_metadata, "archived_filter_result")
+        staged_result = joinpath(root, "staged")
+        staged_dataset = joinpath(staged_result, "Input", "csv")
+        staged_config = joinpath(staged_result, "Input", "config.yaml")
+        mkpath(dirname(staged_config))
+        cp(dataset, staged_dataset)
+        cp(config_file, staged_config)
+        staged_key = joinpath(staged_dataset, "ScenarioData", "sampling_key.csv")
+        @test OpenEMPIRE.write_scenario_artifacts(
+            staged_result,
+            staged_dataset,
+            config;
+            config_file = staged_config,
+            dataset = "dataset",
+            input_format = :csv,
+            seed = 11,
+        ) == staged_key
+        @test !ispath(joinpath(staged_result, "Input", "ScenarioData", "sampling_key.csv"))
+        staged_metadata = YAML.load_file(joinpath(staged_result, "Input", "scenario_metadata.yaml"))
+        @test staged_metadata["staged_input"] == true
+        @test staged_metadata["archived_sampling_key"] ==
+              joinpath("Input", "csv", "ScenarioData", "sampling_key.csv")
 
         disabled_result = joinpath(root, "disabled")
         disabled_config = merge(config, Dict("use_scenario_generation" => false))

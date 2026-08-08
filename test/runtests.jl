@@ -16,6 +16,7 @@ include("test_scenario_csv.jl")
 include("test_out_of_sample.jl")
 include("test_runner_performance.jl")
 include("test_runner_manifest.jl")
+include("test_runner_staging.jl")
 #include("test_interface.jl")
 include("test_timestruct.jl")
 include("test_solve.jl")
@@ -73,6 +74,10 @@ end
 
 @testset "Runner manifest" begin
     test_runner_manifest_helpers()
+end
+
+@testset "Runner staging" begin
+    test_stage_run_inputs_copies_without_mutating_source()
 end
 
 @testset "Validate" begin
