@@ -249,6 +249,9 @@ function create_constraints(
     periods::TimeStructure;
     offshore_transmission_cap::Bool = true,
     natural_gas::Bool = false,
+    # Transport demand lives in InternalEMPIRE's hydrogen block, so it is off unless
+    # hydrogen is modelled. See create_natural_gas_constraints!.
+    gas_transport_demand::Bool = false,
     progress = nothing,
 )
     @info "Creating constraints"
@@ -283,7 +286,9 @@ function create_constraints(
     create_storage_constraints(emp, sets, par, periods; progress)
     create_transmission_constraints(emp, sets, par, periods; offshore_transmission_cap, progress)
     create_emission_constraints(emp, sets, par, periods; progress)
-    natural_gas && create_natural_gas_constraints!(emp, sets, par, periods)
+    natural_gas && create_natural_gas_constraints!(
+        emp, sets, par, periods; transport_demand = gas_transport_demand,
+    )
     return nothing
 
 end

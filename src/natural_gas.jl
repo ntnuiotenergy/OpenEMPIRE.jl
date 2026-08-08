@@ -230,12 +230,28 @@ function _create_natural_gas_reserve_constraints!(
 end
 
 """
-    create_natural_gas_constraints!(model, sets, params, periods)
+    create_natural_gas_constraints!(model, sets, params, periods; transport_demand = false)
 
 Add InternalEMPIRE-compatible gas conversion, terminal, reserve, storage,
 pipeline, transport-demand, and nodal-balance constraints.
+
+Transport demand is part of InternalEMPIRE's hydrogen block, not its natural-gas
+module: `transport_naturalGasDemandMet`/`Shed`, and the constraint that meets that
+demand, are all declared inside `if hydrogen is True:` (`empire.py:1703` and `:2441`).
+Running the reference with `NaturalGas=True, hydrogen=False` therefore has no transport
+natural-gas demand at all.
+
+The port matches that placement so a gas-only run is comparable. Left on, the port
+carries a demand the reference does not and sheds it at the 100 000 EUR/MWh curtailment
+price, which on `full_model_int` was 56% of the objective.
+
+Whether transport genuinely belongs to hydrogen is a question for InternalEMPIRE --
+natural-gas transport demand has no obvious dependence on hydrogen — so this is a
+faithful port of the reference's structure, not an endorsement of it.
 """
-function create_natural_gas_constraints!(emp::JuMP.Model, sets, par, periods)
+function create_natural_gas_constraints!(
+    emp::JuMP.Model, sets, par, periods; transport_demand::Bool = false,
+)
     gas = par.NaturalGas
     period_context = _natural_gas_period_context(emp, periods, gas.gasScenarioCount)
     gas_nodes = natural_gas_nodes(sets)
@@ -326,7 +342,7 @@ function create_natural_gas_constraints!(emp::JuMP.Model, sets, par, periods)
         transmission[from, to, operational_period] <=
             natural_gas_pipeline_capacity(par, from, to),
     )
-    @constraint(
+    transport_demand && @constraint(
         emp,
         meet_transport_natural_gas_demand[
             node in onshore_nodes,
@@ -368,7 +384,7 @@ function create_natural_gas_constraints!(emp::JuMP.Model, sets, par, periods)
         ) +
         charge[node, operational_period] +
         (
-            node in natural_gas_onshore_nodes(sets) ?
+            transport_demand && node in natural_gas_onshore_nodes(sets) ?
             transport_met[node, operational_period] : 0.0
         ),
     )
