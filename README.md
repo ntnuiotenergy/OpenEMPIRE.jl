@@ -39,6 +39,51 @@ emp, periods, sets, params = OpenEMPIRE.create_model(
     config_file, data_folder; optimizer = HiGHS.Optimizer,
 )
 ```
+
+### Natural-gas module
+
+Natural gas is opt-in and does not affect existing electricity-only runs:
+
+```yaml
+natural_gas: true
+number_of_gas_scenarios: 1
+```
+
+With the module enabled, gas-fired generators buy gas through terminals,
+pipelines and seasonal storage. Gas transport demand may be met or shed, and
+pipeline flows consume electricity at their sending node. The ordinary
+generator fuel-price term is removed for gas generators so terminal imports
+are not charged twice; variable O&M and carbon costs remain.
+
+`number_of_scenarios` remains the weather axis.
+`number_of_gas_scenarios` is the terminal-price axis, so the operational model
+contains their Cartesian product. Combined scenarios are ordered weather first,
+then gas price. Weather profiles are sampled once and replicated across all gas
+prices. The bundled `full_model_int` source currently contains one complete gas
+price scenario; higher counts require a complete
+`NaturalGas/TerminalCost_stochastic.csv`.
+
+Run the deterministic full-model input by copying
+`config/run_full_model_int.yaml`, setting `natural_gas: true`, and running:
+
+```bash
+julia --project=. scripts/run_julia_empire.jl \
+  --dataset=full_model_int \
+  --config=/path/to/run_full_model_int_gas.yaml
+```
+
+Gas outputs are written below `<result-dir>/output/` as `ng*.csv`,
+`naturalGasBalance.csv`, and `transportNaturalGas.csv`, together with
+`results_natural_gas_*.csv` comparison reports. Gas-price and storage duals are
+written only when operational duals are available. The run manifest records the
+module gate, both scenario counts, exact gas-input hashes, and conversion
+manifest hash.
+
+For a hands-on equation-level comparison, see
+[`docs/natural_gas_parity.md`](docs/natural_gas_parity.md). It gives commands
+that write separate Julia and Pyomo result CSVs and compare 26 gas,
+electricity, storage, transport, and objective metrics.
+
 The model can then be optimized using `JuMP` with the associated solver:
 ```
 JuMP.optimize!(emp)

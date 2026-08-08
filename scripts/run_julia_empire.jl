@@ -397,6 +397,8 @@ function main(args = ARGS)
             :offshore_converter_investment,
             :load_shedding,
             :generator_operation,
+            :natural_gas_terminal_import,
+            :natural_gas_transport_shedding,
         )]
     else
         ["objective_component_$name=$value" for (name, value) in pairs(objective_components)]

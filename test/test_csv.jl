@@ -430,3 +430,32 @@ function test_europe_summary_uses_per_scenario_totals()
         @test scenario_two.AnnualGeneration_GWh ≈ annual_multiple * (10.0 + 14.0) / 1000
     end
 end
+
+"""
+The CCS fixed transport-and-storage cost is data-driven, and its default is the
+historical hardcoded constant.
+
+`ccs_cost_fix` used to be a literal `1149873.72` in `utils.jl` (with a standing TODO
+to remove the hardcoding). It is now read from an optional
+`Generator/CCSCostTSFixed.csv`. Datasets without that file must behave exactly as
+before, or every existing CCS investment cost silently changes.
+"""
+function test_ccs_fixed_cost_is_data_driven()
+    par = OpenEMPIRE.EmpireParams()
+    @test par.CCSCostTSFixed === nothing
+    @test OpenEMPIRE.ccs_cost_fixed(par) == OpenEMPIRE.DEFAULT_CCS_COST_FIXED
+    @test OpenEMPIRE.DEFAULT_CCS_COST_FIXED == 1149873.72
+
+    par.CCSCostTSFixed = 0.0
+    @test OpenEMPIRE.ccs_cost_fixed(par) == 0.0
+    par.CCSCostTSFixed = 42.5
+    @test OpenEMPIRE.ccs_cost_fixed(par) == 42.5
+
+    mktempdir() do root
+        path = joinpath(root, "CCSCostTSFixed.csv")
+        write(path, "CCS_TSfixed_cost_in_euro_per_tCO2\n1234.5\n")
+        @test OpenEMPIRE._read_scalar_csv(path) == 1234.5
+        write(path, "header\n")
+        @test_throws ArgumentError OpenEMPIRE._read_scalar_csv(path)
+    end
+end

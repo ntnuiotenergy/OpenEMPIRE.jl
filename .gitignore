@@ -12,3 +12,4 @@ data/*/ScenarioData/sampling_key.csv
 data/*/Copulas/
 OutOfSample/
 **/.DS_Store
+__pycache__/
