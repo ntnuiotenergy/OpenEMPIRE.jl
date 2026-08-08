@@ -305,11 +305,15 @@ function write_scenario_artifacts(
 
     input_dir = joinpath(result_dir, "Input")
     is_staged_input = _is_same_or_child_path(data_folder, input_dir)
+    # When the dataset is already staged under `Input/`, every artifact is referenced
+    # where it stands rather than copied beside itself. `scenario_dir` is bound outside
+    # the branch because the filter and copula archiving below need it in both cases.
+    scenario_dir = joinpath(input_dir, "ScenarioData")
+    is_staged_input || mkpath(scenario_dir)
+
     archived_key = if is_staged_input
         source_key
     else
-        scenario_dir = joinpath(input_dir, "ScenarioData")
-        mkpath(scenario_dir)
         copied_key = joinpath(scenario_dir, "sampling_key.csv")
         cp(source_key, copied_key; force = true)
         copied_key
@@ -319,9 +323,13 @@ function write_scenario_artifacts(
     filter_enabled =
         get(config, "filter_make", false) || get(config, "filter_use", false)
     archived_filter = if filter_enabled && isfile(source_filter)
-        destination = joinpath(scenario_dir, "filter_result.csv")
-        cp(source_filter, destination; force = true)
-        destination
+        if is_staged_input
+            source_filter
+        else
+            destination = joinpath(scenario_dir, "filter_result.csv")
+            cp(source_filter, destination; force = true)
+            destination
+        end
     else
         nothing
     end
@@ -330,9 +338,13 @@ function write_scenario_artifacts(
     copula_enabled =
         get(config, "copula_clusters_make", false) || get(config, "copula_clusters_use", false)
     archived_copula = if copula_enabled && isfile(source_copula)
-        destination = joinpath(scenario_dir, "copula_clusters.csv")
-        cp(source_copula, destination; force = true)
-        destination
+        if is_staged_input
+            source_copula
+        else
+            destination = joinpath(scenario_dir, "copula_clusters.csv")
+            cp(source_copula, destination; force = true)
+            destination
+        end
     else
         nothing
     end
