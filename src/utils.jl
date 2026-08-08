@@ -3,8 +3,16 @@
 # lists it, so a lookup must try both orders.
 _pair_value(dict, m, n) = haskey(dict, (m, n)) ? dict[(m, n)] : get(dict, (n, m), nothing)
 
+# Annuity (capital recovery) factor.
+#
+# Matches InternalEMPIRE, which uses the exponent `1 - life` rather than `-life`
+# (empire.py:1086 and the eleven other investment types). That spreads the capital over
+# `life - 1` payments instead of `life`, so the annual charge is slightly larger: +0.8%
+# at a 40-year lifetime, +8.6% at 10 years. Whether that is deliberate is an open
+# question with Stian (issues_for_stian.md); the port follows the reference until it is
+# settled, because the two cannot agree on an objective while they disagree here.
 function annuity_factor(wacc, life)
-    return (1 - (1 + wacc)^(-life)) / wacc
+    return (1 - (1 + wacc)^(1 - life)) / wacc
 end
 
 function present_value(cost, discount_rate, years; at_start = true)
@@ -131,7 +139,12 @@ function preprocess_invest_cost(params::EmpireParams, sets, periods)
         om_cost = get(params.transmissionTypeFixedOMCost, tt, 0.0) # in €/MW/year
         profiles = FixedProfile[]
         for sp in SP
-            cost_per_year = trans_length * cap_cost[sp] / annuity_factor(wacc, life) + om_cost[sp]
+            # InternalEMPIRE scales *both* terms by corridor length (empire.py:1107):
+            #   annuity * length * TypeCapitalCost + length * TypeFixedOMCost
+            # The fixed O&M is per MW per km per year, not per MW per year, so omitting
+            # the length here understated transmission investment by ~40% on
+            # full_model_int.
+            cost_per_year = trans_length * (cap_cost[sp] / annuity_factor(wacc, life) + om_cost[sp])
             y = min(life, sum(duration_strat(spp) for spp in SP if spp >= sp))
             invest_cost = present_value(cost_per_year, ρ, y; at_start = true) # in €/MW
             push!(profiles, FixedProfile(invest_cost))

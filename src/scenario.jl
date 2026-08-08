@@ -209,6 +209,22 @@ end
 const OFFSHORE_WIND_GENERATORS = ("Windoffshore", "Windoffshoregrounded", "Windoffshorefloating")
 
 """
+Raw scenario columns skipped so the port reproduces InternalEMPIRE's results.
+
+`full_model_int` supplies Norway as five per-elspot-area columns, but
+`scenario_random.py` only special-cases a single aggregate `"NO"` column and its
+`dict_countries` has no `NO1`..`NO5` keys, so those columns match neither branch and are
+dropped. With `genCapAvailStochRaw` defaulting to 0.0, Norwegian solar, onshore wind and
+run-of-river cannot generate at all in the reference.
+
+That looks like a defect rather than a modelling choice, and it is worth about 2.9% of
+system cost, so it is raised with Stian in `issues_for_stian.md`. It is mirrored here
+only to keep the two models comparable. **Empty this set the moment the reference
+handles those columns** -- it is the one place the port knowingly reproduces a bug.
+"""
+const INTERNALEMPIRE_SKIPPED_COLUMNS = ("NO1", "NO2", "NO3", "NO4", "NO5")
+
+"""
     _fold_name(s)
 
 Accent-folded, lowercased form of a node name, used only to match a raw scenario
@@ -255,6 +271,11 @@ function _node_names_for_generator(
     # restricted here; treating both as offshore-only strips the country-level grounded
     # capacity and makes the system markedly more expensive.
     offshore_only = generator == "Windoffshorefloating"
+
+    # See INTERNALEMPIRE_SKIPPED_COLUMNS: mirrors the reference dropping these.
+    if !offshore_only && raw in INTERNALEMPIRE_SKIPPED_COLUMNS
+        return String[]
+    end
 
     exact = _node_name(raw, node_set)
     if exact !== nothing
