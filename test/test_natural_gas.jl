@@ -198,6 +198,10 @@ function _natural_gas_solved_fixture(
         params,
         periods;
         natural_gas = natural_gas_gate,
+        # These fixtures exercise the transport-demand formulation itself, so it is
+        # enabled here. Runs leave it off unless hydrogen is modelled, matching
+        # InternalEMPIRE -- see create_natural_gas_constraints!.
+        gas_transport_demand = natural_gas_gate,
     )
     strategic_period = only(collect(strat_periods(periods)))
     for node in ("A", "B")
@@ -223,7 +227,6 @@ function _natural_gas_solved_fixture(
         params,
         periods,
         discounter;
-        natural_gas = natural_gas_gate,
     )
     JuMP.optimize!(model)
     return model, periods, sets, params, discounter
@@ -644,7 +647,7 @@ function test_natural_gas_multi_period_scenario_weighting()
         natural_gas = true,
     )
     discounter = OpenEMPIRE.Discounter(0.05, 1, periods)
-    OpenEMPIRE.create_objective(model, sets, params, periods, discounter; natural_gas = true)
+    OpenEMPIRE.create_objective(model, sets, params, periods, discounter)
 
     imports = model[:ngTerminalImport]
     objective = JuMP.objective_function(model)

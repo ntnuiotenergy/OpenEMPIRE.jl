@@ -4,6 +4,7 @@ data/~$*.xlsx
 *.lp
 results/
 logs/
+tmp/
 config/cluster.json
 data/*/ScenarioData/sloadRaw.csv
 data/*/ScenarioData/maxRegHydroGenRaw.csv

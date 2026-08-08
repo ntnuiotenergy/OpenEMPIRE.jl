@@ -238,7 +238,6 @@ function create_model(
         params,
         periods,
         Discounter(OpenEMPIRE.discount_rate(params), 1, periods);
-        natural_gas = gas_enabled,
         progress,
     )
     _report_progress(progress, "Model build complete")

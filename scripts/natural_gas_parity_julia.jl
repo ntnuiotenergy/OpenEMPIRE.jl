@@ -142,6 +142,10 @@ function solve_julia_parity_fixture(
         params,
         periods;
         natural_gas = true,
+        # The Pyomo reference this is compared against models transport demand
+        # (natural_gas_parity_python.py), so enable it here too. Full runs leave it off
+        # unless hydrogen is modelled -- see create_natural_gas_constraints!.
+        gas_transport_demand = true,
     )
     strategic_period = only(collect(strat_periods(periods)))
     for node in ("A", "B")
@@ -157,8 +161,7 @@ function solve_julia_parity_fixture(
         sets,
         params,
         periods,
-        discounter;
-        natural_gas = true,
+        discounter,
     )
     JuMP.optimize!(model)
     JuMP.termination_status(model) == JuMP.MOI.OPTIMAL ||

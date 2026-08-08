@@ -1396,6 +1396,27 @@ Period,Scenario,Season,Year,Month,Hour
             "scenario_metadata.yaml",
         ))
         @test !haskey(unfiltered_metadata, "archived_filter_result")
+        staged_result = joinpath(root, "staged")
+        staged_dataset = joinpath(staged_result, "Input", "csv")
+        staged_config = joinpath(staged_result, "Input", "config.yaml")
+        mkpath(dirname(staged_config))
+        cp(dataset, staged_dataset)
+        cp(config_file, staged_config)
+        staged_key = joinpath(staged_dataset, "ScenarioData", "sampling_key.csv")
+        @test OpenEMPIRE.write_scenario_artifacts(
+            staged_result,
+            staged_dataset,
+            config;
+            config_file = staged_config,
+            dataset = "dataset",
+            input_format = :csv,
+            seed = 11,
+        ) == staged_key
+        @test !ispath(joinpath(staged_result, "Input", "ScenarioData", "sampling_key.csv"))
+        staged_metadata = YAML.load_file(joinpath(staged_result, "Input", "scenario_metadata.yaml"))
+        @test staged_metadata["staged_input"] == true
+        @test staged_metadata["archived_sampling_key"] ==
+              joinpath("Input", "csv", "ScenarioData", "sampling_key.csv")
 
         disabled_result = joinpath(root, "disabled")
         disabled_config = merge(config, Dict("use_scenario_generation" => false))
@@ -1674,6 +1695,33 @@ function test_emission_constraints_match_python_formulation()
         emp[:genOperational]["A", "gas", winter_scenario_2],
     ) ≈ -gas_coefficient
     @test JuMP.normalized_rhs(emission_cap_1) ≈ 1000.0
+end
+
+function test_objective_matches_component_sum()
+    sets = OpenEMPIRE.EmpireSets(
+        Generator = ["gas"],
+        Storage = ["Battery"],
+        DependentStorage = ["Battery"],
+        Node = ["A", "B"],
+        GeneratorsOfNode = [("A", "gas")],
+        StoragesOfNode = [("A", "Battery")],
+        DirectionalLink = [("A", "B")],
+    )
+    periods = OpenEMPIRE.create_timestruct(1, 5, 1, 2, 0, 0, 1)
+    discounter = Discounter(0.05, 1, periods)
+    params = OpenEMPIRE.EmpireParams()
+
+    emp = JuMP.Model()
+    OpenEMPIRE.create_variables(emp, sets, periods)
+    objective = OpenEMPIRE.create_objective(emp, sets, params, periods, discounter)
+
+    components = OpenEMPIRE.objective_component_expressions(emp, sets, params, periods, discounter)
+
+    # Regression guard: the objective must be exactly the sum of the reported
+    # components, so a future edit can't add a cost term to one without the
+    # other and silently reintroduce the duplication this refactor removed.
+    @test JuMP.isequal_canonical(objective, sum(values(components)))
+    @test JuMP.isequal_canonical(JuMP.objective_function(emp), sum(values(components)))
 end
 
 function test_native_dual_weight_normalization()

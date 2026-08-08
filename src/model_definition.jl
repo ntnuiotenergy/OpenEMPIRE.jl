@@ -182,63 +182,14 @@ function create_objective(
     par,
     periods::TimeStructure,
     discounter::Discounter;
-    natural_gas::Bool = false,
     progress = nothing,
 )
     @info "Creating objective function"
     _report_progress(progress, "Creating objective function")
-    N = nodes(sets)
-    SP = strat_periods(periods)
 
-    genInvCap = emp[:genInvCap]
-    transInvCap = emp[:transmissionInvCap]
-    storInvCapPow = emp[:storPWInvCap]
-    storInvCapEn = emp[:storENInvCap]
+    components = objective_component_expressions(emp, sets, par, periods, discounter)
 
-    shed = emp[:loadShed]
-    genOp = emp[:genOperational]
-    gas_costs = natural_gas ?
-                natural_gas_objective_expressions(emp, sets, par, periods, discounter) :
-                (
-        terminal_import = JuMP.AffExpr(0.0),
-        transport_shedding = JuMP.AffExpr(0.0),
-    )
-
-    # See the note in `objective_component_expressions`: `sum` over a generator
-    # folds left, copying the whole partial expression each step, so summing over
-    # every operational period is O(n^2) in time and allocation.
-    investment = JuMP.AffExpr(0.0)
-    for sp in SP
-        weight = objective_weight(sp, discounter)
-        for n in N, g in generators(sets, n)
-            JuMP.add_to_expression!(investment, weight * gen_invest_cost(par, g, sp), genInvCap[n, g, sp])
-        end
-        for (m, n) in bidir_arcs(sets)
-            JuMP.add_to_expression!(investment, weight * trans_invest_cost(par, m, n, sp), transInvCap[m, n, sp])
-        end
-        for n in N, s in storages(sets, n)
-            JuMP.add_to_expression!(investment, weight * stor_pw_invest_cost(par, s, sp), storInvCapPow[n, s, sp])
-            JuMP.add_to_expression!(investment, weight * stor_en_invest_cost(par, s, sp), storInvCapEn[n, s, sp])
-        end
-        JuMP.add_to_expression!(investment, weight, offshore_conv_investment_expr(emp, sets, par, sp))
-    end
-    operation = JuMP.AffExpr(0.0)
-    for t in periods
-        weight = objective_weight(t, discounter; type = "avg_year")
-        for n in N
-            JuMP.add_to_expression!(operation, weight * lost_load_cost(par, n, t), shed[n, t])
-            for g in generators(sets, n)
-                JuMP.add_to_expression!(operation, weight * gen_marginal_cost(par, g, t), genOp[n, g, t])
-            end
-        end
-    end
-
-    return @objective(
-        emp,
-        Min,
-        investment + operation +
-        gas_costs.terminal_import + gas_costs.transport_shedding
-    )
+    return @objective(emp, Min, sum(values(components)))
 end
 
 # Create all constraints in the model
