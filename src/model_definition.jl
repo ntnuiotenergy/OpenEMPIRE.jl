@@ -82,6 +82,7 @@ function create_variables(
     sets,
     periods::TimeStruct.TimeStructure;
     natural_gas::Bool = false,
+    gas_transport_demand::Bool = false,
     progress = nothing,
 )
 
@@ -172,7 +173,9 @@ function create_variables(
     for n in N, t in T
         unsafe_insertvar!(loadShed, n, t)
     end
-    natural_gas && create_natural_gas_variables!(emp, sets, periods)
+    natural_gas && create_natural_gas_variables!(
+        emp, sets, periods; transport_demand = gas_transport_demand,
+    )
     return
 end
 

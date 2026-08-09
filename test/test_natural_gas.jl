@@ -191,6 +191,7 @@ function _natural_gas_solved_fixture(
         sets,
         periods;
         natural_gas = natural_gas_gate,
+        gas_transport_demand = natural_gas_gate,
     )
     OpenEMPIRE.create_constraints(
         model,
@@ -638,13 +639,16 @@ function test_natural_gas_multi_period_scenario_weighting()
     )
 
     model = JuMP.Model()
-    OpenEMPIRE.create_variables(model, sets, periods; natural_gas = true)
+    OpenEMPIRE.create_variables(
+        model, sets, periods; natural_gas = true, gas_transport_demand = true,
+    )
     OpenEMPIRE.create_constraints(
         model,
         sets,
         params,
         periods;
         natural_gas = true,
+        gas_transport_demand = true,
     )
     discounter = OpenEMPIRE.Discounter(0.05, 1, periods)
     OpenEMPIRE.create_objective(model, sets, params, periods, discounter)

@@ -135,7 +135,9 @@ function solve_julia_parity_fixture(
 
     model = JuMP.Model(HiGHS.Optimizer)
     JuMP.set_silent(model)
-    OpenEMPIRE.create_variables(model, sets, periods; natural_gas = true)
+    OpenEMPIRE.create_variables(
+        model, sets, periods; natural_gas = true, gas_transport_demand = true,
+    )
     OpenEMPIRE.create_constraints(
         model,
         sets,

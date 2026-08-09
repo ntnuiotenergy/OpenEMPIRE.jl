@@ -82,7 +82,9 @@ end
 
 Declare and sparsely index the deterministic natural-gas operational variables.
 """
-function create_natural_gas_variables!(emp::JuMP.Model, sets, periods)
+function create_natural_gas_variables!(
+    emp::JuMP.Model, sets, periods; transport_demand::Bool = false,
+)
     has_natural_gas(sets) ||
         throw(ArgumentError("natural_gas=true requires non-empty natural-gas sets"))
 
@@ -143,9 +145,15 @@ function create_natural_gas_variables!(emp::JuMP.Model, sets, periods)
         unsafe_insertvar!(ngStorageCharge, node, operational_period)
         unsafe_insertvar!(ngStorageDischarge, node, operational_period)
     end
-    for node in onshore_nodes, operational_period in periods
-        unsafe_insertvar!(transportNaturalGasDemandMet, node, operational_period)
-        unsafe_insertvar!(transportNaturalGasDemandShed, node, operational_period)
+    # Only populate the transport variables when transport demand is modelled. Left
+    # populated with the demand constraint off, they are free and unconstrained: at
+    # full scale that is ~1.77 million degenerate columns, which stalled the barrier
+    # (Solstorm 6511 terminated sub-optimal with a 2.3% duality gap).
+    if transport_demand
+        for node in onshore_nodes, operational_period in periods
+            unsafe_insertvar!(transportNaturalGasDemandMet, node, operational_period)
+            unsafe_insertvar!(transportNaturalGasDemandShed, node, operational_period)
+        end
     end
     return nothing
 end
