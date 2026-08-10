@@ -33,7 +33,10 @@ function _parse_args(args)
         "fixed-investment-dir" => "",
         "gurobi-method" => "",
         "gurobi-crossover" => "",
-        "plots" => "true",
+        # Off by default: solving is the job, and the dashboard is a separate
+        # question that costs minutes on a European run. Opt in with --plots, or
+        # build it afterwards with scripts/plot_results.jl.
+        "plots" => "false",
         "plotly-js" => "",
     )
 
@@ -42,6 +45,8 @@ function _parse_args(args)
             options["optimize"] = "false"
         elseif arg == "--generate-only"
             options["generate-only"] = "true"
+        elseif arg == "--plots"
+            options["plots"] = "true"
         elseif arg == "--no-plots"
             options["plots"] = "false"
         elseif arg == "--fixed-sample"

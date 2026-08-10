@@ -351,12 +351,13 @@ The CSVs come in two families, and the difference matters:
   per JuMP variable, unweighted. Summing them over exported hours does *not* give
   annual generation.
 
-The runner writes the dashboard automatically; `--no-plots` skips it. To
-regenerate for an existing run:
+Solving does not build the dashboard. Build it from a finished run:
 
 ```bash
 julia --project=. scripts/plot_results.jl results/julia_runs/<run> data/<dataset>
 ```
+
+or pass `--plots` to the runner to have it built straight after the solve.
 
 The dataset argument is optional and adds the input plots and transmission maps,
 which need `Sets/Coords.csv`. Plots are built only for the CSVs present, so
