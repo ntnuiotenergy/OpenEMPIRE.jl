@@ -4,6 +4,9 @@
 #$ -V
 #$ -o logs/plot_results_$JOB_ID.out
 #$ -e logs/plot_results_$JOB_ID.err
+# Julia writes @info to stderr, so progress lands in the .err file while the .out
+# shows only the banner and looks stalled. Merge the streams into the .out.
+#$ -j y
 #$ -l hostname="compute-6-24|compute-6-25|compute-6-26|compute-6-27|compute-6-28|compute-6-29|compute-6-30|compute-6-31|compute-6-32|compute-6-33|compute-6-34|compute-6-35|compute-6-36|compute-6-37|compute-6-38|compute-6-39|compute-6-40|compute-6-41|compute-6-42|compute-6-43|compute-6-44|compute-6-45|compute-6-46|compute-6-47|compute-6-48|compute-6-49"
 
 # Build the result dashboard for a finished run, on a compute node.
