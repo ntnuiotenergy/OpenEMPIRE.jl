@@ -1,0 +1,11 @@
+Technology,Generator
+HeatWaste,WasteToEnergyCHP
+HeatWaste,WasteToEnergyHOP
+HeatGas,DistrictHeatGasBoiler
+HeatBio,BioWoodChipCHP
+HeatBio,BioWoodChipHOP
+HeatGas,IndividualGasBoiler
+HeatOil,IndividualOilBoiler
+HeatGeo,DistrictHeatGeo
+Industrial,NaturalGasIndustrialBurner
+Industrial,HydrogenIndustrialBurner

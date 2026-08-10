@@ -116,39 +116,14 @@ end
 function create_objective(emp::JuMP.Model, sets, par, periods::TimeStructure, discounter::Discounter; progress = nothing)
     @info "Creating objective function"
     _report_progress(progress, "Creating objective function")
-    N = nodes(sets)
-    SP = strat_periods(periods)
 
-    genInvCap = emp[:genInvCap]
-    transInvCap = emp[:transmissionInvCap]
-    storInvCapPow = emp[:storPWInvCap]
-    storInvCapEn = emp[:storENInvCap]
+    components = objective_component_expressions(emp, sets, par, periods, discounter)
 
-    shed = emp[:loadShed]
-    genOp = emp[:genOperational]
-
-    return @objective(
-        emp,
-        Min,
-        sum(
-            objective_weight(sp, discounter) * (
-                    sum(gen_invest_cost(par, g, sp) * genInvCap[n, g, sp] for n in N, g in generators(sets, n); init = 0) +
-                    sum(trans_invest_cost(par, m, n, sp) * transInvCap[m, n, sp] for (m, n) in bidir_arcs(sets); init = 0) +
-                    sum(stor_pw_invest_cost(par, s, sp) * storInvCapPow[n, s, sp] for n in N, s in storages(sets, n); init = 0) +
-                    sum(stor_en_invest_cost(par, s, sp) * storInvCapEn[n, s, sp] for n in N, s in storages(sets, n); init = 0)
-                ) for sp in SP
-        ) + sum(
-            objective_weight(t, discounter; type = "avg_year") * (
-                    sum(lost_load_cost(par, n, t) * shed[n, t] for n in N; init = 0) +
-                    sum(gen_marginal_cost(par, g, t) * genOp[n, g, t] for n in N for g in generators(sets, n); init = 0)
-                )
-            for t in periods
-        )
-    )
+    return @objective(emp, Min, sum(values(components)))
 end
 
 # Create all constraints in the model
-function create_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
+function create_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; north_sea::Bool = false, progress = nothing)
     @info "Creating constraints"
     _report_progress(progress, "Creating constraints")
 
@@ -174,7 +149,7 @@ function create_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; 
 
     create_generator_constraints(emp, sets, par, periods; progress)
     create_storage_constraints(emp, sets, par, periods; progress)
-    create_transmission_constraints(emp, sets, par, periods; progress)
+    create_transmission_constraints(emp, sets, par, periods; north_sea, progress)
     create_emission_constraints(emp, sets, par, periods; progress)
     return nothing
 
@@ -375,7 +350,17 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
 
 end
 
-function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
+function _canonical_arc(m, n)
+    return is_bidir(m, n) ? (m, n) : (n, m)
+end
+
+function _offshore_endpoint(sets, m, n)
+    is_offshore(sets, m) && return m
+    is_offshore(sets, n) && return n
+    return nothing
+end
+
+function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; north_sea::Bool = false, progress = nothing)
     @info "Creating transmission constraints"
     _report_progress(progress, "Creating transmission constraints")
     N = nodes(sets)
@@ -409,12 +394,46 @@ function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::Ti
     )
 
     # Constraints on maximum installed capacity for each transmission line
-    return @constraint(
+    @constraint(
         emp,
         trans_installed_cap[(m, n) in bidir_arcs(sets), sp in SP; !isnothing(trans_max_inst_cap(par, m, n, sp))],
         transCap[m, n, sp] <= trans_max_inst_cap(par, m, n, sp)
     )
 
+    if north_sea
+        @info " - offshore wind-farm transmission capacity constraints"
+        _report_progress(progress, "Creating offshore wind-farm transmission capacity constraints")
+        genCap = emp[:genInstalledCap]
+        # The cap's right-hand side is a sum over the offshore endpoint's generators, so
+        # an offshore node with none of its own gives an empty sum and pins every adjacent
+        # corridor to zero capacity. Python behaves identically, so this is not corrected
+        # here -- but it is silent, and it disconnects the node, so say so. It happens when
+        # OffshoreNode is derived as "all nodes minus onshore nodes" and picks up energy
+        # hubs or platforms, which the Python internal model caps through a separate
+        # converter formulation instead.
+        for node in offshore_nodes(sets)
+            isempty(generators(sets, node)) && @warn(
+                "Offshore node has no generators, so wind_farm_transmission_cap will " *
+                "force every adjacent corridor to zero transmission capacity. Remove it " *
+                "from Sets/OffshoreNode.csv unless that is intended.",
+                node,
+            )
+        end
+        # Python builds this over ordered node pairs, producing duplicate rows for the
+        # two directions of an offshore-adjacent corridor. Keep the same row structure
+        # while pointing both directions at Julia's canonical corridor capacity.
+        return @constraint(
+            emp,
+            wind_farm_transmission_cap[
+                (m, n) in arcs(sets), sp in SP;
+                !isnothing(_offshore_endpoint(sets, m, n))
+            ],
+            transCap[_canonical_arc(m, n)..., sp] <=
+                sum(genCap[_offshore_endpoint(sets, m, n), g, sp] for g in generators(sets, _offshore_endpoint(sets, m, n)); init = 0)
+        )
+    end
+
+    return nothing
 end
 
 

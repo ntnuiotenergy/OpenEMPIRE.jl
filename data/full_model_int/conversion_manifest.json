@@ -1,0 +1,641 @@
+{
+  "schema_version": 1,
+  "dataset": "full_model_int",
+  "source_dataset": "full_model_int",
+  "periods": 7,
+  "converter": "scripts/convert_internalempire_xlsx.py",
+  "terminal_cost_duplicate_keys_by_table": {
+    "TerminalCost": 35,
+    "TerminalCost_stochastic": 35
+  },
+  "terminal_cost_duplicate_keys_total": 70,
+  "terminal_cost_conflicting_keys": 8,
+  "reserve_duplicate_keys": 1,
+  "reserve_conflicting_keys": 1,
+  "source_workbooks": [
+    {
+      "path": "CO2.xlsx",
+      "bytes": 24077,
+      "sha256": "f287371bc3206840256e6aa98b0a3cffa8b0eba6d27e5779b7d910b0dc49bf1d"
+    },
+    {
+      "path": "General.xlsx",
+      "bytes": 4704544,
+      "sha256": "6a8a8f20e2d03501d8a1e190bafb9352f040c9596999b491de398c5e88fd0129"
+    },
+    {
+      "path": "Generator.xlsx",
+      "bytes": 2058391,
+      "sha256": "c4921f2887f1bbeffd8077ae6a15a6ffd88758cc790601d3b8d8ac9d0df3e332"
+    },
+    {
+      "path": "HeatModule/HeatModuleConverter.xlsx",
+      "bytes": 73339,
+      "sha256": "9a269145893b7647a9e5661290c5a4d5d566716d9243b0fdcce9788a0df4f93f"
+    },
+    {
+      "path": "HeatModule/HeatModuleGenerator.xlsx",
+      "bytes": 33278,
+      "sha256": "dab8a335fad90f878e3ce5772eb7a8763a77564b0b172d7d09c2c899c608669b"
+    },
+    {
+      "path": "HeatModule/HeatModuleNeighbourhood.xlsx",
+      "bytes": 1466776,
+      "sha256": "a2a8d19d68193c7c7fd47439e730fe9bdd76776af60dc1949a75cd21a7a5e6de"
+    },
+    {
+      "path": "HeatModule/HeatModuleNode.xlsx",
+      "bytes": 19305,
+      "sha256": "c19857653f535cda45b982f1aa87095ab3e89f25164212651214ad99f79e390f"
+    },
+    {
+      "path": "HeatModule/HeatModuleSets.xlsx",
+      "bytes": 22795,
+      "sha256": "81c9664ae54442a1c5bfe2cdb9786c9a9c6a7eccad417303a3259a83e90d0e36"
+    },
+    {
+      "path": "HeatModule/HeatModuleStochastic.xlsx",
+      "bytes": 1842663,
+      "sha256": "c1a0fedc3dc6e443d0d11e0f467eb4ff97f0749d093ff1dda1859fdf05d6c0fa"
+    },
+    {
+      "path": "HeatModule/HeatModuleStorage.xlsx",
+      "bytes": 25950,
+      "sha256": "8da91f54dc397c65ac38067f9d9e9c42250535ec541d688b4f980f83cd78de55"
+    },
+    {
+      "path": "Hydrogen.xlsx",
+      "bytes": 111929,
+      "sha256": "a50685f249a61c4fbd87b51307de31cca098bbe3beb5f04a1a1f79d9459d01ab"
+    },
+    {
+      "path": "Industry.xlsx",
+      "bytes": 101646,
+      "sha256": "ddbeebdd69f00b144af279f244a19bd6735730d191a85586bcfa24380cce6115"
+    },
+    {
+      "path": "NaturalGas.xlsx",
+      "bytes": 69461,
+      "sha256": "79035e5142fdce3116593f9773fbc7ac22e42668745d0d7aa33f65bdf1c822c5"
+    },
+    {
+      "path": "Node.xlsx",
+      "bytes": 862333,
+      "sha256": "7557e1b3a1b114ee8c903685e6b6f345de08911f68a431cb0bd1e05128ceaf13"
+    },
+    {
+      "path": "Sets.xlsx",
+      "bytes": 64796,
+      "sha256": "21ed17c9e2290bd479b38b86cc891f471cd06634b8676bb1ef1fc55d07dccd67"
+    },
+    {
+      "path": "Storage.xlsx",
+      "bytes": 46810,
+      "sha256": "cd8d5126018bef05afe0dcc2ae358964c3b0494d89d6585a03e5f6dcf16d5c1f"
+    },
+    {
+      "path": "Transmission.xlsx",
+      "bytes": 399063,
+      "sha256": "a098dff60fca1b54a2934bc857e1544314b8830cd75a0fdd3c8abe3126bb8eab"
+    },
+    {
+      "path": "Transport.xlsx",
+      "bytes": 96359329,
+      "sha256": "ef22d212d220b4b1a9202d5703962036e2732b7aab85b4f7ed962168459a9b46"
+    }
+  ],
+  "files": [
+    {
+      "path": "General/CO2cap.csv",
+      "bytes": 143,
+      "rows": 7,
+      "sha256": "94a8283e3a8396052cdb82bbb30f7654e21a0fad7fba4bca9ca66cfb0ab4eba7"
+    },
+    {
+      "path": "General/CO2price.csv",
+      "bytes": 176,
+      "rows": 7,
+      "sha256": "fe11d4a5d6bdd0f1fe721d0527b05d98b0fe3d6a371347cb8d99f6d8d1b1ce69"
+    },
+    {
+      "path": "General/seasScale.csv",
+      "bytes": 137,
+      "rows": 6,
+      "sha256": "37997709e4d15d8a5f41279944e51c88e555c3df4507c4b11364e3d4a3f8dcd0"
+    },
+    {
+      "path": "Generator/CCSCostTSVariable.csv",
+      "bytes": 175,
+      "rows": 7,
+      "sha256": "46e759448937b7cbea4fee512ba1fd4423f577b84739de1a2c89998f4ddf779f"
+    },
+    {
+      "path": "Generator/genCO2TypeFactor.csv",
+      "bytes": 627,
+      "rows": 33,
+      "sha256": "7aa0e4dc78a925f31d996d72c034c6d6663a32e8809ae964e0f64dba016494c4"
+    },
+    {
+      "path": "Generator/genCapAvailTypeRaw.csv",
+      "bytes": 571,
+      "rows": 33,
+      "sha256": "c74d0e607c49b8ca68d44f6fc9770ed112ca75106a057bf2f7e00cf07aad7d5d"
+    },
+    {
+      "path": "Generator/genCapitalCost.csv",
+      "bytes": 4316,
+      "rows": 196,
+      "sha256": "8df9f455415f4b2f651c29cfee1acca66e031bc91fb73e87b250305d840be3ba"
+    },
+    {
+      "path": "Generator/genEfficiency.csv",
+      "bytes": 4657,
+      "rows": 231,
+      "sha256": "95ba649647959223cb349e49d919028a53f72f082def948bf218198c541ba46f"
+    },
+    {
+      "path": "Generator/genFixedOMCost.csv",
+      "bytes": 3892,
+      "rows": 196,
+      "sha256": "062bef510142e1116de1fb65a487fb19e26bb4c7e4d7a168e5d04614a27df5a8"
+    },
+    {
+      "path": "Generator/genFuelCost.csv",
+      "bytes": 5672,
+      "rows": 231,
+      "sha256": "dfae511e3f58201d77cc230ed327e6cfacacd71bbd6cbbb479c92ee74e77b4b2"
+    },
+    {
+      "path": "Generator/genInitCap.csv",
+      "bytes": 7771,
+      "rows": 294,
+      "sha256": "009336efb80f59664f51c2c1f100daac9f36cd205271de243b505f9330bd14a8"
+    },
+    {
+      "path": "Generator/genLifetime.csv",
+      "bytes": 524,
+      "rows": 33,
+      "sha256": "dfb92c434e59e8305d888f515657ab743b822e3dd043321984cb91fd23c63069"
+    },
+    {
+      "path": "Generator/genMaxBuiltCap.csv",
+      "bytes": 131898,
+      "rows": 5271,
+      "sha256": "5968422b03d432f982ffda3237cf2d12e355d6f98fdebed9b5dffc21c18c89c8"
+    },
+    {
+      "path": "Generator/genMaxInstalledCapRaw.csv",
+      "bytes": 16279,
+      "rows": 625,
+      "sha256": "381cb5be5ef457a1413a40465aefedcb604262929f8aa5ef5e3d56966e2244bb"
+    },
+    {
+      "path": "Generator/genRampUpCap.csv",
+      "bytes": 351,
+      "rows": 21,
+      "sha256": "aa2688a45a24e2ec615f74642ba99590d3fab49a31e73c9ae951da17e694fe27"
+    },
+    {
+      "path": "Generator/genRefInitCap.csv",
+      "bytes": 7044,
+      "rows": 256,
+      "sha256": "532e4cb2d8364d9cfee3cc4568da1485db8812e113b4b318341a408842f4ba09"
+    },
+    {
+      "path": "Generator/genScaleInitCap.csv",
+      "bytes": 725,
+      "rows": 33,
+      "sha256": "9e9b585cdc2de9f7d9fe2d0c3b284c53645b20db1e462878ca581c32313ba776"
+    },
+    {
+      "path": "Generator/genVariableOMCost.csv",
+      "bytes": 645,
+      "rows": 33,
+      "sha256": "da3de3d6f051beb76352a135824afdcec076d86919d7187c95e053087079aa0c"
+    },
+    {
+      "path": "NaturalGas/PipelineCapacity.csv",
+      "bytes": 3019,
+      "rows": 94,
+      "sha256": "8cf04268c9f165853be8ed84d5beb5adcca7ecf32d43c4d7253e51b24107ed31"
+    },
+    {
+      "path": "NaturalGas/PipelineElectricityUse.csv",
+      "bytes": 42,
+      "rows": 1,
+      "sha256": "eee78256d02f784091d61aac4027785ac4d553310eec1a7d586f722b7cae3326"
+    },
+    {
+      "path": "NaturalGas/Reserves.csv",
+      "bytes": 378,
+      "rows": 15,
+      "sha256": "66186935907a6dd73be576b3aaca6b80ee2643129740b0102340a38a6f285a17"
+    },
+    {
+      "path": "NaturalGas/StorageCapacity.csv",
+      "bytes": 459,
+      "rows": 17,
+      "sha256": "675dedd7faa343899bbf51d4e4f475578a29ddb70b15756461a9b87a9db69e84"
+    },
+    {
+      "path": "NaturalGas/TerminalCapacity.csv",
+      "bytes": 11437,
+      "rows": 308,
+      "sha256": "c641c37824c39ed5b5f73127b0b63fa4207d7d921028887d839ccea7c407212f"
+    },
+    {
+      "path": "NaturalGas/TerminalCost.csv",
+      "bytes": 11249,
+      "rows": 308,
+      "sha256": "d756f75ee3d02de5755f38e241bcac6c9c33f2825d04c2e11ec0b3378d6a2a93"
+    },
+    {
+      "path": "NaturalGas/TerminalCost_stochastic.csv",
+      "bytes": 11264,
+      "rows": 308,
+      "sha256": "c7432d9ff8c57c5b0518fddd9b05087619398711af7bdb45988f85011a3c7015"
+    },
+    {
+      "path": "NaturalGas/reserves_duplicate_audit.csv",
+      "bytes": 152,
+      "rows": 1,
+      "sha256": "2d4745a9f506bd23bc0e91b716ff270a2479581f3614f62f864da68e3201cd9b"
+    },
+    {
+      "path": "NaturalGas/terminal_cost_duplicate_audit.csv",
+      "bytes": 4849,
+      "rows": 70,
+      "sha256": "c77162cd74e6741f207d28c1f4849c54b150f5e716b57126488a6f33667e8e79"
+    },
+    {
+      "path": "Node/maxHydroNode.csv",
+      "bytes": 963,
+      "rows": 50,
+      "sha256": "724ed720f5686770393a51e2935a2c0ef9c87d77b94ce1a7598e409048384440"
+    },
+    {
+      "path": "Node/nodeLostLoadCost.csv",
+      "bytes": 7709,
+      "rows": 364,
+      "sha256": "2010fd9af0147bdb1bcf5feae700eac8beaf86f3b7cc5f406d9e2749fea0faed"
+    },
+    {
+      "path": "Node/sloadAnnualDemand.csv",
+      "bytes": 6910,
+      "rows": 245,
+      "sha256": "680500d42e2b72174899ca56aafe3719c05bb7f9d8ff19d5cad9d4a6f1d9b52d"
+    },
+    {
+      "path": "README.md",
+      "bytes": 708,
+      "rows": null,
+      "sha256": "d9cfb3b522a02da2e0782e533ca212e7a6a9b979e02bbe3f6a99aec38ae42daa"
+    },
+    {
+      "path": "ScenarioData/electricload.csv",
+      "bytes": 11974192,
+      "rows": 43824,
+      "sha256": "7ee0c9c524c08cef1e6bfe52a34cd77b16c4668d1e1c3f637f170ea7f10bf527"
+    },
+    {
+      "path": "ScenarioData/hydroror.csv",
+      "bytes": 27886467,
+      "rows": 43824,
+      "sha256": "67bbd04ff76c7eb9518c6109fa4f5618a70b818a7189f413432c65d347a939db"
+    },
+    {
+      "path": "ScenarioData/hydroseasonal.csv",
+      "bytes": 8660314,
+      "rows": 43824,
+      "sha256": "0e85b83c94d7535af73a56732786dd8317f36d1a9179999dad39ed0b9d4ffeab"
+    },
+    {
+      "path": "ScenarioData/sampling_key.csv",
+      "bytes": 3389,
+      "rows": 175,
+      "sha256": "0ca40037f102fc5795d12831cdd64068c4c0f5aed499b34e4c3dae0e798336b2"
+    },
+    {
+      "path": "ScenarioData/solar.csv",
+      "bytes": 8201485,
+      "rows": 43824,
+      "sha256": "b0cee4cb66767bc2d7d40293d3629c524d8d6fa5b20422c505c7dfcb42e00ac4"
+    },
+    {
+      "path": "ScenarioData/windoffshore.csv",
+      "bytes": 10459082,
+      "rows": 43824,
+      "sha256": "fc358be71cb98b9ccea8f7227cd02eff6477562a0fa022fc7dcb359f6eabaca3"
+    },
+    {
+      "path": "ScenarioData/windonshore.csv",
+      "bytes": 12843920,
+      "rows": 43824,
+      "sha256": "2734e5c68c7a1b516e5d46ee5755e4423da7729b76d9e54f761eae25438a0b89"
+    },
+    {
+      "path": "Sets/DependentStorage.csv",
+      "bytes": 29,
+      "rows": 1,
+      "sha256": "7fe8af05b8a5cc8eee762c6963a9d653a97d97d84d456dd239e07c23b830534c"
+    },
+    {
+      "path": "Sets/DirectionalLink.csv",
+      "bytes": 8972,
+      "rows": 436,
+      "sha256": "0a0288b7dbac989301627fe60222106ee17c516f3150d0a5ff47e96e23307438"
+    },
+    {
+      "path": "Sets/Generator.csv",
+      "bytes": 397,
+      "rows": 33,
+      "sha256": "6c05567f5134876f98fb88f6f43416c480b14d616c35c2651e8d6e4ffea29dbb"
+    },
+    {
+      "path": "Sets/GeneratorsOfNode.csv",
+      "bytes": 17463,
+      "rows": 863,
+      "sha256": "1b13d1561043f5419147c7d919a94e9d60ed8703e34082379800b026768a8df3"
+    },
+    {
+      "path": "Sets/GeneratorsOfTechnology.csv",
+      "bytes": 1011,
+      "rows": 53,
+      "sha256": "edb412e5b53dcc823e9f9146f6799b57dab9b2af8d3eab10cab41efae31c6a71"
+    },
+    {
+      "path": "Sets/HydroGenerator.csv",
+      "bytes": 52,
+      "rows": 2,
+      "sha256": "063aa79947e31e7fd6d4eb67291ff7f97d78f77b84df286f00bda590311c06c0"
+    },
+    {
+      "path": "Sets/NaturalGasDirectionalLines.csv",
+      "bytes": 1548,
+      "rows": 94,
+      "sha256": "e94f9b2ae1deb5f18289e1e7c0d25912f0c2f698ef49fe9b32ab1e4f6c5c5625"
+    },
+    {
+      "path": "Sets/NaturalGasNodes.csv",
+      "bytes": 302,
+      "rows": 37,
+      "sha256": "d2ba23ca264649f50d84ce75fc971bfa221597588d565be3f699d1366dcb9f9a"
+    },
+    {
+      "path": "Sets/NaturalGasTerminals.csv",
+      "bytes": 75,
+      "rows": 4,
+      "sha256": "d5480e9e0b7331fb22906f8a1c0c019e00c561e36a1c7ac3d3144c5311e89475"
+    },
+    {
+      "path": "Sets/NaturalGasTerminalsOfNode.csv",
+      "bytes": 955,
+      "rows": 44,
+      "sha256": "3c3844bd05792652ed74c43f3644e80af54cd4ec315579c436de96a7435f6cbe"
+    },
+    {
+      "path": "Sets/Node.csv",
+      "bytes": 478,
+      "rows": 52,
+      "sha256": "ecebb834a93b20fa89c8de5650ee6ea64a768571d81d8dccad53ca27a05d7065"
+    },
+    {
+      "path": "Sets/OffshoreNode.csv",
+      "bytes": 218,
+      "rows": 17,
+      "sha256": "ee5718532a3f44364e287e4e3b2bdf543c719dc7a1cf68f11072261649f9f847"
+    },
+    {
+      "path": "Sets/OnshoreNode.csv",
+      "bytes": 280,
+      "rows": 35,
+      "sha256": "3007cdb8485c1c6dbfdde86b5e602544180d8331c323af10b5e19e64268b8d4f"
+    },
+    {
+      "path": "Sets/Period.csv",
+      "bytes": 22,
+      "rows": 7,
+      "sha256": "b0c3823b49f62c1c2817db955d9e9618a1c3ae2a477c0e1a3bdf3b06ebc9092c"
+    },
+    {
+      "path": "Sets/RegHydroGenerator.csv",
+      "bytes": 43,
+      "rows": 1,
+      "sha256": "33f6c0710f308d3736cf39749973a78e7db4166dbccdb5341c16ab3f7cd750b6"
+    },
+    {
+      "path": "Sets/Storage.csv",
+      "bytes": 37,
+      "rows": 2,
+      "sha256": "51c3a779348392e0cd8d7e9ba822bf3e00f9a2229d868ba042b2f5f716122dc6"
+    },
+    {
+      "path": "Sets/StoragesOfNode.csv",
+      "bytes": 1461,
+      "rows": 66,
+      "sha256": "43320be5ddb2e2dfad0816c35ac5d46f01ac78fed2581961a057a6ad01a7b880"
+    },
+    {
+      "path": "Sets/Technology.csv",
+      "bytes": 184,
+      "rows": 21,
+      "sha256": "b6d6b0c611ae962a1f502996232dbba169b04820038986454c99364d712c7228"
+    },
+    {
+      "path": "Sets/ThermalGenerators.csv",
+      "bytes": 246,
+      "rows": 21,
+      "sha256": "9712c45aa52958a1fe45d0d57bf67895ae17a8b870d14cdd62b516fdb15ae847"
+    },
+    {
+      "path": "Sets/TransmissionType.csv",
+      "bytes": 61,
+      "rows": 3,
+      "sha256": "c741dd714feffae42f035d62bd65a1f4649cf7cbd37b63eca798842c5afa668c"
+    },
+    {
+      "path": "Sets/TransmissionTypeOfDirectionalLink.csv",
+      "bytes": 14771,
+      "rows": 436,
+      "sha256": "5e23e6d3e9f4e1f449949216ecd39eb0606034e639a988163c290ad93b3c5a66"
+    },
+    {
+      "path": "Storage/storENCapitalCost.csv",
+      "bytes": 453,
+      "rows": 14,
+      "sha256": "07ae859a18d979fd778f92fead5fbde9a81c00adff7f1f6519f44512ed60bf1c"
+    },
+    {
+      "path": "Storage/storENFixedOMCost.csv",
+      "bytes": 440,
+      "rows": 14,
+      "sha256": "65aafd56f18717943bb993209e679817e390afaca35dbf24bd3a0730ea3ba5db"
+    },
+    {
+      "path": "Storage/storENInitCap.csv",
+      "bytes": 7167,
+      "rows": 203,
+      "sha256": "9932be65b83df4c53abeae259b610053696b87309b821668efc02d804a3b223a"
+    },
+    {
+      "path": "Storage/storENMaxBuiltCap.csv",
+      "bytes": 14553,
+      "rows": 455,
+      "sha256": "82e4abab056e9b8e5205edfc986361e445af4352469c5ce89dc406640a680a7b"
+    },
+    {
+      "path": "Storage/storENMaxInstalledCapRaw.csv",
+      "bytes": 2139,
+      "rows": 64,
+      "sha256": "f342441b26236a1bb118e2983db1b3d76b7bcb52212351d93354ec5b11cbd56a"
+    },
+    {
+      "path": "Storage/storOperationalInit.csv",
+      "bytes": 125,
+      "rows": 2,
+      "sha256": "f5cb294139e71ec5af3a29bd57972e448c87a91578be6bf2ec9611a98b73a182"
+    },
+    {
+      "path": "Storage/storPWCapitalCost.csv",
+      "bytes": 462,
+      "rows": 14,
+      "sha256": "c877749b17989f730f90e6e7bf79fc0105488ef395bf85667edd3441c688b749"
+    },
+    {
+      "path": "Storage/storPWFixedOMCost.csv",
+      "bytes": 436,
+      "rows": 14,
+      "sha256": "7cc0be92050c511db777b48393aaa884478010b6fa63db4d340fa695b8433201"
+    },
+    {
+      "path": "Storage/storPWInitCap.csv",
+      "bytes": 6823,
+      "rows": 203,
+      "sha256": "c5016e7e2009d95030f36db896b505262073cb800a72f42520cfb66d5146965e"
+    },
+    {
+      "path": "Storage/storPWMaxBuiltCap.csv",
+      "bytes": 14877,
+      "rows": 455,
+      "sha256": "8d87266f4e7ceceaebb627019bb09ea4a0068a79334887590970af840be4b911"
+    },
+    {
+      "path": "Storage/storPWMaxInstalledCapRaw.csv",
+      "bytes": 2042,
+      "rows": 64,
+      "sha256": "5bdc8f93291f87b5bdd3f5c5c66e85170b82e6113e56b1642a79a60af8969ba2"
+    },
+    {
+      "path": "Storage/storageBleedEff.csv",
+      "bytes": 61,
+      "rows": 2,
+      "sha256": "d3e1cce72fe4e625488e1f2b28bfbb27188e2de7f3d78d9d1a8a66abdc273223"
+    },
+    {
+      "path": "Storage/storageChargeEff.csv",
+      "bytes": 67,
+      "rows": 2,
+      "sha256": "e3ec795b0a229a428fa4cd8369c16c35c897c1868fd20e22d81170b5a8e0087d"
+    },
+    {
+      "path": "Storage/storageDischargeEff.csv",
+      "bytes": 65,
+      "rows": 2,
+      "sha256": "6f190c97ec955a6e5e115acc95f43685794fb28b75943279efc4dff9379de83e"
+    },
+    {
+      "path": "Storage/storageLifetime.csv",
+      "bytes": 64,
+      "rows": 2,
+      "sha256": "874c24de884e789820a3fecc08a687f5c491ebf8945229934619c74f86e9db05"
+    },
+    {
+      "path": "Storage/storagePowToEnergy.csv",
+      "bytes": 45,
+      "rows": 1,
+      "sha256": "663bd7054961860065a67e04bb454dd9091ab5e18e35aca323fbd99f402e252a"
+    },
+    {
+      "path": "Transmission/lineEfficiency.csv",
+      "bytes": 6648,
+      "rows": 278,
+      "sha256": "6324081cc0d59a97c141129ce79c9e59a8b6f659aacf2007e900e3c8dfd3c075"
+    },
+    {
+      "path": "Transmission/transmissionInitCap.csv",
+      "bytes": 17324,
+      "rows": 706,
+      "sha256": "74e47592d511669eb55157f64c9cd8abbd8a9240b0fe06f2d0316360d7afbaa8"
+    },
+    {
+      "path": "Transmission/transmissionLength.csv",
+      "bytes": 6329,
+      "rows": 218,
+      "sha256": "b03fc7dbfb0aee674545c21c8b9e28cec57f304ada34ddfac5b341b2195fd771"
+    },
+    {
+      "path": "Transmission/transmissionLifetime.csv",
+      "bytes": 4542,
+      "rows": 192,
+      "sha256": "9b4fb052eaf455014503ead57df14475cfc4f63200bd64db28e0347a8488e002"
+    },
+    {
+      "path": "Transmission/transmissionMaxBuiltCap.csv",
+      "bytes": 45041,
+      "rows": 1526,
+      "sha256": "8cc4df6fd72ec78b12ae5b4fe043e413bf78a886698da90ffd5d906432640b59"
+    },
+    {
+      "path": "Transmission/transmissionMaxInstalledCapRaw.csv",
+      "bytes": 46017,
+      "rows": 1519,
+      "sha256": "867f81de30f679e00b651d189aaa5e24d2e48f9af42750a80c3f4b6c97915ef4"
+    },
+    {
+      "path": "Transmission/transmissionTypeCapitalCost.csv",
+      "bytes": 707,
+      "rows": 21,
+      "sha256": "036b237dbcf0c5653e0cb2132c7cce99c8740c8579bd1de94889fad04e3819eb"
+    },
+    {
+      "path": "Transmission/transmissionTypeFixedOMCost.csv",
+      "bytes": 712,
+      "rows": 21,
+      "sha256": "ffff60c7a5c8fe3e6f01bd1ffd993633541ac326304d73dd76d86478fbfddd31"
+    },
+    {
+      "path": "Transport/CurtailCost.csv",
+      "bytes": 29,
+      "rows": 1,
+      "sha256": "1fd315c427def26576547857d641753b06514d70b5639826f1407ab34ffd398e"
+    },
+    {
+      "path": "Transport/NaturalGasDemand.csv",
+      "bytes": 5891,
+      "rows": 245,
+      "sha256": "4263a074b9408a317a9195eff83502ed4bb3b3f3a5a4a3b0891a01c92a7d8208"
+    }
+  ],
+  "owner_confirmed_corrections": {
+    "description": "Corrections confirmed by the dataset owner that intentionally override the workbook value. Until NaturalGas.xlsx is repaired, these make the CSV differ from what InternalEMPIRE currently reads.",
+    "rules": [
+      {
+        "tables": [
+          "TerminalCost",
+          "TerminalCost_stochastic"
+        ],
+        "terminal": "RussianGas",
+        "values_by_period": {
+          "1": 278.0,
+          "2": 800.0,
+          "3": 800.0,
+          "4": 800.0,
+          "5": 800.0,
+          "6": 800.0,
+          "7": 800.0
+        },
+        "reason": "The workbook RussianGas block has 8 periods and its value column was pasted on a 7-row stride, so the 278 drifted one period later per country. Owner-confirmed intent: cheap pre-war gas in period 1, 800 EUR/ton thereafter."
+      }
+    ]
+  }
+}

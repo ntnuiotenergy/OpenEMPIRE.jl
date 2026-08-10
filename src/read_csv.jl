@@ -97,6 +97,11 @@ function _required_csv(dir::AbstractString, component::AbstractString, filename:
     return path
 end
 
+function _optional_csv(dir::AbstractString, component::AbstractString, filename::AbstractString)
+    path = joinpath(dir, component, filename)
+    return isfile(path) ? path : nothing
+end
+
 _csv_rows(path::AbstractString) = CSV.File(path; normalizenames = false)
 _is_blank(x) = ismissing(x) || isempty(strip(string(x)))
 _string_cell(x) = strip(string(x))
@@ -245,6 +250,8 @@ function read_sets_csv(dir::AbstractString)
     @info "Reading CSV sets from $dir"
 
     sets_dir = "Sets"
+    offshore_node_path = _optional_csv(dir, sets_dir, "OffshoreNode.csv")
+
     return OpenEMPIRE.EmpireSets(
         Generator = _read_vector_csv(_required_csv(dir, sets_dir, "Generator.csv")),
         ThermalGenerators = _read_vector_csv(_required_csv(dir, sets_dir, "ThermalGenerators.csv")),
@@ -254,6 +261,7 @@ function read_sets_csv(dir::AbstractString)
         DependentStorage = _read_vector_csv(_required_csv(dir, sets_dir, "DependentStorage.csv")),
         Technology = _read_vector_csv(_required_csv(dir, sets_dir, "Technology.csv")),
         Node = _read_vector_csv(_required_csv(dir, sets_dir, "Node.csv")),
+        OffshoreNode = isnothing(offshore_node_path) ? String[] : _read_vector_csv(offshore_node_path),
         DirectionalLink = _read_tuple2_csv(_required_csv(dir, sets_dir, "DirectionalLink.csv")),
         TransmissionType = _read_vector_csv(_required_csv(dir, sets_dir, "TransmissionType.csv")),
         TransmissionTypeOfDirectionalLink =

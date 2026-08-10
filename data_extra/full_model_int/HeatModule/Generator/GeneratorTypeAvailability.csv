@@ -1,0 +1,13 @@
+Generator,GeneratorTypeAvailability
+WasteToEnergyCHP,0.95
+WasteToEnergyHOP,0.95
+DistrictHeatGasBoiler,0.99
+BioWoodChipCHP,0.94
+BioWoodChipHOP,0.96
+IndividualOilBoiler,1.0
+IndividualGasBoiler,1.0
+DistrictHeatGeo,0.9615384615384616
+NaturalGasIndustrialBurner,1.0
+HydrogenIndustrialBurner,1.0
+DistrictHeatHydrogenBoiler,1.0
+IndividualHydrogenBoiler,1.0
