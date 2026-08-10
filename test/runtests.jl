@@ -63,6 +63,7 @@ end
 @testset "Postprocessing" begin
     test_postprocessing_helpers()
     test_postprocessing_specs()
+    test_postprocessing_dispatch()
     test_postprocessing_dashboard()
 end
 

@@ -199,7 +199,7 @@ function _available_result_plot_specs(output_dir::AbstractString, input_dir::Uni
     # quantities.
 
     load_shed = joinpath(output_dir, "loadShed.csv")
-    if isfile(load_shed)
+    if _raw_dump_is_plottable(load_shed, "Load Shedding (diagnostic)")
         push!(specs, _stacked_bar_spec(
             load_shed,
             "Load Shedding (diagnostic)",
@@ -213,7 +213,7 @@ function _available_result_plot_specs(output_dir::AbstractString, input_dir::Uni
     end
 
     gen_operation = joinpath(output_dir, "genOperational.csv")
-    if isfile(gen_operation)
+    if _raw_dump_is_plottable(gen_operation, "Operational Generation (diagnostic)")
         push!(specs, _stacked_bar_spec(
             gen_operation,
             "Operational Generation (diagnostic)",

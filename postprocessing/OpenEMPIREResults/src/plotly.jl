@@ -68,6 +68,161 @@ function _scattergeo_trace(
     return "{" * join(fields, ", ") * "}"
 end
 
+"""
+Hourly values are rounded before they reach the page. Three decimals is far below
+any meaningful MW resolution, and full `Float64` printing roughly doubles the size
+of a dispatch page for no gain.
+"""
+_dispatch_round(value::Real) = round(Float64(value); digits = 3)
+
+function _dispatch_area_trace(
+        x,
+        y,
+        name::AbstractString,
+        stackgroup::AbstractString,
+        color::AbstractString,
+        visible::Bool,
+    )
+    fields = [
+        "\"x\": $(_js_array(x))",
+        "\"y\": $(_js_array(_dispatch_round.(y)))",
+        "\"name\": $(_js_string(name))",
+        "\"type\": \"scatter\"",
+        "\"mode\": \"lines\"",
+        "\"stackgroup\": $(_js_string(stackgroup))",
+        "\"line\": {\"width\": 0.5, \"color\": $(_js_string(color))}",
+        "\"fillcolor\": $(_js_string(color))",
+        "\"hovertemplate\": $(_js_string("%{y:.1f} MW<extra>$name</extra>"))",
+    ]
+    visible || push!(fields, "\"visible\": false")
+    return "{" * join(fields, ", ") * "}"
+end
+
+function _dispatch_line_trace(
+        x,
+        y,
+        name::AbstractString,
+        color::AbstractString,
+        dash::AbstractString,
+        axis::AbstractString,
+        visible::Bool,
+    )
+    unit = axis == "y2" ? "EUR/MWh" : "MW"
+    fields = [
+        "\"x\": $(_js_array(x))",
+        "\"y\": $(_js_array(_dispatch_round.(y)))",
+        "\"name\": $(_js_string(name))",
+        "\"type\": \"scatter\"",
+        "\"mode\": \"lines\"",
+        "\"line\": {\"width\": 1.6, \"color\": $(_js_string(color)), \"dash\": $(_js_string(dash))}",
+        "\"hovertemplate\": $(_js_string("%{y:.1f} $unit<extra>$name</extra>"))",
+    ]
+    axis == "y" || push!(fields, "\"yaxis\": $(_js_string(axis))")
+    visible || push!(fields, "\"visible\": false")
+    return "{" * join(fields, ", ") * "}"
+end
+
+"""
+    _dispatch_layout(title, base_title, periods, period_trace_indices, trace_count, active_period, season_last_hour)
+
+Two y-axes (power left, price right), a vertical rule at each season boundary,
+and a period dropdown.
+
+`Hour` runs as one index across the concatenated seasons, so the boundaries are
+where the reader would otherwise mistake a discontinuity for a ramp.
+"""
+function _dispatch_layout(
+        title::AbstractString,
+        base_title::AbstractString,
+        periods::AbstractVector{<:AbstractString},
+        period_trace_indices::Dict{String, Vector{Int}},
+        trace_count::Integer,
+        active_period::AbstractString,
+        season_last_hour::Dict{String, Int},
+    )
+    boundaries = sort!(collect(season_last_hour); by = pair -> pair[2])
+    shapes = String[]
+    annotations = String[]
+    for (season, hour) in boundaries
+        push!(
+            shapes,
+            "{\"type\": \"line\", \"xref\": \"x\", \"yref\": \"paper\", " *
+            "\"x0\": $hour, \"x1\": $hour, \"y0\": 0, \"y1\": 1, " *
+            "\"line\": {\"color\": \"#999999\", \"width\": 1, \"dash\": \"dot\"}}",
+        )
+        push!(
+            annotations,
+            "{\"x\": $hour, \"xref\": \"x\", \"yref\": \"paper\", \"y\": 1.02, " *
+            "\"text\": $(_js_string(season)), \"showarrow\": false, " *
+            "\"font\": {\"size\": 10, \"color\": \"#666666\"}, \"xanchor\": \"right\"}",
+        )
+    end
+
+    fields = [
+        "\"title\": $(_js_string(title))",
+        "\"xaxis\": {\"title\": \"Hour\"}",
+        "\"yaxis\": {\"title\": \"Power [MW]\", \"zeroline\": true, \"zerolinecolor\": \"#888888\"}",
+        "\"yaxis2\": {\"title\": \"Price [EUR/MWh]\", \"overlaying\": \"y\", \"side\": \"right\", \"showgrid\": false}",
+        "\"legend\": {\"orientation\": \"h\", \"y\": -0.18}",
+        "\"margin\": {\"l\": 70, \"r\": 70, \"t\": 90, \"b\": 70}",
+        "\"hovermode\": \"x unified\"",
+        "\"shapes\": [" * join(shapes, ", ") * "]",
+        "\"annotations\": [" * join(annotations, ", ") * "]",
+    ]
+    if !isempty(periods)
+        push!(
+            fields,
+            "\"updatemenus\": $(_label_dropdown(periods, period_trace_indices, trace_count, base_title, active_period))",
+        )
+    end
+    return "{" * join(fields, ", ") * "}"
+end
+
+"""
+    _label_dropdown(labels, label_trace_indices, trace_count, base_title, active_label)
+
+String-labelled sibling of [`_period_dropdown`](@ref). Report tables label periods
+`"2020-2025"` rather than with an index, so the integer version cannot be reused.
+"""
+function _label_dropdown(
+        labels::AbstractVector{<:AbstractString},
+        label_trace_indices::Dict{String, Vector{Int}},
+        trace_count::Integer,
+        base_title::AbstractString,
+        active_label::AbstractString,
+    )
+    buttons = String[]
+    for label in labels
+        visible = falses(trace_count)
+        for trace_index in get(label_trace_indices, String(label), Int[])
+            visible[trace_index] = true
+        end
+        push!(
+            buttons,
+            "{" *
+            join([
+                "\"label\": $(_js_string(label))",
+                "\"method\": \"update\"",
+                "\"args\": [{\"visible\": $(_js_array(visible))}, {\"title\": $(_js_string("$base_title ($label)"))}]",
+            ], ", ") *
+            "}",
+        )
+    end
+    # As in `_period_dropdown`: `findfirst` returns `nothing` when the active
+    # label is not among `labels`, and `nothing - 1` would throw.
+    active_index = something(findfirst(==(active_label), labels), length(labels))
+    return "[" * "{" * join([
+        "\"buttons\": [" * join(buttons, ", ") * "]",
+        "\"direction\": \"down\"",
+        "\"showactive\": true",
+        "\"active\": $(active_index - 1)",
+        "\"x\": 0.02",
+        "\"xanchor\": \"left\"",
+        "\"y\": 1.14",
+        "\"yanchor\": \"top\"",
+    ], ", ") * "}" * "]"
+end
+
 function _layout(
         title::AbstractString,
         x_title::AbstractString,
@@ -245,10 +400,39 @@ function _plot_sections(plots, start_index::Integer)
     return join(sections, "\n"), join(scripts, "\n")
 end
 
-function _write_dashboard_html(path::AbstractString, result_plots, input_plots)
+"""
+    _dispatch_index_html(plots)
+
+Render the per-node dispatch pages as a link index rather than embedded plots.
+
+There is one page per node, each carrying every period, so `europe_v51` would
+otherwise inline ~70 MB of traces into `dashboard.html`.
+"""
+function _dispatch_index_html(plots)
+    isempty(plots) && return ""
+    links = String[]
+    for plot in plots
+        label = replace(plot.title, "Hourly Dispatch - " => "")
+        push!(links, "<li><a href=\"$(_html_escape(plot.filename))\">$(_html_escape(label))</a></li>")
+    end
+    note = _note_html(first(plots).note)
+    return """
+    <section>
+      <h2>Hourly Dispatch by Node</h2>
+      $note
+      <ul class="node-index">
+      $(join(links, "\n"))
+      </ul>
+    </section>
+    """
+end
+
+function _write_dashboard_html(path::AbstractString, result_plots, input_plots, dispatch_plots = NamedTuple[])
     result_sections, result_scripts = _plot_sections(result_plots, 1)
     input_sections, input_scripts = _plot_sections(input_plots, length(result_plots) + 1)
+    dispatch_sections = _dispatch_index_html(dispatch_plots)
     input_button = isempty(input_plots) ? "" : "<button class=\"tab-button\" onclick=\"showTab('inputs', event)\">Inputs</button>"
+    dispatch_button = isempty(dispatch_plots) ? "" : "<button class=\"tab-button\" onclick=\"showTab('dispatch', event)\">Dispatch</button>"
 
     html = """
     <!doctype html>
@@ -270,6 +454,10 @@ function _write_dashboard_html(path::AbstractString, result_plots, input_plots)
         section p { margin: 0; }
         .note { margin-top: 8px; color: #555; max-width: 960px; }
         .plot { width: 100%; height: 680px; }
+        .node-index { margin-top: 16px; padding: 0; list-style: none;
+                      display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px 16px; }
+        .node-index a { text-decoration: none; color: #1f77b4; }
+        .node-index a:hover { text-decoration: underline; }
       </style>
     </head>
     <body>
@@ -277,10 +465,14 @@ function _write_dashboard_html(path::AbstractString, result_plots, input_plots)
     $PLOTLY_FALLBACK_NOTICE
       <div class="tabs">
         <button class="tab-button active" onclick="showTab('results', event)">Results</button>
+        $dispatch_button
         $input_button
       </div>
       <div id="results" class="tab-panel active">
       $result_sections
+      </div>
+      <div id="dispatch" class="tab-panel">
+      $dispatch_sections
       </div>
       <div id="inputs" class="tab-panel">
       $input_sections

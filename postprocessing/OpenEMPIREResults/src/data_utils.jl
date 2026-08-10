@@ -80,6 +80,44 @@ function _read_csv_section(csv_path::AbstractString, index::Integer = 1)
     return sections[index]
 end
 
+"""
+Raw variable dumps above this size are skipped rather than plotted.
+
+The diagnostic plots built on `genOperational.csv` and `loadShed.csv` go through
+[`_group_sum`](@ref), which uses `CSV.File` and therefore materialises the whole
+file before summing. These dumps hold one row per JuMP variable — node x
+generator x period x scenario x hour — so on `europe_v51` at `run_2060`
+`genOperational.csv` runs to hundreds of millions of rows and the dashboard never
+finishes. It is 2.1 MB on `data/test`, so the threshold does not affect the
+datasets these plots are actually useful for.
+
+The weighted report tables are never subject to this: they are aggregated to
+annual figures by `src/results.jl` and stay small at any dataset size. Hourly
+detail at European scale is what the per-node dispatch pages are for, and those
+stream their input instead of materialising it.
+"""
+const RAW_DUMP_MAX_BYTES = 100 * 1024 * 1024
+
+"""
+    _raw_dump_is_plottable(csv_path, label)
+
+Whether a raw variable dump is present and small enough to aggregate in memory.
+
+Warns rather than failing when it is too large: the dump feeds a diagnostic, and
+losing one diagnostic is much better than losing the whole dashboard for a run
+that took hours to solve.
+"""
+function _raw_dump_is_plottable(csv_path::AbstractString, label::AbstractString)
+    isfile(csv_path) || return false
+    size_bytes = filesize(csv_path)
+    size_bytes <= RAW_DUMP_MAX_BYTES && return true
+    @warn "Skipping \"$label\": raw variable dump is too large to aggregate in memory. " *
+        "Use the per-node hourly dispatch pages for operational detail at this scale." *
+        " file=$(basename(csv_path)) size=$(round(size_bytes / 1024^2; digits = 1))MB" *
+        " limit=$(round(RAW_DUMP_MAX_BYTES / 1024^2; digits = 1))MB"
+    return false
+end
+
 function _group_sum(
         csv_path::AbstractString,
         x_col::Union{Symbol, Integer},
@@ -113,12 +151,45 @@ function _number(value::AbstractString)
 end
 _number(value) = Float64(value)
 
+"""
+    _integer(value)
+
+Coerce a CSV cell to `Int`. `CSV.Rows` hands back unparsed string cells, so the
+streamed operational table needs this where `CSV.File` would already have typed
+the column.
+"""
+_integer(value::Integer) = Int(value)
+_integer(value::Real) = Int(round(value))
+_integer(::Missing) = 0
+_integer(::Nothing) = 0
+function _integer(value::AbstractString)
+    stripped = strip(value)
+    isempty(stripped) && return 0
+    parsed = tryparse(Int, stripped)
+    parsed === nothing || return parsed
+    return Int(round(_number(stripped)))
+end
+_integer(value) = Int(value)
+
+"""
+The input transmission CSVs are read by column position, not by header name,
+because the header names drift between datasets while the layout does not:
+
+| File | `test` | `europe_v50` | `europe_v51` |
+|---|---|---|---|
+| `transmissionInitCap.csv` | `InterconnectorLinks` | `FromNode` | `InterconnectorLinks` |
+| `transmissionLength.csv` | `lineLength_in_km` | `lineLength_in_km` | `Length_in_km` |
+
+`src/read_csv.jl` already reads these same files positionally
+(`_read_float_by_pair_csv`, `_read_strategic_profiles_pair_csv`), which is why the
+model loads all three datasets while a name-based read here does not. Match it.
+"""
 function _read_arc_period_values(
-        csv_path::AbstractString,
-        from_col::Symbol,
-        to_col::Symbol,
-        period_col::Symbol,
-        value_col::Symbol,
+        csv_path::AbstractString;
+        from_col::Int = 1,
+        to_col::Int = 2,
+        period_col::Int = 3,
+        value_col::Int = 4,
     )
     values = Dict{Tuple{String, String, Int}, Float64}()
     isfile(csv_path) || return values
@@ -132,7 +203,12 @@ function _read_arc_period_values(
     return values
 end
 
-function _read_arc_values(csv_path::AbstractString, from_col::Symbol, to_col::Symbol, value_col::Symbol)
+function _read_arc_values(
+        csv_path::AbstractString;
+        from_col::Int = 1,
+        to_col::Int = 2,
+        value_col::Int = 3,
+    )
     values = Dict{Tuple{String, String}, Float64}()
     isfile(csv_path) || return values
 

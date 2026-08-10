@@ -8,6 +8,7 @@ include("constants.jl")
 include("data_utils.jl")
 include("plotly.jl")
 include("maps.jl")
+include("dispatch.jl")
 include("specs.jl")
 
 """
@@ -57,21 +58,20 @@ function write_result_plots(
     if input_dir !== nothing
         input_specs = _available_input_plot_specs(input_dir)
     end
-    plot_specs = vcat(result_specs, input_specs)
+    # One page per node, so this is the one group that is linked from the
+    # dashboard rather than embedded in it: `europe_v51` produces 49 pages of
+    # ~1.4 MB, and inlining them would make dashboard.html unopenable.
+    dispatch_specs = _dispatch_specs(joinpath(output_dir, "results_output_Operational.csv"))
+
+    plot_specs = vcat(result_specs, input_specs, dispatch_specs)
     isempty(plot_specs) && throw(ArgumentError("No supported result CSV files found in $output_dir"))
 
-    html_plots = NamedTuple[]
     for spec in plot_specs
-        path = joinpath(plot_dir, spec.filename)
-        _write_plotly_html(path, spec.title, spec.traces, spec.layout)
-        push!(html_plots, spec)
+        _write_plotly_html(joinpath(plot_dir, spec.filename), spec.title, spec.traces, spec.layout)
     end
 
     dashboard_path = joinpath(plot_dir, "dashboard.html")
-    n_result_specs = length(result_specs)
-    result_html_plots = html_plots[1:n_result_specs]
-    input_html_plots = n_result_specs < length(html_plots) ? html_plots[(n_result_specs + 1):end] : NamedTuple[]
-    _write_dashboard_html(dashboard_path, result_html_plots, input_html_plots)
+    _write_dashboard_html(dashboard_path, result_specs, input_specs, dispatch_specs)
     return dashboard_path
 end
 

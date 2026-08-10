@@ -206,6 +206,183 @@ function test_postprocessing_specs()
     return nothing
 end
 
+"""
+Minimal `results_output_Operational.csv`.
+
+Two nodes, two periods, two scenarios, two seasons of two hours. Sinks are
+negative as `src/results.jl` writes them, and every row balances by construction
+so `_dispatch_role`'s classification can be asserted against it: generation +
+storDischarge + FlowIn + LoadShed + Load + storCharge + FlowOut + LossesFlowIn
+sums to zero, and `LossesChargeDischargeBleed_MW` is deliberately non-zero and
+outside that sum.
+"""
+function _write_fake_operational(output_dir)
+    header = "Node,Period,Scenario,Season,Hour,AllGen_MW,Load_MW,Net_load_MW," *
+        "Gasexisting_MW,GasOCGT_MW,Windonshore_MW,Solar_MW," *
+        "storCharge_MW,storDischarge_MW,storEnergyLevel_MWh,LossesChargeDischargeBleed_MW," *
+        "FlowOut_MW,FlowIn_MW,LossesFlowIn_MW,LoadShed_MW,Price_EURperMWh,AvgCO2_kgCO2perMWh"
+
+    rows = String[]
+    for (node, scale) in (("NO", 1.0), ("SE", 2.0)), period in ("2020-2025", "2025-2030"),
+            scenario in ("scenario1", "scenario2"), (season, hours) in (("winter", 1:2), ("summer", 3:4))
+        for hour in hours
+            # scenario2 is deliberately different so picking the wrong scenario
+            # would change every asserted number.
+            factor = scale * (scenario == "scenario1" ? 1.0 : 10.0)
+            gas_existing = 10.0 * factor
+            gas_ocgt = 5.0 * factor
+            wind = 20.0 * factor
+            solar = hour * factor
+            allgen = gas_existing + gas_ocgt + wind + solar
+            discharge = 4.0 * factor
+            flow_in = 3.0 * factor
+            load_shed = 0.0
+            charge = -2.0 * factor
+            flow_out = -1.0 * factor
+            loss_in = -0.5 * factor
+            bleed = -0.25 * factor              # excluded from the balance
+            load = -(allgen + discharge + flow_in + load_shed + charge + flow_out + loss_in)
+            push!(rows, join(
+                [
+                    node, period, scenario, season, hour, allgen, load, -allgen,
+                    gas_existing, gas_ocgt, wind, solar,
+                    charge, discharge, 100.0, bleed,
+                    flow_out, flow_in, loss_in, load_shed, 30.0 + hour, 200.0,
+                ], ","))
+        end
+    end
+    return _write_text(joinpath(output_dir, "results_output_Operational.csv"), header * "\n" * join(rows, "\n") * "\n")
+end
+
+function test_postprocessing_dispatch()
+    @testset "operational columns are classified" begin
+        @test _Results._dispatch_role(:Load_MW) == (:load, "Load")
+        @test _Results._dispatch_role(:Price_EURperMWh) == (:price, "Price")
+        @test _Results._dispatch_role(:FlowIn_MW) == (:supply, "Import")
+        @test _Results._dispatch_role(:FlowOut_MW) == (:sink, "Export")
+        @test _Results._dispatch_role(:LossesFlowIn_MW) == (:sink, "Transmission losses")
+        # Generation columns fold into the families used everywhere else.
+        @test _Results._dispatch_role(:GasOCGT_MW) == (:supply, "Gas")
+        @test _Results._dispatch_role(:Windonshore_MW) == (:supply, "Wind onshore")
+
+        # Identities and states must not become bands.
+        for column in (:AllGen_MW, :Net_load_MW, :storEnergyLevel_MWh, :AvgCO2_kgCO2perMWh, :Node, :Hour)
+            @test first(_Results._dispatch_role(column)) === :skip
+        end
+        # Already netted into storCharge/storDischarge; stacking it double-counts.
+        @test first(_Results._dispatch_role(:LossesChargeDischargeBleed_MW)) === :skip
+    end
+
+    @testset "node names survive becoming filenames" begin
+        @test _Results._filename_slug("GreatBrit.") == "GreatBrit"
+        @test _Results._filename_slug("NO1") == "NO1"
+        @test _Results._filename_slug("Sorlige Nordsjo I") == "SorligeNordsjoI"
+        @test _Results._filename_slug("../etc") == "etc"
+        @test _Results._filename_slug("...") == "node"
+    end
+
+    @test isempty(_Results._dispatch_specs(joinpath(mktempdir(), "absent.csv")))
+
+    mktempdir() do root
+        output_dir = joinpath(root, "output")
+        mkpath(output_dir)
+        _write_fake_operational(output_dir)
+        csv = joinpath(output_dir, "results_output_Operational.csv")
+        data = _Results._read_dispatch_data(csv)
+
+        @testset "one scenario is read, deterministically" begin
+            @test data.scenario == "scenario1"
+            @test data.nodes == ["NO", "SE"]
+            @test data.periods == ["2020-2025", "2025-2030"]
+            # scenario2 carries 10x the values; reading it would show here.
+            wind = data.values[("NO", "2020-2025", "Wind onshore")]
+            @test wind[1] == 20.0
+        end
+
+        @testset "generation columns aggregate into families" begin
+            # Gasexisting 10 + GasOCGT 5, for node NO (scale 1.0).
+            @test data.values[("NO", "2020-2025", "Gas")][1] == 15.0
+            # SE is scaled by 2.
+            @test data.values[("SE", "2020-2025", "Gas")][1] == 30.0
+        end
+
+        @testset "load is drawn as positive demand" begin
+            # Stored negated: the CSV holds Load_MW < 0.
+            @test data.values[("NO", "2020-2025", "Load")][1] > 0
+        end
+
+        @testset "seasons are located at their last hour" begin
+            @test data.season_last_hour == Dict("winter" => 2, "summer" => 4)
+        end
+
+        @testset "the stack balances every hour" begin
+            worst = 0.0
+            for node in data.nodes, period in data.periods, hour in data.hours[(node, period)]
+                supply = 0.0
+                sink = 0.0
+                load = 0.0
+                for (label, role) in data.roles
+                    series = get(data.values, (node, period, label), nothing)
+                    series === nothing && continue
+                    value = get(series, hour, 0.0)
+                    role === :supply && (supply += value)
+                    role === :sink && (sink += value)
+                    role === :load && (load = value)
+                end
+                worst = max(worst, abs(supply + sink - load))
+            end
+            # Would be off by exactly LossesChargeDischargeBleed_MW if the bleed
+            # column were stacked.
+            @test worst < 1e-9
+        end
+
+        @testset "one page per node, one trace group per period" begin
+            specs = _Results._dispatch_specs(csv)
+            @test length(specs) == 2
+            @test [spec.filename for spec in specs] == ["dispatch_NO.html", "dispatch_SE.html"]
+
+            spec = first(specs)
+            @test occursin("scenario1", spec.note)
+            # Supply and sink bands stack separately, price sits on its own axis.
+            @test any(t -> occursin("\"stackgroup\": \"supply\"", t), spec.traces)
+            @test any(t -> occursin("\"stackgroup\": \"sink\"", t), spec.traces)
+            @test any(t -> occursin("\"yaxis\": \"y2\"", t), spec.traces)
+            # Exactly one period's traces are visible at load.
+            hidden = count(t -> occursin("\"visible\": false", t), spec.traces)
+            @test hidden == length(spec.traces) ÷ 2
+            # Both seasons are marked.
+            @test occursin("winter", spec.layout)
+            @test occursin("summer", spec.layout)
+            @test occursin("\"2025-2030\"", spec.layout)
+        end
+    end
+
+    @testset "oversized raw dumps are skipped, not hung on" begin
+        mktempdir() do dir
+            small = _write_text(joinpath(dir, "genOperational.csv"), "Period,Generator,genOperational\n1,Nuclear,5.0\n")
+            @test _Results._raw_dump_is_plottable(small, "small")
+            @test !_Results._raw_dump_is_plottable(joinpath(dir, "absent.csv"), "absent")
+
+            big = joinpath(dir, "big.csv")
+            open(big, "w") do io
+                write(io, "Period,Generator,genOperational\n")
+                # Just over the limit; the guard reads filesize, not the rows.
+                write(io, repeat("1,Nuclear,5.0\n", (_Results.RAW_DUMP_MAX_BYTES ÷ 14) + 2))
+            end
+            @test filesize(big) > _Results.RAW_DUMP_MAX_BYTES
+            @test (@test_logs (:warn,) match_mode = :any _Results._raw_dump_is_plottable(big, "big")) == false
+        end
+    end
+
+    @testset "label dropdown with unknown active label" begin
+        # The string-labelled sibling of the period dropdown, same nothing - 1 trap.
+        dropdown = _Results._label_dropdown(["a", "b"], Dict("a" => [1], "b" => [2]), 2, "T", "zzz")
+        @test occursin("\"active\": 1", dropdown)
+    end
+
+    return nothing
+end
+
 function test_postprocessing_dashboard()
     mktempdir() do root
         _write_fake_output(joinpath(root, "output"))
@@ -220,6 +397,19 @@ function test_postprocessing_dashboard()
 
         # Standalone pages are written alongside the dashboard.
         @test isfile(joinpath(root, "Plots", "generation_mix.html"))
+
+        @testset "dispatch pages are linked, not embedded" begin
+            _write_fake_operational(joinpath(root, "output"))
+            dashboard = _Results.write_result_plots(root)
+            html = read(dashboard, String)
+
+            @test isfile(joinpath(root, "Plots", "dispatch_NO.html"))
+            @test isfile(joinpath(root, "Plots", "dispatch_SE.html"))
+            @test occursin("href=\"dispatch_NO.html\"", html)
+            # Inlining one page per node would make dashboard.html unopenable on
+            # a 49-node dataset, so the traces must stay out of it.
+            @test !occursin("\"stackgroup\"", html)
+        end
 
         @testset "vendored plotly is referenced relatively" begin
             vendored = joinpath(root, "plotly.min.js")

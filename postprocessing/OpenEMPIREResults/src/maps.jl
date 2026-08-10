@@ -37,29 +37,15 @@ function _input_transmission_map_spec(
 
     init_capacity = _read_arc_period_values(
         joinpath(input_dir, "Transmission", "transmissionInitCap.csv"),
-        :InterconnectorLinks,
-        :ToNode,
-        :Period,
-        :TransmissionInitialCapacity,
     )
     max_built_capacity = _read_arc_period_values(
         joinpath(input_dir, "Transmission", "transmissionMaxBuiltCap.csv"),
-        :InterconnectorLinks,
-        :ToNode,
-        :Period,
-        :TransmissionMaxBuiltCapacity_in_MW,
     )
     lengths = _read_arc_values(
         joinpath(input_dir, "Transmission", "transmissionLength.csv"),
-        :FromNode,
-        :ToNode,
-        :lineLength_in_km,
     )
     efficiencies = _read_arc_values(
         joinpath(input_dir, "Transmission", "lineEfficiency.csv"),
-        :FromNode,
-        :ToNode,
-        :lineEfficiency,
     )
 
     isempty(transmission_line_types) && return nothing
