@@ -338,69 +338,32 @@ check `GRB_LICENSE_FILE` in the job log and verify the Solstorm Gurobi module.
 
 ## Results and dashboard
 
-A solved run writes to `results/julia_runs/<timestamp>_<dataset>/`:
+A solved run writes to `results/julia_runs/<timestamp>_<dataset>/`, with the
+result CSVs in `output/` and a self-contained HTML dashboard in `Plots/`.
 
-```text
-Input/     archived sampling key, scenario data and run metadata
-output/    result CSVs
-Plots/     dashboard.html plus one standalone HTML page per plot
-summary.txt
-```
+The CSVs come in two families, and the difference matters:
 
-The result CSVs come in two families, and the difference matters when reading
-them:
-
-- **Report tables** (`results_output_gen.csv`, `results_output_stor.csv`,
-  `results_output_transmission.csv`, `results_output_EuropeSummary.csv`,
-  `results_output_curtailed_prod.csv`) hold scenario- and season-weighted
+- **Report tables** (`results_output_*.csv`) hold scenario- and season-weighted
   *annual* quantities and label periods `"2020-2025"`. These are the numbers to
-  quote.
-- **Raw variable dumps** (`genInvCap.csv`, `genOperational.csv`, `loadShed.csv`,
-  …) hold one row per JuMP variable with integer period indices and no
-  weighting. Summing them over exported hours does *not* give annual generation.
+  quote. `EuropeSummary` and `EuropePlot` concatenate several tables separated by
+  a blank line; read them section by section.
+- **Raw variable dumps** (`genInvCap.csv`, `genOperational.csv`, …) hold one row
+  per JuMP variable, unweighted. Summing them over exported hours does *not* give
+  annual generation.
 
-`results_output_EuropeSummary.csv` and `results_output_EuropePlot.csv` contain
-several tables concatenated with a blank line between them, matching the Python
-layout; read them section by section.
-
-### Dashboard
-
-The runner generates the dashboard automatically after writing the CSVs. Pass
-`--no-plots` to skip it. To (re)generate for an existing run:
+The runner writes the dashboard automatically; `--no-plots` skips it. To
+regenerate for an existing run:
 
 ```bash
 julia --project=. scripts/plot_results.jl results/julia_runs/<run> data/<dataset>
 ```
 
-The second argument is optional and adds an "Inputs" tab plus the transmission
-map. Or call it as a library:
+The dataset argument is optional and adds the input plots and transmission maps,
+which need `Sets/Coords.csv`. Plots are built only for the CSVs present, so
+partial runs still produce a dashboard.
 
-```julia
-include("postprocessing/OpenEMPIREResults/src/OpenEMPIREResults.jl")
-using .OpenEMPIREResults
-
-write_result_plots("results/julia_runs/<run>"; input_dir = "data/<dataset>")
-```
-
-Plots are built only for the CSVs that are present, so partial runs still
-produce a dashboard. The transmission map additionally needs
-`Sets/Coords.csv` and `Sets/TransmissionTypeOfDirectionalLink.csv` in the
-dataset; without coordinates it is skipped silently and the other plots are
-unaffected.
-
-### Viewing results offline
-
-Pages load Plotly from a CDN by default. Runs produced on Solstorm are often
-read later from an archived copy or a machine without network access, where that
-renders a blank page — so the pages detect it and show an explanatory banner
-instead. To make a run self-contained, vendor the library:
-
-```bash
-julia --project=. scripts/run_julia_empire.jl --dataset=test --plotly-js=/path/to/plotly.min.js
-```
-
-or `write_result_plots(run; plotly_js = "/path/to/plotly.min.js")`. The file is
-copied into `Plots/` and every page then references it relatively.
+Pages load Plotly from a CDN and show an explanatory banner if it is unreachable.
+Pass `--plotly-js=/path/to/plotly.min.js` to vendor it for offline viewing.
 
 ### Time structure
 
