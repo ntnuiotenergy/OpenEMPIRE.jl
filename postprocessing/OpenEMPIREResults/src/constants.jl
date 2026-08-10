@@ -22,9 +22,11 @@ const RESULT_SERIES_COLORS = Dict(
     "Li-Ion_BESS" => "#ff7f0e",
     "CCS" => "#7f7f7f",
     "Existing" => "#9e9e9e",
-    # Non-generation bands of the hourly dispatch stack.
-    "Storage discharge" => "#ff7f0e",
-    "Storage charge" => "#c96a08",
+    # Non-generation bands of the hourly dispatch stack. Storage is deliberately
+    # violet rather than orange: "Gas" is #bc6c25, and an orange storage pair made
+    # the large negative charging band read as gas at a glance.
+    "Storage discharge" => "#9d5cd6",
+    "Storage charge" => "#6a3d9a",
     "Import" => "#76b7b2",
     "Export" => "#4a7c7a",
     "Load shed" => "#e31a1c",

@@ -279,6 +279,54 @@ function _has_nonzero(values)
     return any(value -> abs(Float64(value)) > 1.0e-9, values)
 end
 
+"""
+One step up the unit ladder, applied when an axis would otherwise be read in
+scientific-ish shorthand.
+"""
+const _UNIT_STEP_UP = Dict(
+    "GWh" => "TWh",
+    "MWh" => "GWh",
+    "MW" => "GW",
+    "MEUR" => "BEUR",
+)
+
+"""
+Rescale above this stacked peak, in whatever unit the axis is already in.
+
+`europe_v51` annual generation peaks near 8e6 GWh, which Plotly renders as an
+axis labelled `8M` — technically correct and unreadable. In TWh it reads 8000.
+`data/test` peaks around 1e3 GWh and stays in GWh, so the small dataset's numbers
+(and the assertions pinned to them) are untouched.
+"""
+const UNIT_RESCALE_THRESHOLD = 1.0e5
+
+"""
+    _rescale_unit(grouped, y_title, stack_key)
+
+Divide grouped values by 1000 and step the axis unit up, when the largest stacked
+column warrants it. Returns the values and title unchanged otherwise.
+
+The peak is the stacked total per column, not the largest single value: it is the
+axis maximum that decides whether the labels are readable.
+"""
+function _rescale_unit(grouped::Dict, y_title::AbstractString, stack_key::Function)
+    unit = _unit_suffix(y_title)
+    stepped = get(_UNIT_STEP_UP, unit, nothing)
+    stepped === nothing && return grouped, y_title
+
+    stacks = Dict{Any, Float64}()
+    for (key, value) in grouped
+        value > 0 || continue
+        column = stack_key(key)
+        stacks[column] = get(stacks, column, 0.0) + value
+    end
+    peak = isempty(stacks) ? 0.0 : maximum(values(stacks))
+    peak < UNIT_RESCALE_THRESHOLD && return grouped, y_title
+
+    rescaled = Dict(key => value / 1000 for (key, value) in grouped)
+    return rescaled, replace(y_title, "[$unit]" => "[$stepped]")
+end
+
 function _hover_template(y_title::AbstractString)
     unit = _unit_suffix(y_title)
     value = isempty(unit) ? "%{y:,.1f}" : "%{y:,.1f} $unit"

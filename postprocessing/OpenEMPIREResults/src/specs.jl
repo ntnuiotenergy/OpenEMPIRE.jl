@@ -317,6 +317,7 @@ function _stacked_bar_spec(
         x_title::AbstractString = "Period",
     )
     grouped = _group_sum(csv_path, x_col, series_col, value_col; series_mapper)
+    grouped, y_title = _rescale_unit(grouped, y_title, key -> key[1])
     x_values = _sort_categories(unique(first.(keys(grouped))))
     series_values = _sort_categories(unique(last.(keys(grouped))))
     traces = String[]
@@ -355,6 +356,8 @@ function _node_investment_bar_spec(
         grouped[key] = get(grouped, key, 0.0) + _number(row[value_col])
     end
 
+    grouped, y_title = _rescale_unit(grouped, y_title, key -> (key[1], key[2]))
+
     # Nodes that never receive an investment contribute only empty columns, and on
     # a European dataset they dominate the axis. Drop them.
     active_nodes = Set(node for ((_, node, _), value) in grouped if abs(value) > 1.0e-9)
@@ -365,26 +368,40 @@ function _node_investment_bar_spec(
 
     periods = _sort_categories(unique(period for (period, _, _) in keys(grouped)))
     nodes = sort!(collect(active_nodes))
-    period_nodes = [(period, node) for period in periods for node in nodes]
-    x_labels = ["$period / $node" for (period, node) in period_nodes]
     series_values = _sort_categories(unique(series for (_, _, series) in keys(grouped)))
 
+    # One x-category per (period, node) is 8 x 49 = 392 categories on europe_v51,
+    # which renders as an illegible smear of overlapping tick labels. Node on the
+    # x axis with a period dropdown gives 49 categories per view, and makes the
+    # periods directly comparable instead of laid end to end.
     traces = String[]
-    for series in series_values
-        y_values = [get(grouped, (period, node, series), 0.0) for (period, node) in period_nodes]
-        _has_nonzero(y_values) || continue
-        push!(traces, _trace(
-            ;
-            x = x_labels,
-            y = y_values,
-            name = series,
-            type = "bar",
-            color = _series_color(series),
-            hovertemplate = _hover_template(y_title),
-        ))
+    period_trace_indices = Dict{String, Vector{Int}}()
+    active_period = last(periods)
+    for period in periods
+        indices = Int[]
+        for series in series_values
+            y_values = [get(grouped, (period, node, series), 0.0) for node in nodes]
+            _has_nonzero(y_values) || continue
+            push!(traces, _trace(
+                ;
+                x = nodes,
+                y = y_values,
+                name = series,
+                type = "bar",
+                color = _series_color(series),
+                hovertemplate = _hover_template(y_title),
+                visible = period == active_period,
+            ))
+            push!(indices, length(traces))
+        end
+        period_trace_indices[period] = indices
     end
 
-    layout = _layout(title, "Period / Node", y_title; barmode = "stack", x_values = x_labels)
+    layout = _layout(
+        "$title ($active_period)", "Node", y_title;
+        barmode = "stack", x_values = nodes,
+        updatemenus = _label_dropdown(periods, period_trace_indices, length(traces), title, active_period),
+    )
     return (filename = filename, title = title, traces = traces, layout = layout, note = note)
 end
 

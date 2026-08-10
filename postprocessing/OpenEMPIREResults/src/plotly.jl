@@ -7,6 +7,7 @@ function _trace(
         mode::Union{Nothing, AbstractString} = nothing,
         color::Union{Nothing, AbstractString} = nothing,
         hovertemplate::Union{Nothing, AbstractString} = nothing,
+        visible::Bool = true,
     )
     fields = [
         "\"x\": $(_js_array(x))",
@@ -16,6 +17,7 @@ function _trace(
     ]
     mode === nothing || push!(fields, "\"mode\": $(_js_string(mode))")
     hovertemplate === nothing || push!(fields, "\"hovertemplate\": $(_js_string(hovertemplate))")
+    visible || push!(fields, "\"visible\": false")
     if color !== nothing
         if type == "bar"
             push!(fields, "\"marker\": {\"color\": $(_js_string(color))}")
@@ -143,6 +145,7 @@ function _dispatch_layout(
     boundaries = sort!(collect(season_last_hour); by = pair -> pair[2])
     shapes = String[]
     annotations = String[]
+    span_start = 0
     for (season, hour) in boundaries
         push!(
             shapes,
@@ -150,12 +153,16 @@ function _dispatch_layout(
             "\"x0\": $hour, \"x1\": $hour, \"y0\": 0, \"y1\": 1, " *
             "\"line\": {\"color\": \"#999999\", \"width\": 1, \"dash\": \"dot\"}}",
         )
+        # Centred over the span it names, not parked against the boundary rule —
+        # a label sitting on the line reads as ambiguous about which side it
+        # describes.
         push!(
             annotations,
-            "{\"x\": $hour, \"xref\": \"x\", \"yref\": \"paper\", \"y\": 1.02, " *
+            "{\"x\": $((span_start + hour) / 2), \"xref\": \"x\", \"yref\": \"paper\", \"y\": 1.02, " *
             "\"text\": $(_js_string(season)), \"showarrow\": false, " *
-            "\"font\": {\"size\": 10, \"color\": \"#666666\"}, \"xanchor\": \"right\"}",
+            "\"font\": {\"size\": 10, \"color\": \"#666666\"}, \"xanchor\": \"center\"}",
         )
+        span_start = hour
     end
 
     fields = [
@@ -229,6 +236,7 @@ function _layout(
         y_title::AbstractString;
         barmode::Union{Nothing, AbstractString} = nothing,
         x_values = nothing,
+        updatemenus::Union{Nothing, AbstractString} = nothing,
     )
     xaxis_fields = [
         "\"title\": $(_js_string(x_title))",
@@ -243,6 +251,7 @@ function _layout(
         "\"margin\": {\"l\": 70, \"r\": 20, \"t\": 70, \"b\": 70}",
     ]
     barmode === nothing || push!(fields, "\"barmode\": $(_js_string(barmode))")
+    updatemenus === nothing || push!(fields, "\"updatemenus\": $updatemenus")
     return "{" * join(fields, ", ") * "}"
 end
 
@@ -252,12 +261,27 @@ function _geo_layout(
         period_trace_indices::Dict{Int, Vector{Int}} = Dict{Int, Vector{Int}}(),
         trace_count::Integer = 0,
         base_title::AbstractString = title,
-        active_period::Integer = isempty(periods) ? 0 : last(periods),
+        active_period::Integer = isempty(periods) ? 0 : last(periods);
+        bounds = nothing,
     )
     updatemenus = isempty(periods) ? nothing : _period_dropdown(periods, period_trace_indices, trace_count, base_title, active_period)
+    geo_fields = [
+        "\"scope\": \"europe\"",
+        "\"showland\": true",
+        "\"landcolor\": \"#f5f5f5\"",
+        "\"showcountries\": true",
+        "\"countrycolor\": \"#bbbbbb\"",
+        "\"projection\": {\"type\": \"natural earth\"}",
+    ]
+    # Explicit ranges rather than `fitbounds`, so the framing is deterministic and
+    # can be asserted in a test. `scope` alone frames far more than the nodes span.
+    if bounds !== nothing
+        push!(geo_fields, "\"lataxis\": {\"range\": [$(bounds.lat[1]), $(bounds.lat[2])]}")
+        push!(geo_fields, "\"lonaxis\": {\"range\": [$(bounds.lon[1]), $(bounds.lon[2])]}")
+    end
     fields = [
         "\"title\": $(_js_string(title))",
-        "\"geo\": {\"scope\": \"europe\", \"showland\": true, \"landcolor\": \"#f5f5f5\", \"showcountries\": true, \"countrycolor\": \"#bbbbbb\", \"projection\": {\"type\": \"natural earth\"}}",
+        "\"geo\": {" * join(geo_fields, ", ") * "}",
         "\"legend\": {\"orientation\": \"h\"}",
         "\"margin\": {\"l\": 20, \"r\": 20, \"t\": 70, \"b\": 20}",
     ]
@@ -503,6 +527,10 @@ end
 
 _js_array(values) = "[" * join((_js_value(v) for v in values), ", ") * "]"
 _js_value(value::AbstractString) = _js_string(value)
+# A gap in a coordinate array. Plotly breaks the line at a null, which is what
+# lets many disconnected corridors share one trace.
+_js_value(::Nothing) = "null"
+_js_value(::Missing) = "null"
 _js_value(value::Bool) = value ? "true" : "false"
 _js_value(value::Integer) = string(value)
 _js_value(value::Real) = isfinite(value) ? string(Float64(value)) : "null"

@@ -374,6 +374,73 @@ function test_postprocessing_dispatch()
         end
     end
 
+    @testset "corridors collapse into capacity bands" begin
+        coords = Dict(
+            "A" => (lat = 50.0, lon = 5.0), "B" => (lat = 52.0, lon = 6.0),
+            "C" => (lat = 54.0, lon = 7.0), "D" => (lat = 56.0, lon = 8.0),
+        )
+        # Many corridors over few nodes, which is the shape that broke the map:
+        # europe_v51 has 190 corridors and produced 190 legend rows.
+        pairs = [("A", "B"), ("B", "C"), ("C", "D"), ("A", "D"), ("A", "C"), ("B", "D")]
+        corridors = [
+            (
+                from_node = from, to_node = to,
+                capacity = 100.0 * index,
+                line_type = isodd(index) ? "HVAC" : "HVDC",
+                hover = "$from-$to",
+            )
+            for (index, (from, to)) in enumerate(repeat(pairs, 5))
+        ]
+        traces, nodes = _Results._corridor_traces(corridors, coords)
+        # 30 corridors must never mean 30 legend rows: at most 2 line types x 4 bands.
+        @test length(corridors) == 30
+        @test length(traces) <= 8
+        @test nodes == Set(["A", "B", "C", "D"])
+        # Segments are separated by a JSON null so one trace draws several lines.
+        @test any(t -> occursin("null", t), traces)
+        # Each corridor's hover text survives the merge.
+        @test any(t -> occursin("A-B", t), traces)
+        @test any(t -> occursin("A-D", t), traces)
+
+        @testset "a uniform capacity column yields one band, not empty ones" begin
+            flat = [
+                (from_node = "A", to_node = "B", capacity = 20000.0, line_type = "HVAC", hover = "x"),
+                (from_node = "B", to_node = "C", capacity = 20000.0, line_type = "HVAC", hover = "y"),
+            ]
+            flat_traces, _ = _Results._corridor_traces(flat, coords)
+            @test length(flat_traces) == 1
+            # The line type alone, not "HVAC " with an empty bracket after it.
+            @test occursin("\"name\": \"HVAC\"", flat_traces[1])
+        end
+    end
+
+    @testset "map is framed on the nodes" begin
+        coords = Dict("A" => (lat = 50.0, lon = 5.0), "B" => (lat = 60.0, lon = 15.0))
+        bounds = _Results._node_bounds(coords)
+        @test bounds.lat[1] < 50.0 && bounds.lat[2] > 60.0
+        @test bounds.lon[1] < 5.0 && bounds.lon[2] > 15.0
+        @test _Results._node_bounds(Dict{String, NamedTuple{(:lat, :lon), Tuple{Float64, Float64}}}()) === nothing
+    end
+
+    @testset "axis units step up only when the numbers demand it" begin
+        title = "Expected annual production [GWh]"
+        small = Dict(("2020-2025", "Wind") => 700.8, ("2020-2025", "Solar") => 350.4)
+        values, unit_title = _Results._rescale_unit(small, title, key -> key[1])
+        @test unit_title == title
+        @test values[("2020-2025", "Wind")] == 700.8
+
+        # Stacked column of 8e6 GWh: the axis Plotly would label "8M".
+        large = Dict(("2020-2025", "Wind") => 5.0e6, ("2020-2025", "Solar") => 3.0e6)
+        values, unit_title = _Results._rescale_unit(large, title, key -> key[1])
+        @test unit_title == "Expected annual production [TWh]"
+        @test values[("2020-2025", "Wind")] == 5000.0
+
+        # An unrecognised unit is left alone rather than silently mis-scaled.
+        odd = Dict(("x", "y") => 1.0e9)
+        _, odd_title = _Results._rescale_unit(odd, "Capacity factor [-]", key -> key[1])
+        @test odd_title == "Capacity factor [-]"
+    end
+
     @testset "label dropdown with unknown active label" begin
         # The string-labelled sibling of the period dropdown, same nothing - 1 trap.
         dropdown = _Results._label_dropdown(["a", "b"], Dict("a" => [1], "b" => [2]), 2, "T", "zzz")
