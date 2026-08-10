@@ -359,6 +359,13 @@ julia --project=. scripts/plot_results.jl results/julia_runs/<run> data/<dataset
 
 or pass `--plots` to the runner to have it built straight after the solve.
 
+On Solstorm this goes through the queue, since all computation belongs on a
+compute node:
+
+```bash
+sh scripts/plot_results_sge.sh results/julia_runs/<run> data/<dataset>
+```
+
 The dataset argument is optional and adds the input plots and transmission maps,
 which need `Sets/Coords.csv`. Plots are built only for the CSVs present, so
 partial runs still produce a dashboard.
