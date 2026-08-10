@@ -54,16 +54,24 @@ if [[ "$(uname)" == "Darwin" ]]; then
 fi
 
 echo "Creating transfer archive..."
+# The archive is built from `*`, so member paths carry no "./" prefix and the
+# patterns must not either — with `--exclude='./results'` nothing matched, and
+# every transfer silently shipped results/, logs/ and a locally-resolved
+# Manifest.toml. The last of those overwrites the cluster's manifest and breaks
+# instantiate when the local and remote Julia versions differ.
+#
+# `.git`/`.vscode` are excluded by the glob as well (bash does not expand
+# dotfiles into `*`); the patterns are kept correct in case that ever changes.
 tar $TAR_FLAGS \
-	--exclude='./.git' \
-	--exclude='./.git/*' \
-	--exclude='./.vscode' \
-	--exclude='./.vscode/*' \
-	--exclude='./results' \
-	--exclude='./results/*' \
-	--exclude='./logs' \
-	--exclude='./logs/*' \
-	--exclude='./Manifest.toml' \
+	--exclude='.git' \
+	--exclude='.git/*' \
+	--exclude='.vscode' \
+	--exclude='.vscode/*' \
+	--exclude='results' \
+	--exclude='results/*' \
+	--exclude='logs' \
+	--exclude='logs/*' \
+	--exclude='Manifest.toml' \
 	--exclude='*/._*' \
 	--exclude='*__pycache__*' \
 	-cvzf openempire_jl.tar.gz *
@@ -75,9 +83,12 @@ echo "Copying archive to $REMOTE_SERVER..."
 scp openempire_jl.tar.gz "$REMOTE_USER@$REMOTE_SERVER:$REMOTE_DIR"
 
 echo "Extracting archive on remote..."
+# The cluster's Manifest.toml is left alone. It is excluded from the archive, so
+# deleting it here would force a full re-resolve (several minutes) on every
+# upload; the manifest is resolved against the cluster's Julia and should
+# persist. `Pkg.instantiate()` still re-resolves when Project.toml has moved on.
 ssh "$REMOTE_USER@$REMOTE_SERVER" <<EOF
     cd $REMOTE_DIR
-    rm -f Manifest.toml
     tar --warning=no-unknown-keyword -xvzf openempire_jl.tar.gz
     rm openempire_jl.tar.gz
     chmod +x scripts/*
