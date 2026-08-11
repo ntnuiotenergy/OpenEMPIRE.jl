@@ -381,6 +381,7 @@ function test_write_solution_csv_tables()
         Storage = ["battery"],
         Technology = ["Solar"],
         Node = ["A", "B"],
+        OffshoreEnergyHub = ["B"],
         DirectionalLink = [("A", "B"), ("B", "A")],
         TransmissionType = ["HVDC"],
         TransmissionTypeOfDirectionalLink = [("A", "B", "HVDC"), ("B", "A", "HVDC")],
@@ -434,6 +435,8 @@ function test_write_solution_csv_tables()
     @constraint(emp, emp[:transmissionOperational]["A", "B", second_time] == 14.0)
     @constraint(emp, emp[:transmissionOperational]["B", "A", first_time] == 15.0)
     @constraint(emp, emp[:transmissionOperational]["B", "A", second_time] == 16.0)
+    @constraint(emp, emp[:offshoreConvInvCap]["B", sp] == 17.0)
+    @constraint(emp, emp[:offshoreConvInstalledCap]["B", sp] == 18.0)
     @objective(emp, Min, emp[:genInvCap]["A", "Solar", sp])
     optimize!(emp)
 
@@ -449,6 +452,8 @@ function test_write_solution_csv_tables()
             "investment_costs.csv",
             "loadShed.csv",
             "marginal_costs.csv",
+            "offshoreConvInstalledCap.csv",
+            "offshoreConvInvCap.csv",
             "results_objective.csv",
             "results_output_EuropePlot.csv",
             "results_output_EuropeSummary.csv",
@@ -473,6 +478,20 @@ function test_write_solution_csv_tables()
 
         @test sort(readdir(output_dir)) == sort(expected_files)
         @test all(endswith(file, ".csv") for file in readdir(output_dir))
+
+        offshore_inv = collect(CSV.File(joinpath(output_dir, "offshoreConvInvCap.csv")))
+        @test propertynames(first(offshore_inv)) == [:Node, :Period, :offshoreConvInvCap]
+        @test length(offshore_inv) == 1
+        @test offshore_inv[1].Node == "B"
+        @test offshore_inv[1].Period == 1
+        @test offshore_inv[1].offshoreConvInvCap ≈ 17.0
+
+        offshore_cap = collect(CSV.File(joinpath(output_dir, "offshoreConvInstalledCap.csv")))
+        @test propertynames(first(offshore_cap)) == [:Node, :Period, :offshoreConvInstalledCap]
+        @test length(offshore_cap) == 1
+        @test offshore_cap[1].Node == "B"
+        @test offshore_cap[1].Period == 1
+        @test offshore_cap[1].offshoreConvInstalledCap ≈ 18.0
 
         gen_inv = collect(CSV.File(joinpath(output_dir, "genInvCap.csv")))
         @test propertynames(first(gen_inv)) == [:Node, :Generator, :Period, :genInvCap]

@@ -1470,6 +1470,17 @@ function write_investment_csvs(output_dir::AbstractString, emp::JuMP.Model, sets
     _write_csv_rows(joinpath(output_dir, "transmissionInvCap.csv"), trans_rows)
     _write_csv_rows(joinpath(output_dir, "transmissionInstalledCap.csv"), trans_cap_rows)
 
+    offshore_inv = emp[:offshoreConvInvCap]
+    offshore_cap = emp[:offshoreConvInstalledCap]
+    offshore_inv_rows = NamedTuple{(:Node, :Period, :offshoreConvInvCap), Tuple{String, Int, Float64}}[]
+    offshore_cap_rows = NamedTuple{(:Node, :Period, :offshoreConvInstalledCap), Tuple{String, Int, Float64}}[]
+    for n in offshore_energy_hubs(sets), (period_index, sp) in strategic_periods
+        push!(offshore_inv_rows, (Node = n, Period = period_index, offshoreConvInvCap = _solution_value(offshore_inv[n, sp])))
+        push!(offshore_cap_rows, (Node = n, Period = period_index, offshoreConvInstalledCap = _solution_value(offshore_cap[n, sp])))
+    end
+    _write_csv_rows(joinpath(output_dir, "offshoreConvInvCap.csv"), offshore_inv_rows)
+    _write_csv_rows(joinpath(output_dir, "offshoreConvInstalledCap.csv"), offshore_cap_rows)
+
     stor_pw_inv = emp[:storPWInvCap]
     stor_pw_cap = emp[:storPWInstalledCap]
     stor_en_inv = emp[:storENInvCap]
