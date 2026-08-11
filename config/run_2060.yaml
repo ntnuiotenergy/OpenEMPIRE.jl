@@ -21,11 +21,10 @@ n_cluster : 10                                         #
 moment_matching : False                                #
 n_tree_compare : 20                                    # Number of trees to compare for moment matching and copula-sampling
 use_emission_cap: True                                 # Indicates if there's a cap on CO2 emissions
-compute_operational_duals: True                        # Resolve empire with fixed investment variables and write new duals
+compute_operational_duals: False                       # Resolve empire with fixed investment variables and write new duals
 print_in_iamc_format: False                            # Output should be printed in a IAMC-compatible format
 write_in_lp_format: False                              # Problem should be written in Linear Programming format
 serialize_instance: False                              # Serialize the data structure or model for later use
-north_sea: True                                        # Whether the north sea is modelled or not
 leap_years_investment: 5                               # Number of years per period (default: 5)
 time_format: "%d/%m/%Y %H:%M"                          # Time format for scenario data files
 

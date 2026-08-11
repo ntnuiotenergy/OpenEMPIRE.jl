@@ -95,6 +95,12 @@ gas_scenario_index(combined::Integer, gas_count::Integer) =
 scenario_peak_count(config) = Int(get(config, "n_peak_seasons", 2))
 scenario_peak_hours(config) = Int(get(config, "len_peak_season", 24))
 
+# Bug-for-bug compatibility with InternalEMPIRE's Pyomo Param(default=1.0) for
+# missing seasonal-hydro samples. Remove this key and compatibility path when the
+# reference replaces that silent default with explicit scenario input.
+const INTERNALEMPIRE_MISSING_HYDRO_RAW_DEFAULT_KEY =
+    "internalempire_missing_hydro_raw_default_mw"
+
 const LoadScenarioRow = NamedTuple{
     (:Node, :Operationalhour, :Scenario, :Period, :ElectricLoadRaw_in_MW),
     Tuple{String, Int, String, Int, Float64},
@@ -154,7 +160,14 @@ function read_scenario_data!(
     scenario_files = _generated_scenario_csv_files(data_folder)
     has_csvs = isfile.(scenario_files)
     if all(has_csvs)
-        return read_generated_scenario_csv!(data_folder, periods, params, sets, season_for_hour)
+        return read_generated_scenario_csv!(
+            data_folder,
+            periods,
+            params,
+            sets,
+            season_for_hour,
+            config,
+        )
     elseif any(has_csvs)
         missing_files = collect(scenario_files)[.!collect(has_csvs)]
         throw(ArgumentError(
@@ -248,20 +261,88 @@ function _read_raw_scenario_table(path::AbstractString, dateformat::DateFormat)
     return RawScenarioTable(columns, timestamps, years, months, values)
 end
 
+const OFFSHORE_WIND_GENERATORS = ("Windoffshore", "Windoffshoregrounded", "Windoffshorefloating")
+
+"""
+Raw scenario columns skipped so the port reproduces InternalEMPIRE's results.
+
+`full_model_int` supplies Norway as five per-elspot-area columns, but
+`scenario_random.py` only special-cases a single aggregate `"NO"` column and its
+`dict_countries` has no `NO1`..`NO5` keys, so those columns match neither branch and are
+dropped. With `genCapAvailStochRaw` defaulting to 0.0, Norwegian solar, onshore wind and
+run-of-river cannot generate at all in the reference.
+
+That looks like a defect rather than a modelling choice, and it is worth about 2.9% of
+system cost, so it is raised with Stian in `issues_for_stian.md`. It is mirrored here
+only to keep the two models comparable. **Empty this set the moment the reference
+handles those columns** -- it is the one place the port knowingly reproduces a bug.
+"""
+const INTERNALEMPIRE_SKIPPED_COLUMNS = ("NO1", "NO2", "NO3", "NO4", "NO5")
+
+"""
+    _fold_name(s)
+
+Accent-folded, lowercased form of a node name, used only to match a raw scenario
+column against the dataset's spelling of the same node.
+
+`COUNTRY_NODE_MAPPING` carries the open datasets' ASCII spellings
+(`HelgolanderBucht`, `Nordsoen`, `SorligeNordsjoI/II`), while `full_model_int`
+spells the same four nodes with diacritics. Without folding, those columns resolved
+to a name no node had and their availability was dropped in silence -- the four
+wind farms simply never generated.
+"""
+function _fold_name(s::AbstractString)
+    folded = replace(
+        s,
+        'ø' => 'o', 'Ø' => 'O', 'å' => 'a', 'Å' => 'A',
+        'æ' => "ae", 'Æ' => "AE", 'ð' => 'd', 'Ð' => 'D', 'þ' => "th", 'Þ' => "TH",
+    )
+    return lowercase(Unicode.normalize(folded; stripmark = true))
+end
+
 function _node_name(raw::AbstractString, node_set::Set{String})
     raw in node_set && return raw
     mapped = get(COUNTRY_NODE_MAPPING, raw, raw)
     mapped in node_set && return mapped
+    # Fall back to an accent-insensitive match against the dataset's own spelling.
+    target = _fold_name(mapped)
+    for node in node_set
+        _fold_name(node) == target && return node
+    end
     return nothing
 end
 
-function _node_names_for_generator(raw::AbstractString, generator::AbstractString, node_set::Set{String})
+function _node_names_for_generator(
+    raw::AbstractString,
+    generator::AbstractString,
+    node_set::Set{String},
+    offshore_node_set::Set{String},
+)
+    # With the north sea modelled, InternalEMPIRE samples the offshore series three
+    # times (scenario_random.py): Windoffshoregrounded and Windoffshorefloating through
+    # `dict_offshr_nodes`, then Windoffshoregrounded again through `dict_countries`. So
+    # grounded offshore wind gets availability at the offshore farms *and* at the
+    # country nodes, while floating is confined to the farms. Only floating is
+    # restricted here; treating both as offshore-only strips the country-level grounded
+    # capacity and makes the system markedly more expensive.
+    offshore_only = generator == "Windoffshorefloating"
+
+    # See INTERNALEMPIRE_SKIPPED_COLUMNS: mirrors the reference dropping these.
+    if !offshore_only && raw in INTERNALEMPIRE_SKIPPED_COLUMNS
+        return String[]
+    end
+
     exact = _node_name(raw, node_set)
-    exact !== nothing && return [exact]
+    if exact !== nothing
+        offshore_only && !(exact in offshore_node_set) && return String[]
+        return [exact]
+    end
 
     if raw == "NO"
-        start_area = generator in ("Windoffshore", "Windoffshoregrounded", "Windoffshorefloating") ? 2 : 1
-        return [node for node in ("NO$(i)" for i in start_area:5) if node in node_set]
+        start_area = offshore_only ? 2 : 1
+        candidates = [node for node in ("NO$(i)" for i in start_area:5) if node in node_set]
+        offshore_only && (candidates = [n for n in candidates if n in offshore_node_set])
+        return candidates
     end
 
     return String[]
@@ -777,6 +858,289 @@ function _get_fixed_sample(key, period::Int, scenario::Int, season::AbstractStri
     return sample
 end
 
+# ===== Copula-cluster scenario generation reduction (SGR) =====
+#
+# Stratifies regular-season sampling by clustering candidate (year, hour-window)
+# combinations on the empirical copula (rank-transformed, uniform-margin) of one
+# or more input variables across all their nodes, via k-means. Sampling then
+# round-robins through the clusters instead of sampling purely at random, so
+# scenarios are pulled from all regimes (e.g. low-load vs. high-load weeks).
+
+const COPULA_VARIABLE_NAMES = ("electricload", "hydroseasonal", "solar", "windonshore", "windoffshore", "hydroror")
+
+const CopulaClusterRow = NamedTuple{
+    (:Season, :Year, :SampleIndex, :ClusterGroup),
+    Tuple{String, Int, Int, Int},
+}
+
+_copula_cluster_path(data_folder) = joinpath(data_folder, "Copulas", "CopulaClusters", "copula_clusters.csv")
+
+function _copula_source_table(name::AbstractString, load_table::RawScenarioTable, hydro_table::RawScenarioTable, generator_sources)
+    name == "electricload" && return load_table
+    name == "hydroseasonal" && return hydro_table
+    for (gen_name, table) in generator_sources
+        name == "solar" && gen_name == "Solar" && return table
+        name == "windonshore" && gen_name == "Windonshore" && return table
+        name == "hydroror" && gen_name == "Hydrorun-of-the-river" && return table
+        name == "windoffshore" && startswith(gen_name, "Windoffshore") && return table
+    end
+    return nothing
+end
+
+function _copula_source_tables(copulas_to_use, load_table::RawScenarioTable, hydro_table::RawScenarioTable, generator_sources)
+    isempty(copulas_to_use) && throw(ArgumentError("copulas_to_use must contain at least one variable"))
+    tables = Tuple{String, RawScenarioTable}[]
+    for name in copulas_to_use
+        table = _copula_source_table(String(name), load_table, hydro_table, generator_sources)
+        table === nothing && throw(ArgumentError(
+            "Unknown copula variable \"$name\" in copulas_to_use. Valid options: " *
+            join(COPULA_VARIABLE_NAMES, ", "),
+        ))
+        push!(tables, (String(name), table))
+    end
+    return tables
+end
+
+# Candidate count per year, matching Python's `make_mean`:
+#
+#     for j in range(max_sample - regularSeasonHours - 1)
+#
+# `range` is exclusive, so the last offset Python considers is
+# `length(indices) - regular_hours - 2`, two short of the last window that
+# actually fits. `_filter_metric_rows` reproduces the same bound for the scenario
+# filter via Python's `make_ws`, so both stratification paths agree with the
+# reference implementation and with each other.
+function _copula_candidate_count(table::RawScenarioTable, year::Int, season::AbstractString, regular_hours::Int)
+    indices = _season_indices(table, year, season)
+    return length(indices) - regular_hours - 1
+end
+
+function _copula_candidate_windows(tables, years, season::AbstractString, regular_hours::Int)
+    candidates = Tuple{Int, Int}[]
+    for year in years
+        candidate_count = minimum(_copula_candidate_count(table, year, season, regular_hours) for table in tables)
+        candidate_count <= 0 && continue
+        for offset in 0:(candidate_count - 1)
+            push!(candidates, (year, offset))
+        end
+    end
+    isempty(candidates) && throw(ArgumentError(
+        "No candidate $season windows available for copula clustering in years $years",
+    ))
+    return candidates
+end
+
+function _copula_window_mean(table::RawScenarioTable, col::String, year::Int, season::AbstractString, offset::Int, regular_hours::Int)
+    indices = _sample_regular_indices(table, year, season, offset, regular_hours)
+    return mean(view(table.values[col], indices))
+end
+
+"""
+    _copula_window_means(table, col, candidates, season, regular_hours)
+
+Window means for `col` over every `(year, offset)` in `candidates`.
+
+Equivalent to mapping [`_copula_window_mean`] over `candidates`, but
+`_season_indices` scans the whole table, so it is resolved once per year instead
+of once per candidate window. That lookup otherwise dominates catalog
+construction: on `europe_v51` it is ~350k scans per season. Windows are still
+averaged with `mean` over the same elements in the same order, so results are
+unchanged.
+"""
+function _copula_window_means(
+    table::RawScenarioTable,
+    col::String,
+    candidates::Vector{Tuple{Int, Int}},
+    season::AbstractString,
+    regular_hours::Int,
+)
+    values = table.values[col]
+    year_indices = Dict{Int, Vector{Int}}()
+    for (year, _) in candidates
+        haskey(year_indices, year) && continue
+        year_indices[year] = _season_indices(table, year, season)
+    end
+
+    means = Vector{Float64}(undef, length(candidates))
+    for (i, (year, offset)) in enumerate(candidates)
+        indices = year_indices[year]
+        if offset < 0 || offset + regular_hours > length(indices)
+            throw(ArgumentError(
+                "Invalid sample window for $season $year: hour $offset with length " *
+                "$regular_hours but only $(length(indices)) rows are available",
+            ))
+        end
+        means[i] = mean(view(values, view(indices, (offset + 1):(offset + regular_hours))))
+    end
+    return means
+end
+
+# Ordinal rank (ties broken by order of appearance, matching pandas' rank(method="first"))
+# divided by N, transforming to a uniform-margin empirical copula.
+function _rank_transform(values::Vector{Float64})
+    n = length(values)
+    order = sortperm(values; alg = Base.Sort.MergeSort)
+    ranks = Vector{Float64}(undef, n)
+    for (rank, idx) in enumerate(order)
+        ranks[idx] = rank
+    end
+    return ranks ./ n
+end
+
+# Runs k-means `n_init` times with k-means++ initialization (matching sklearn's
+# default) and keeps the lowest-cost run, since Clustering.jl has no built-in
+# multi-restart option. Cluster labels are canonicalized by sorting the centers
+# so that `ClusterGroup` values are deterministic rather than arbitrary, matching
+# `_cluster_filter_rows`. Returns 0-indexed cluster assignments.
+function _best_kmeans(X::Matrix{Float64}, k::Int, rng; n_init::Int = 100, season = nothing)
+    n_init > 0 || throw(ArgumentError("K-means initialization count must be positive"))
+    label = season === nothing ? "copula clustering" : "season $season"
+
+    best = nothing
+    best_cost = Inf
+    for _ in 1:n_init
+        result = Clustering.kmeans(X, k; init = :kmpp, maxiter = 300, rng)
+        if isfinite(result.totalcost) && result.totalcost < best_cost
+            best = result
+            best_cost = result.totalcost
+        end
+    end
+    best === nothing && throw(ArgumentError(
+        "K-means did not produce a finite result for $label",
+    ))
+    all(>(0), best.counts) || throw(ArgumentError(
+        "K-means produced an empty cluster for $label",
+    ))
+
+    center_order = sortperm(1:k; by = cluster -> (best.centers[:, cluster], cluster))
+    canonical_group = Vector{Int}(undef, k)
+    for (group, cluster) in enumerate(center_order)
+        canonical_group[cluster] = group - 1
+    end
+    return [canonical_group[assignment] for assignment in Clustering.assignments(best)]
+end
+
+# Column layout mirrors Python's `make_copula_filter`, which writes
+# `Year,Season,SampleIndex,Value1..ValueN,ClusterGroup`. `ValueI` is the
+# rank-transformed window mean of the I-th feature dimension, i.e. the uniform
+# margin the clustering actually ran on. Persisting those columns is what makes a
+# Julia catalog directly comparable with a Python one: the `ClusterGroup` labels
+# cannot be diffed (Python leaves K-means labelling arbitrary, this port
+# canonicalises it), so the `Value` columns are the part that can.
+#
+# Sampling reads only the four index columns, and `_read_copula_clusters` looks up
+# fields by name, so the extra columns are inert at read time.
+function _copula_cluster_table(rows::Vector{CopulaClusterRow}, value_columns::Vector{Vector{Float64}})
+    names = (
+        :Year, :Season, :SampleIndex,
+        (Symbol("Value", i) for i in eachindex(value_columns))...,
+        :ClusterGroup,
+    )
+    columns = (
+        [row.Year for row in rows],
+        [row.Season for row in rows],
+        [row.SampleIndex for row in rows],
+        value_columns...,
+        [row.ClusterGroup for row in rows],
+    )
+    return NamedTuple{names}(columns)
+end
+
+"""
+    make_copula_clusters(data_folder, regular_seasons, regular_hours, copulas_to_use, n_cluster,
+                          load_table, hydro_table, generator_sources, rng; n_init=100)
+
+Cluster candidate regular-season sampling windows by the empirical copula of
+`copulas_to_use` across all of their nodes, and write the result to
+`Copulas/CopulaClusters/copula_clusters.csv` under `data_folder`.
+
+Clustering consumes `rng`, so a fixed seed reproduces the same cluster catalog.
+"""
+function make_copula_clusters(
+    data_folder,
+    regular_seasons,
+    regular_hours::Int,
+    copulas_to_use,
+    n_cluster::Int,
+    load_table::RawScenarioTable,
+    hydro_table::RawScenarioTable,
+    generator_sources,
+    rng;
+    n_init::Int = 100,
+)
+    source_tables = _copula_source_tables(copulas_to_use, load_table, hydro_table, generator_sources)
+    years = _sample_years((table for (_, table) in source_tables)...)
+
+    rows = CopulaClusterRow[]
+    value_columns = Vector{Float64}[]
+    for season in regular_seasons
+        candidates = _copula_candidate_windows((table for (_, table) in source_tables), years, season, regular_hours)
+        n_candidates = length(candidates)
+        n_cluster <= n_candidates || throw(ArgumentError(
+            "n_cluster=$n_cluster exceeds the number of candidate $season windows " *
+            "($n_candidates) available for copula clustering",
+        ))
+
+        dims = Vector{Float64}[]
+        for (_, table) in source_tables, col in table.columns
+            means = _copula_window_means(table, col, candidates, season, regular_hours)
+            push!(dims, _rank_transform(means))
+        end
+
+        if isempty(value_columns)
+            value_columns = [Float64[] for _ in dims]
+        end
+        length(value_columns) == length(dims) || throw(ArgumentError(
+            "Season $season produced $(length(dims)) copula dimensions, but earlier " *
+            "seasons produced $(length(value_columns))",
+        ))
+        for (dimension, ranks) in enumerate(dims)
+            append!(value_columns[dimension], ranks)
+        end
+
+        X = permutedims(reduce(hcat, dims))
+        cluster_of = _best_kmeans(X, n_cluster, rng; n_init, season)
+
+        for (i, (year, offset)) in enumerate(candidates)
+            push!(rows, (Season = String(season), Year = year, SampleIndex = offset, ClusterGroup = cluster_of[i]))
+        end
+    end
+
+    path = _copula_cluster_path(data_folder)
+    mkpath(dirname(path))
+    CSV.write(path, _copula_cluster_table(rows, value_columns))
+    return rows
+end
+
+function _read_copula_clusters(data_folder)
+    path = _copula_cluster_path(data_folder)
+    isfile(path) || throw(ArgumentError(
+        "copula_clusters_use is true, but no copula cluster file found at $path. " *
+        "Set copula_clusters_make=true first to build it.",
+    ))
+    rows = CopulaClusterRow[]
+    for row in CSV.File(path; normalizenames = false)
+        push!(rows, (
+            Season = String(row.Season),
+            Year = Int(row.Year),
+            SampleIndex = Int(row.SampleIndex),
+            ClusterGroup = Int(row.ClusterGroup),
+        ))
+    end
+    return rows
+end
+
+function _pick_copula_cluster_sample(rng, clusters::Vector{CopulaClusterRow}, season::AbstractString, cluster::Int)
+    matches = filter(r -> r.Season == season && r.ClusterGroup == cluster, clusters)
+    isempty(matches) && throw(ArgumentError(
+        "No candidate windows found for season=$season, cluster=$cluster in copula_clusters.csv",
+    ))
+    year = rand(rng, unique(r.Year for r in matches))
+    year_matches = filter(r -> r.Year == year, matches)
+    sample_hour = rand(rng, [r.SampleIndex for r in year_matches])
+    return year, sample_hour
+end
+
 _scenario_name(scenario_index::Int) = "scenario$scenario_index"
 _normalized_scenario_value(value) = value <= 0.001 ? 0.0 : value
 
@@ -931,11 +1295,12 @@ end
 
 function _generator_columns(table::RawScenarioTable, generator::AbstractString, sets)
     node_set = Set(nodes(sets))
+    offshore_node_set = union(offshore_wind_farm_nodes(sets), offshore_energy_hubs(sets))
     node_gens = Set(sets.GeneratorsOfNode)
     mapping = Tuple{String, Vector{Tuple{String, String}}}[]
     for col in table.columns
         pairs = Tuple{String, String}[]
-        for node in _node_names_for_generator(col, generator, node_set)
+        for node in _node_names_for_generator(col, generator, node_set, offshore_node_set)
             (node, generator) in node_gens && push!(pairs, (node, generator))
         end
         !isempty(pairs) && push!(mapping, (col, pairs))
@@ -1032,6 +1397,35 @@ function generate_scenario_csv!(data_folder, periods, params::EmpireParams, sets
     end
     filter_cluster = n_cluster - 1
 
+    copula_clusters_make = get(config, "copula_clusters_make", false)
+    copula_clusters_use = get(config, "copula_clusters_use", false)
+    copulas_to_use = get(config, "copulas_to_use", ["electricload"])
+
+    if copula_clusters_make
+        @info "Making copula clusters..."
+        make_copula_clusters(
+            data_folder,
+            regular_seasons,
+            regular_hours,
+            copulas_to_use,
+            n_cluster,
+            load_table,
+            hydro_table,
+            generator_sources,
+            rng,
+        )
+    end
+    # Only load the catalog when copula clustering will actually drive sampling.
+    # Fixed sampling and the scenario filter both take precedence, and a stale
+    # `copula_clusters_use: true` left in a config must not fail those runs.
+    copula_clusters =
+        if !fixed_sample && copula_clusters_use && filter_groups === nothing
+            _read_copula_clusters(data_folder)
+        else
+            nothing
+        end
+    cluster_state = Ref(n_cluster - 1)
+
     load_columns = _node_columns(load_table, sets)
     hydro_columns = _node_columns(hydro_table, sets)
     generator_columns = Dict(g => _generator_columns(table, g, sets) for (g, table) in generator_sources)
@@ -1067,6 +1461,9 @@ function generate_scenario_csv!(data_folder, periods, params::EmpireParams, sets
                         rng,
                         filter_groups[(String(season), filter_cluster)],
                     )
+                elseif copula_clusters !== nothing
+                    cluster_state[] = mod(cluster_state[] + 1, n_cluster)
+                    year, sample_hour = _pick_copula_cluster_sample(rng, copula_clusters, season, cluster_state[])
                 else
                     year = rand(rng, sample_years)
                     sample_hour = _random_regular_sample(rng, load_table, year, season, regular_hours)
@@ -1212,6 +1609,7 @@ function generate_scenario_csv!(data_folder, periods, params::EmpireParams, sets
 
     params.sloadRaw = _build_node_profiles(load_profiles, periods)
     params.maxRegHydroGenRaw = _build_node_profiles(hydro_profiles, periods)
+    _fill_internalempire_missing_hydro_raw!(params, sets, config)
     params.genCapAvail = _build_generator_profiles(gen_profiles, periods)
     _fill_missing_stochastic_availability!(params, sets, periods)
     _validate_stochastic_availability(params, sets)
@@ -1328,6 +1726,7 @@ function read_generated_scenario_csv!(
     params::EmpireParams,
     sets,
     season_for_hour::Dict{Int, Int},
+    config,
 )
     sload_file, hydro_file, availability_file = _generated_scenario_csv_files(data_folder)
 
@@ -1343,6 +1742,7 @@ function read_generated_scenario_csv!(
         season_for_hour,
         :HydroGeneratorMaxSeasonalProduction,
     )
+    _fill_internalempire_missing_hydro_raw!(params, sets, config)
     params.genCapAvail = _read_generated_generator_profiles(
         availability_file,
         periods,
@@ -1351,5 +1751,20 @@ function read_generated_scenario_csv!(
     _fill_missing_stochastic_availability!(params, sets, periods)
     _validate_stochastic_availability(params, sets)
 
+    return params
+end
+
+function _fill_internalempire_missing_hydro_raw!(params, sets, config)
+    haskey(config, INTERNALEMPIRE_MISSING_HYDRO_RAW_DEFAULT_KEY) || return params
+    default = Float64(config[INTERNALEMPIRE_MISSING_HYDRO_RAW_DEFAULT_KEY])
+    default >= 0 || throw(ArgumentError(
+        "$(INTERNALEMPIRE_MISSING_HYDRO_RAW_DEFAULT_KEY) must be non-negative",
+    ))
+
+    for node in nodes(sets)
+        any(generator -> is_reg_hydro(sets, generator), generators(sets, node)) || continue
+        haskey(params.maxRegHydroGenRaw, node) && continue
+        params.maxRegHydroGenRaw[node] = FixedProfile(default)
+    end
     return params
 end

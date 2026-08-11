@@ -182,6 +182,15 @@ query memberships in O(1).
   capacity is linked to its power capacity.
 - `Technology::Vector{TechId}`: all technology ids.
 - `Node::Vector{NodeId}`: all node ids.
+- `OffshoreWindFarmNode::Set{NodeId}`: subset of `Node` holding offshore wind
+  farms. Their own installed generation caps the transmission corridors adjacent
+  to them, so a member with no generators would pin those corridors to zero
+  capacity; `validate!` rejects that rather than letting it happen silently.
+- `OffshoreEnergyHub::Set{NodeId}`: subset of `Node` holding offshore energy
+  hubs — junctions that route power between wind farms and shore without
+  generating anything themselves. Disjoint from `OffshoreWindFarmNode`: a hub is
+  limited by its converter capacity, not by generation it does not have.
+  Currently read and validated only; the converter formulation is not ported yet.
 - `DirectionalLink::Vector{Arc}`: directed transmission arcs `(from, to)`.
   Bidirectional corridors appear as two entries.
 - `TransmissionType::Vector{TransmissionTypeId}`: available transmission
@@ -247,6 +256,8 @@ struct EmpireSets
     DependentStorage::Set{StorId}
     Technology::Vector{TechId}
     Node::Vector{NodeId}
+    OffshoreWindFarmNode::Set{NodeId}
+    OffshoreEnergyHub::Set{NodeId}
     DirectionalLink::Vector{Arc}
     TransmissionType::Vector{TransmissionTypeId}
     TransmissionTypeOfDirectionalLink::Vector{ArcTransmissionType}
@@ -271,6 +282,8 @@ function EmpireSets(
     DependentStorage::Set{StorId},
     Technology::Vector{TechId},
     Node::Vector{NodeId},
+    OffshoreWindFarmNode::Set{NodeId},
+    OffshoreEnergyHub::Set{NodeId},
     DirectionalLink::Vector{Arc},
     TransmissionType::Vector{TransmissionTypeId},
     TransmissionTypeOfDirectionalLink::Vector{ArcTransmissionType},
@@ -324,6 +337,8 @@ function EmpireSets(
         DependentStorage,
         Technology,
         Node,
+        OffshoreWindFarmNode,
+        OffshoreEnergyHub,
         DirectionalLink,
         TransmissionType,
         TransmissionTypeOfDirectionalLink,
@@ -353,6 +368,8 @@ function EmpireSets(
     DependentStorage::Union{AbstractVector{<:AbstractString}, AbstractSet{<:AbstractString}} = String[],
     Technology::AbstractVector{<:AbstractString} = String[],
     Node::AbstractVector{<:AbstractString} = String[],
+    OffshoreWindFarmNode::Union{AbstractVector{<:AbstractString}, AbstractSet{<:AbstractString}} = String[],
+    OffshoreEnergyHub::Union{AbstractVector{<:AbstractString}, AbstractSet{<:AbstractString}} = String[],
     DirectionalLink::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString}} = Tuple{String, String}[],
     TransmissionType::AbstractVector{<:AbstractString} = String[],
     TransmissionTypeOfDirectionalLink::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString, <:AbstractString}} =
@@ -373,6 +390,8 @@ function EmpireSets(
         Set(String.(collect(DependentStorage))),
         String.(Technology),
         String.(Node),
+        Set(String.(collect(OffshoreWindFarmNode))),
+        Set(String.(collect(OffshoreEnergyHub))),
         Arc[(String(m), String(n)) for (m, n) in DirectionalLink],
         String.(TransmissionType),
         ArcTransmissionType[(String(m), String(n), String(tt)) for (m, n, tt) in TransmissionTypeOfDirectionalLink],
@@ -387,6 +406,8 @@ end
 
 # Accessors, prefer to use this instead of direct field access
 nodes(sets::EmpireSets) = sets.Node
+offshore_wind_farm_nodes(sets::EmpireSets) = sets.OffshoreWindFarmNode
+offshore_energy_hubs(sets::EmpireSets) = sets.OffshoreEnergyHub
 generators(sets::EmpireSets) = sets.Generator
 thermal_generators(sets::EmpireSets) = sets.ThermalGenerators
 hydro_generators(sets::EmpireSets) = sets.HydroGenerator
@@ -398,6 +419,8 @@ transmission_types(sets::EmpireSets) = sets.TransmissionType
 arcs(sets::EmpireSets) = sets.DirectionalLink
 bidir_arcs(sets::EmpireSets) = sets.Corridors
 is_bidir(m, n) = m < n
+is_offshore_wind_farm(sets::EmpireSets, n) = n in sets.OffshoreWindFarmNode
+is_offshore_energy_hub(sets::EmpireSets, n) = n in sets.OffshoreEnergyHub
 generators(sets::EmpireSets, n) = get(sets.GeneratorsByNode, n, GenId[])
 node_generators(sets::EmpireSets) = sets.GeneratorsOfNode
 is_thermal(sets::EmpireSets, g) = g in sets.ThermalGenerators
@@ -469,6 +492,28 @@ function validate!(sets::EmpireSets)
         throw(ArgumentError("All RegHydroGenerator entries must exist in Generator"))
     isempty(setdiff(dependent_storages(sets), storage_set)) ||
         throw(ArgumentError("All DependentStorage entries must exist in Storage"))
+    isempty(setdiff(offshore_wind_farm_nodes(sets), node_set)) ||
+        throw(ArgumentError("All OffshoreWindFarmNode entries must exist in Node"))
+    isempty(setdiff(offshore_energy_hubs(sets), node_set)) ||
+        throw(ArgumentError("All OffshoreEnergyHub entries must exist in Node"))
+    let both = intersect(offshore_wind_farm_nodes(sets), offshore_energy_hubs(sets))
+        isempty(both) || throw(ArgumentError(
+            "Nodes listed as both an offshore wind farm and an energy hub: $(sort(collect(both))). " *
+            "A wind farm's corridors are capped by its own generation; a hub's are capped by its " *
+            "converter capacity. A node cannot be both.",
+        ))
+    end
+    # A wind farm caps its corridors by its own installed generation, so one with no
+    # generators would force them to zero capacity and silently disconnect the node.
+    # This is what "all nodes minus onshore nodes" produces when it sweeps up energy
+    # hubs and platforms, so reject it here instead of solving a disconnected model.
+    let barren = [n for n in offshore_wind_farm_nodes(sets) if isempty(generators(sets, n))]
+        isempty(barren) || throw(ArgumentError(
+            "OffshoreWindFarmNode entries with no generators: $(sort(barren)). " *
+            "Their transmission corridors would be capped at zero. Energy hubs belong in " *
+            "OffshoreEnergyHub; nodes that are merely offshore belong in neither set.",
+        ))
+    end
 
     # Subset relations between generator categories
     isempty(setdiff(reg_hydro_generators(sets), hydro_generators(sets))) ||

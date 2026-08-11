@@ -83,6 +83,7 @@ function create_variables(
     periods::TimeStruct.TimeStructure;
     natural_gas::Bool = false,
     hydrogen::Bool = false,
+    gas_transport_demand::Bool = hydrogen,
     progress = nothing,
 )
 
@@ -103,6 +104,13 @@ function create_variables(
     # Investments in new transmission capacity and tracking installed capacity
     @variable(emp, transmissionInvCap[N, N, SP] >= 0; container = IndexedVarArray)
     @variable(emp, transmissionInstalledCap[N, N, SP] >= 0; container = IndexedVarArray)
+
+    # Investment in offshore energy-hub converter capacity and tracking installed capacity.
+    # Hubs generate nothing, so what limits the power they can route is the converter
+    # equipment on the platform, which has to be built and paid for.
+    HUB = collect(offshore_energy_hubs(sets))
+    @variable(emp, offshoreConvInvCap[HUB, SP] >= 0; container = IndexedVarArray)
+    @variable(emp, offshoreConvInstalledCap[HUB, SP] >= 0; container = IndexedVarArray)
 
     # Investment in new storage capacity and tracking installed capacity
     @variable(emp, storPWInvCap[N, S, SP] >= 0; container = IndexedVarArray)
@@ -128,6 +136,10 @@ function create_variables(
     for (n, m) in bidir_arcs(sets), sp in SP
         unsafe_insertvar!(transmissionInvCap, n, m, sp)
         unsafe_insertvar!(transmissionInstalledCap, n, m, sp)
+    end
+    for n in HUB, sp in SP
+        unsafe_insertvar!(offshoreConvInvCap, n, sp)
+        unsafe_insertvar!(offshoreConvInstalledCap, n, sp)
     end
     for (n, s) in node_storages(sets), sp in SP
         unsafe_insertvar!(storPWInvCap, n, s, sp)
@@ -162,7 +174,9 @@ function create_variables(
     for n in N, t in T
         unsafe_insertvar!(loadShed, n, t)
     end
-    natural_gas && create_natural_gas_variables!(emp, sets, periods)
+    natural_gas && create_natural_gas_variables!(
+        emp, sets, periods; transport_demand = gas_transport_demand,
+    )
     hydrogen && create_hydrogen_variables!(emp, sets, periods)
     return
 end
@@ -173,73 +187,16 @@ function create_objective(
     par,
     periods::TimeStructure,
     discounter::Discounter;
-    natural_gas::Bool = false,
-    hydrogen::Bool = false,
+    natural_gas::Bool = has_natural_gas(sets),
+    hydrogen::Bool = has_hydrogen(sets),
     progress = nothing,
 )
     @info "Creating objective function"
     _report_progress(progress, "Creating objective function")
-    N = nodes(sets)
-    SP = strat_periods(periods)
 
-    genInvCap = emp[:genInvCap]
-    transInvCap = emp[:transmissionInvCap]
-    storInvCapPow = emp[:storPWInvCap]
-    storInvCapEn = emp[:storENInvCap]
+    components = objective_component_expressions(emp, sets, par, periods, discounter)
 
-    shed = emp[:loadShed]
-    genOp = emp[:genOperational]
-    gas_costs = natural_gas ?
-                natural_gas_objective_expressions(emp, sets, par, periods, discounter) :
-                (
-        terminal_import = JuMP.AffExpr(0.0),
-        transport_shedding = JuMP.AffExpr(0.0),
-    )
-    hydrogen_costs = hydrogen ?
-                     hydrogen_objective_expressions(emp, sets, par, periods, discounter) :
-                     (
-        investment = JuMP.AffExpr(0.0),
-        terminal_import = JuMP.AffExpr(0.0),
-        reformer_operation = JuMP.AffExpr(0.0),
-        transport_shedding = JuMP.AffExpr(0.0),
-    )
-
-    # See the note in `objective_component_expressions`: `sum` over a generator
-    # folds left, copying the whole partial expression each step, so summing over
-    # every operational period is O(n^2) in time and allocation.
-    investment = JuMP.AffExpr(0.0)
-    for sp in SP
-        weight = objective_weight(sp, discounter)
-        for n in N, g in generators(sets, n)
-            JuMP.add_to_expression!(investment, weight * gen_invest_cost(par, g, sp), genInvCap[n, g, sp])
-        end
-        for (m, n) in bidir_arcs(sets)
-            JuMP.add_to_expression!(investment, weight * trans_invest_cost(par, m, n, sp), transInvCap[m, n, sp])
-        end
-        for n in N, s in storages(sets, n)
-            JuMP.add_to_expression!(investment, weight * stor_pw_invest_cost(par, s, sp), storInvCapPow[n, s, sp])
-            JuMP.add_to_expression!(investment, weight * stor_en_invest_cost(par, s, sp), storInvCapEn[n, s, sp])
-        end
-    end
-    operation = JuMP.AffExpr(0.0)
-    for t in periods
-        weight = objective_weight(t, discounter; type = "avg_year")
-        for n in N
-            JuMP.add_to_expression!(operation, weight * lost_load_cost(par, n, t), shed[n, t])
-            for g in generators(sets, n)
-                JuMP.add_to_expression!(operation, weight * gen_marginal_cost(par, g, t), genOp[n, g, t])
-            end
-        end
-    end
-
-    return @objective(
-        emp,
-        Min,
-        investment + operation +
-        gas_costs.terminal_import + gas_costs.transport_shedding +
-        hydrogen_costs.investment + hydrogen_costs.terminal_import +
-        hydrogen_costs.reformer_operation + hydrogen_costs.transport_shedding
-    )
+    return @objective(emp, Min, sum(values(components)))
 end
 
 # `include_investment_constraints` gates the investment-linking constraints. The
@@ -252,14 +209,13 @@ function create_constraints(
     sets,
     par,
     periods::TimeStructure;
+    offshore_transmission_cap::Bool = true,
     natural_gas::Bool = false,
     hydrogen::Bool = false,
-    # Forwarded to the Hydrogen module only. Hydrogen pins ten capacity families in
-    # its controlled parity fixture, and its own investment constraints would make
-    # those pins infeasible. The equivalent gating for the generator, storage and
-    # transmission builders lives in the unmerged out-of-sample stack and is
-    # deliberately not reproduced here, so this flag does not affect the base model.
     include_investment_constraints::Bool = true,
+    # Transport demand lives in InternalEMPIRE's hydrogen block, so it is off unless
+    # hydrogen is modelled. See create_natural_gas_constraints!.
+    gas_transport_demand::Bool = hydrogen,
     progress = nothing,
 )
     @info "Creating constraints"
@@ -298,9 +254,19 @@ function create_constraints(
 
     create_generator_constraints(emp, sets, par, periods; include_investment_constraints, progress)
     create_storage_constraints(emp, sets, par, periods; include_investment_constraints, progress)
-    create_transmission_constraints(emp, sets, par, periods; include_investment_constraints, progress)
+    create_transmission_constraints(
+        emp,
+        sets,
+        par,
+        periods;
+        offshore_transmission_cap,
+        include_investment_constraints,
+        progress,
+    )
     create_emission_constraints(emp, sets, par, periods; hydrogen, progress)
-    natural_gas && create_natural_gas_constraints!(emp, sets, par, periods)
+    natural_gas && create_natural_gas_constraints!(
+        emp, sets, par, periods; transport_demand = gas_transport_demand,
+    )
     hydrogen && create_hydrogen_constraints!(
         emp,
         sets,
@@ -314,6 +280,32 @@ end
 
 # Calculate the total duration of all strategic periods from spp to sp (inclusive)
 # Return Inf if spp < sp
+"""
+    offshore_conv_investment_expr(emp, sets, par, sp)
+
+Annuitised investment cost of offshore energy-hub converter capacity built in `sp`.
+
+Zero when the dataset has no hubs. If it has hubs but ships no converter costs the
+capacity would be unpriced rather than unavailable, so that case warns instead of
+silently building free converters.
+"""
+function offshore_conv_investment_expr(emp::JuMP.Model, sets, par, sp)
+    hubs = offshore_energy_hubs(sets)
+    isempty(hubs) && return zero(JuMP.AffExpr)
+    cost = offshore_conv_invest_cost(par, sp)
+    if cost === nothing
+        @warn(
+            "Offshore energy hubs are present but the dataset has no " *
+            "Transmission/OffshoreConverterCapitalCost.csv, so converter capacity is " *
+            "free. Add the cost table, or remove the hubs from Sets/OffshoreEnergyHub.csv.",
+            maxlog = 1,
+        )
+        return zero(JuMP.AffExpr)
+    end
+    convInv = emp[:offshoreConvInvCap]
+    return sum(cost * convInv[n, sp] for n in hubs; init = zero(JuMP.AffExpr))
+end
+
 function duration_aggr(sp, spp, strat_periods)
     spp < sp && return Inf
     return sum(duration_strat(p) for p in strat_periods if p >= sp && p < spp; init = 0)
@@ -374,6 +366,8 @@ function create_generator_constraints(
         ) <= max_hydro_node(par, n)
     )
 
+    create_bioenergy_constraints(emp, sets, par, periods; progress)
+
     include_investment_constraints || return nothing
 
     # Tracking installed capacity from investments across strategic periods that are within
@@ -409,6 +403,66 @@ function create_generator_constraints(
         max_inst_tech[n in N, tc in techs(sets), sp in SP],
         sum(genCap[n, g, sp] for g in generators_tech(sets, n, tc)) <= max_inst_cap(par, n, tc, sp)
     )
+end
+
+"""
+    create_bioenergy_constraints(emp, sets, par, periods; progress=nothing)
+
+Add InternalEMPIRE's scenario-wise biomass and node-wise biomethane availability
+limits. The biomass table is in GJ and the biomethane table in TJ, matching the
+units of the source workbook and Pyomo formulation.
+"""
+function create_bioenergy_constraints(
+    emp::JuMP.Model,
+    sets,
+    par,
+    periods::TimeStructure;
+    progress = nothing,
+)
+    par.availableBioEnergy === nothing &&
+        isempty(par.genMaxBiomethaneAvailability) && return nothing
+
+    _report_progress(progress, "Creating biomass and biomethane availability constraints")
+    N = nodes(sets)
+    SP = strat_periods(periods)
+    genOp = emp[:genOperational]
+
+    if par.availableBioEnergy !== nothing
+        @constraint(
+            emp,
+            max_bio_availability[sp in SP, sc in 1:_opscenario_count(sp)],
+            sum(
+                multiple_strat(sp, t) *
+                (occursin("cofiring", lowercase(g)) ? 0.1 : 1.0) *
+                genOp[n, g, t] * 3.6 / par.genEfficiency[g][sp]
+                for n in N
+                for g in generators(sets, n) if occursin("bio", lowercase(g))
+                for rp in repr_periods(sp)
+                for (scenario_index, scenario) in enumerate(opscenarios(rp))
+                if scenario_index == sc
+                for t in scenario;
+                init = 0.0
+            ) <= available_bioenergy(par, sp)
+        )
+    end
+
+    if !isempty(par.genMaxBiomethaneAvailability)
+        @constraint(
+            emp,
+            gen_fuel_use_limit[n in N, sp in SP, sc in 1:_opscenario_count(sp)],
+            sum(
+                multiple_strat(sp, t) * genOp[n, g, t] * 3.6 / par.genEfficiency[g][sp]
+                for g in generators(sets, n) if occursin("biomethane", lowercase(g))
+                for rp in repr_periods(sp)
+                for (scenario_index, scenario) in enumerate(opscenarios(rp))
+                if scenario_index == sc
+                for t in scenario;
+                init = 0.0
+            ) <= 1e3 * max_biomethane_availability(par, n, sp)
+        )
+    end
+
+    return nothing
 end
 
 function create_storage_constraints(
@@ -525,11 +579,22 @@ function create_storage_constraints(
 
 end
 
+function _canonical_arc(m, n)
+    return is_bidir(m, n) ? (m, n) : (n, m)
+end
+
+function _offshore_endpoint(sets, m, n)
+    is_offshore_wind_farm(sets, m) && return m
+    is_offshore_wind_farm(sets, n) && return n
+    return nothing
+end
+
 function create_transmission_constraints(
     emp::JuMP.Model,
     sets,
     par,
     periods::TimeStructure;
+    offshore_transmission_cap::Bool = true,
     include_investment_constraints::Bool = true,
     progress = nothing,
 )
@@ -568,12 +633,72 @@ function create_transmission_constraints(
     )
 
     # Constraints on maximum installed capacity for each transmission line
-    return @constraint(
+    @constraint(
         emp,
         trans_installed_cap[(m, n) in bidir_arcs(sets), sp in SP; !isnothing(trans_max_inst_cap(par, m, n, sp))],
         transCap[m, n, sp] <= trans_max_inst_cap(par, m, n, sp)
     )
 
+    # Offshore energy-hub converter constraints.
+    #
+    # Ports InternalEMPIRE's offshore_hub_capacity_in / _out (empire.py:2424-2429) and
+    # installedCapDefinitionConv (:2748). A hub has no generation of its own, so what
+    # bounds the power it can route is the converter capacity installed on it, in each
+    # direction separately. Without these a hub is free, unlimited transmission.
+    HUB = collect(offshore_energy_hubs(sets))
+    if !isempty(HUB)
+        @info " - offshore energy-hub converter constraints"
+        _report_progress(progress, "Creating offshore energy-hub converter constraints")
+        convCap = emp[:offshoreConvInstalledCap]
+        convInv = emp[:offshoreConvInvCap]
+        # Neighbours of each hub, so the in/out sums iterate only over real arcs.
+        # Mirrors InternalEMPIRE's model.NodesLinked[n].
+        hub_in = Dict(n => [m for (m, k) in arcs(sets) if k == n] for n in HUB)
+        hub_out = Dict(n => [m for (k, m) in arcs(sets) if k == n] for n in HUB)
+
+        # Power flowing into the hub, and out of it, each capped by converter capacity.
+        @constraint(
+            emp,
+            offshore_hub_capacity_in[n in HUB, sp in SP, t in sp],
+            sum(transOp[m, n, t] for m in hub_in[n]; init = 0) <= convCap[n, sp]
+        )
+        @constraint(
+            emp,
+            offshore_hub_capacity_out[n in HUB, sp in SP, t in sp],
+            sum(transOp[n, m, t] for m in hub_out[n]; init = 0) <= convCap[n, sp]
+        )
+
+        # Installed converter capacity is what was built within the lifetime window,
+        # the same accumulation the transmission and generator families use.
+        @constraint(
+            emp,
+            offshore_conv_track_cap[n in HUB, sp in SP],
+            sum(
+                convInv[n, spp] for spp in SP
+                if duration_aggr(spp, sp, SP) <= DEFAULT_OFFSHORE_CONV_LIFETIME - duration_strat(sp)
+            ) == convCap[n, sp]
+        )
+    end
+
+    if offshore_transmission_cap
+        @info " - offshore wind-farm transmission capacity constraints"
+        _report_progress(progress, "Creating offshore wind-farm transmission capacity constraints")
+        genCap = emp[:genInstalledCap]
+        # Python builds this over ordered node pairs, producing duplicate rows for the
+        # two directions of an offshore-adjacent corridor. Keep the same row structure
+        # while pointing both directions at Julia's canonical corridor capacity.
+        return @constraint(
+            emp,
+            wind_farm_transmission_cap[
+                (m, n) in arcs(sets), sp in SP;
+                !isnothing(_offshore_endpoint(sets, m, n))
+            ],
+            transCap[_canonical_arc(m, n)..., sp] <=
+                sum(genCap[_offshore_endpoint(sets, m, n), g, sp] for g in generators(sets, _offshore_endpoint(sets, m, n)); init = 0)
+        )
+    end
+
+    return nothing
 end
 
 
@@ -731,6 +856,9 @@ function objective_component_expressions(emp::JuMP.Model, sets, par, periods::Ti
         generator_investment = accumulate_strategic(generator_investment_expr),
         storage_investment = accumulate_strategic(storage_investment_expr),
         transmission_investment = accumulate_strategic(transmission_investment_expr),
+        offshore_converter_investment = accumulate_strategic(
+            sp -> offshore_conv_investment_expr(emp, sets, par, sp),
+        ),
         load_shedding = accumulate_operational(load_shedding_expr),
         generator_operation = accumulate_operational(generator_operation_expr),
         natural_gas_terminal_import = gas_costs.terminal_import,

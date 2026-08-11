@@ -4,7 +4,7 @@
 #$ -V
 #$ -o logs/julia_empire_$JOB_ID.out
 #$ -e logs/julia_empire_$JOB_ID.err
-#$ -l hostname="compute-4-51|compute-4-52|compute-4-53|compute-4-55|compute-4-56"
+#$ -l hostname="compute-6-24|compute-6-25|compute-6-26|compute-6-27|compute-6-28|compute-6-29|compute-6-30|compute-6-31|compute-6-32|compute-6-33|compute-6-34|compute-6-35|compute-6-36|compute-6-37|compute-6-38|compute-6-39|compute-6-40|compute-6-41|compute-6-42|compute-6-43|compute-6-44|compute-6-45|compute-6-46|compute-6-47|compute-6-48|compute-6-49"
 
 # Basic SGE script for running OpenEMPIRE.jl on Solstorm.
 #
@@ -24,6 +24,10 @@
 #   JULIA_OPTIMIZE  true/false, default: true
 #   JULIA_FIXED_SAMPLE  true/false, default: false. If true, pass
 #                       --fixed-sample and require ScenarioData/sampling_key.csv.
+#   JULIA_SGE_HOSTS Host expression for SGE, default:
+#                   compute-6-24|compute-6-25|compute-6-26|compute-6-27|compute-6-28|compute-6-29|compute-6-30|compute-6-31|compute-6-32|compute-6-33|compute-6-34|compute-6-35|compute-6-36|compute-6-37|compute-6-38|compute-6-39|compute-6-40|compute-6-41|compute-6-42|compute-6-43|compute-6-44|compute-6-45|compute-6-46|compute-6-47|compute-6-48|compute-6-49
+#   EMPIRE_PERF         1/true/yes enables performance reporting, default: off
+#   EMPIRE_PERF_INTERVAL  Sampling interval in seconds, default: 1.0
 
 DATASET=${1:-test}
 CONFIG_FILE=${2:-config/testrun.yaml}
@@ -33,6 +37,90 @@ JULIA_SOLVER=${JULIA_SOLVER:-HiGHS}
 JULIA_SEED=${JULIA_SEED:-1}
 JULIA_OPTIMIZE=${JULIA_OPTIMIZE:-true}
 JULIA_FIXED_SAMPLE=${JULIA_FIXED_SAMPLE:-false}
+JULIA_SGE_HOSTS=${JULIA_SGE_HOSTS:-compute-6-24|compute-6-25|compute-6-26|compute-6-27|compute-6-28|compute-6-29|compute-6-30|compute-6-31|compute-6-32|compute-6-33|compute-6-34|compute-6-35|compute-6-36|compute-6-37|compute-6-38|compute-6-39|compute-6-40|compute-6-41|compute-6-42|compute-6-43|compute-6-44|compute-6-45|compute-6-46|compute-6-47|compute-6-48|compute-6-49}
+
+function split_sge_hosts() {
+	local host_expr="$1"
+	host_expr="${host_expr//\"/}"
+	IFS='|' read -ra SGE_HOST_CANDIDATES <<< "$host_expr"
+}
+
+function jobs_on_node() {
+	local node="$1"
+	if ! command -v qstat >/dev/null 2>&1; then
+		echo 0
+		return
+	fi
+	qstat -u "*" 2>/dev/null | awk -v node="$node" 'index($0, node) > 0 { count++ } END { print count + 0 }'
+}
+
+function sge_queue_state() {
+	local node="$1"
+	local queue_line
+	queue_line="$(qstat -f -q "*@${node}.local" 2>/dev/null | awk '/^[[:alnum:]_.-]+@/ { print; exit }')"
+	if [[ -z "$queue_line" ]]; then
+		queue_line="$(qstat -f -q "*@${node}" 2>/dev/null | awk '/^[[:alnum:]_.-]+@/ { print; exit }')"
+	fi
+	if [[ -z "$queue_line" ]]; then
+		printf 'missing\n'
+		return
+	fi
+	awk '{ if (NF >= 6) print $6; else print "ok" }' <<< "$queue_line"
+}
+
+function sge_host_is_usable() {
+	local state="$1"
+	[[ "$state" == "ok" ]] && return 0
+	[[ "$state" == *a* || "$state" == *u* || "$state" == *d* || "$state" == *E* || "$state" == *s* ]] && return 1
+	return 0
+}
+
+function choose_sge_host() {
+	local host_expr="$1"
+	local best_node=""
+	local best_jobs=999999
+	local node jobs state
+
+	split_sge_hosts "$host_expr"
+	echo "Checking high-memory node usage..." >&2
+	for node in "${SGE_HOST_CANDIDATES[@]}"; do
+		[[ -n "$node" ]] || continue
+		state="$(sge_queue_state "$node")"
+		if ! sge_host_is_usable "$state"; then
+			echo "  ${node}: skipped, queue state=${state}" >&2
+			continue
+		fi
+		jobs="$(jobs_on_node "$node")"
+		echo "  ${node}: ${jobs} visible running jobs" >&2
+		if [[ "$jobs" -lt "$best_jobs" ]]; then
+			best_jobs="$jobs"
+			best_node="$node"
+		fi
+	done
+
+	[[ -n "$best_node" ]] || return 1
+	if [[ "$best_jobs" -eq 0 ]]; then
+		echo "Selected free node: $best_node" >&2
+	else
+		echo "No fully free node found; selected least busy node: $best_node (${best_jobs} visible running jobs)" >&2
+	fi
+	printf '%s\n' "$best_node"
+}
+
+function submit_with_node_selection() {
+	local selected_host
+	selected_host="$(choose_sge_host "$JULIA_SGE_HOSTS")" || {
+		echo "ERROR: No suitable node found from JULIA_SGE_HOSTS=$JULIA_SGE_HOSTS"
+		exit 1
+	}
+
+	echo "Submitting to selected SGE host: ${selected_host}"
+	qsub \
+		-l hostname="$selected_host" \
+		-v JULIA_CMD="$JULIA_CMD",JULIA_SOLVER="$JULIA_SOLVER",JULIA_SEED="$JULIA_SEED",JULIA_OPTIMIZE="$JULIA_OPTIMIZE",JULIA_FIXED_SAMPLE="$JULIA_FIXED_SAMPLE",JULIA_SGE_HOSTS="$JULIA_SGE_HOSTS",EMPIRE_PERF="${EMPIRE_PERF:-}",EMPIRE_PERF_INTERVAL="${EMPIRE_PERF_INTERVAL:-}" \
+		"$0" "$DATASET" "$CONFIG_FILE" "$INPUT_FORMAT"
+	echo "Job submitted to ${selected_host}. Use 'qstat' to monitor status."
+}
 
 if [ -z "$JOB_ID" ]; then
 	echo "Submitting OpenEMPIRE.jl job for dataset: $DATASET"
@@ -43,37 +131,14 @@ if [ -z "$JOB_ID" ]; then
 		exit 1
 	fi
 
-	HIGH_MEM_NODES=("compute-4-51" "compute-4-52" "compute-4-53" "compute-4-55" "compute-4-56")
-
-	echo "Checking availability of high-memory nodes..."
-	BEST_NODE=""
-	MIN_LOAD=999999
-
-	for node in "${HIGH_MEM_NODES[@]}"; do
-		JOBS_ON_NODE=$(qstat -u "*" 2>/dev/null | grep "${node}" | wc -l)
-		if ! [[ "$JOBS_ON_NODE" =~ ^[0-9]+$ ]]; then
-			JOBS_ON_NODE=0
-		fi
-
-		if [ "$JOBS_ON_NODE" -lt "$MIN_LOAD" ]; then
-			MIN_LOAD=$JOBS_ON_NODE
-			BEST_NODE=$node
-		fi
-
-		echo "  ${node}: ${JOBS_ON_NODE} jobs"
-	done
-
-	if [ -z "$BEST_NODE" ]; then
-		echo "ERROR: No suitable node found!"
-		exit 1
+	if command -v flock >/dev/null 2>&1; then
+		(
+			flock 9
+			submit_with_node_selection
+		) 9>/tmp/openempire_sge_node_select.lock
+	else
+		submit_with_node_selection
 	fi
-
-	echo "Selected node: ${BEST_NODE} (${MIN_LOAD} jobs)"
-	qsub \
-		-l hostname=${BEST_NODE} \
-		-v JULIA_CMD="$JULIA_CMD",JULIA_SOLVER="$JULIA_SOLVER",JULIA_SEED="$JULIA_SEED",JULIA_OPTIMIZE="$JULIA_OPTIMIZE",JULIA_FIXED_SAMPLE="$JULIA_FIXED_SAMPLE",EMPIRE_PERF="${EMPIRE_PERF:-}",EMPIRE_PERF_INTERVAL="${EMPIRE_PERF_INTERVAL:-}" \
-		"$0" "$DATASET" "$CONFIG_FILE" "$INPUT_FORMAT"
-	echo "Job submitted to ${BEST_NODE}. Use 'qstat' to monitor status."
 	exit 0
 fi
 

@@ -206,6 +206,23 @@ implementations. Enabled filters are archived with their sampling key under
 See [FILTER_COMPARISON.md](FILTER_COMPARISON.md) for the reproducible
 Python–Julia metric comparison and the cluster-count sweep from 1 to 30.
 
+Set `copula_clusters_make: true` to sort the possible regular-season windows into
+clusters and write `Copulas/CopulaClusters/copula_clusters.csv`. The clustering
+looks at how the variables in `copulas_to_use` move together across nodes, not at
+how large their values are. Set `copula_clusters_use: true` to sample from that
+file, cycling through cluster groups `0:n_cluster-1`. Turn on both flags to build
+a new file and use it in the same run.
+
+The defaults are `copula_clusters_make: false`, `copula_clusters_use: false`,
+`copulas_to_use: ["electricload"]`, and `n_cluster: 10`. You can cluster on
+`electricload`, `hydroseasonal`, `solar`, `windonshore`, `windoffshore`, or
+`hydroror`. Clustering uses the scenario RNG, so the same seed gives the same
+file. It runs once per `copula_clusters_make` run, and takes longer when the
+chosen variables cover more nodes. If more than one sampling mode is on,
+`use_fixed_sample` wins over `filter_use`, and `filter_use` wins over
+`copula_clusters_use`. The file is saved with the sampling key under
+`results/julia_runs/<run>/Input/ScenarioData/`.
+
 ### Generating out-of-sample scenario trees
 
 Use `scripts/create_out_of_sample_tree.jl` to generate one or more scenario trees
@@ -232,6 +249,42 @@ and scenario settings used to generate it. Internally, the script reuses
 `data/<dataset>/ScenarioData` and then copied into the corresponding
 `OutOfSample/<dataset>/oos_treeN/ScenarioData` folder.
 
+### Offshore nodes
+
+Offshore nodes come in two kinds, and they are modelled differently. This mirrors
+InternalEMPIRE, which keeps two separate lists rather than one offshore set.
+
+**Offshore wind farms** (`Sets/OffshoreWindFarmNode.csv`) generate power. An
+offshore wind farm may not build more transmission capacity than it has
+generation — there is no point paying for a 5 GW export cable out of a 2 GW wind
+farm. The `wind_farm_transmission_cap` family enforces this, capping each
+adjacent corridor by the installed generation at the offshore endpoint. It keeps
+the Python implementation's ordered-arc row structure: both directions of a
+corridor are emitted, pointing at the same canonical corridor capacity.
+
+**Offshore energy hubs** (`Sets/OffshoreEnergyHub.csv`) generate nothing. They
+are junctions that collect power from several wind farms and route it onward, and
+are limited by converter capacity instead. The set is read and validated, but the
+converter formulation is not ported yet, so hubs currently carry no capacity
+limit of their own.
+
+The two sets must be disjoint, and every wind farm must have at least one
+generator. Both are enforced by `validate!`, because the failure is otherwise
+silent and severe: the cap's right-hand side sums the node's own generators, so a
+generator-less entry yields an empty sum, the constraint becomes
+`transmissionInstalledCap <= 0`, and the node is disconnected from the grid
+entirely. That is exactly what a dataset produces when it derives the offshore set
+as "all nodes minus onshore nodes" and sweeps up hubs and platforms.
+
+The cap is **on by default**. Set `offshore_transmission_cap: false` in the run
+config to switch it off for an experiment. (The old `north_sea` key is obsolete:
+it is ignored, with a warning. InternalEMPIRE has no north-sea module — the flag
+existed there only to mark datasets that predate the
+`Windoffshoregrounded`/`Windoffshorefloating` split, and is always on now.)
+
+Datasets written before the split may still ship `Sets/OffshoreNode.csv`; it is
+read as the wind-farm set with a deprecation warning.
+
 ### Comparable multi-seed Julia/Python parity runs
 
 Scenario draws are **not** cross-language reproducible (Julia's RNG differs from
@@ -248,6 +301,21 @@ run both implementations on identical scenarios:
 
 Repeat with different seeds to build confidence that the two implementations stay
 equivalent beyond a single sampled tree.
+
+North-sea-on parity at europe_v51 2060/5sce/168h (38,120,648 variables,
+54,452,000 constraints, all `OPTIMAL`, `wind_farm_transmission_cap: 1728` in
+every Julia build log):
+
+| seed | Julia | Python | relative difference |
+| ---- | ----- | ------ | ------------------- |
+| 3 | `4.634430286661141e12` | `4.63443031e12` | 5.0e-9 |
+| 4 | `4.662211214996041e12` | `4.66221071e12` | 1.1e-7 |
+| 5 | `4.724774434584402e12` | `4.72477447e12` | 7.5e-9 |
+| 6 | `4.661684419314461e12` | `4.66168444e12` | 4.4e-9 |
+
+Python values are as printed by the solver log. Baseline north-sea-*off* parity
+is closed for matched configs at the same scale, and north-sea-on 2045/3sce/168h
+agrees to solver tolerance as well.
 
 ## Running on Solstorm
 
@@ -271,8 +339,8 @@ To run directly on Solstorm after copying the repo there:
 sh scripts/run_empire_julia_basic_sge.sh test
 ```
 
-The script selects one of the high-memory Solstorm nodes, instantiates the
-Julia project with `Pkg.instantiate()`, and runs:
+The script asks SGE to choose an available high-memory Solstorm node,
+instantiates the Julia project with `Pkg.instantiate()`, and runs:
 
 ```bash
 julia --project=. scripts/run_julia_empire.jl --dataset=test
@@ -292,7 +360,38 @@ Edit `config/cluster.json` with your Solstorm username and remote directory,
 then run:
 
 ```bash
-sh scripts/copy_and_run_julia_on_hpc.sh Solstorm
+sh scripts/copy_and_run_julia_on_hpc.sh Solstorm \
+  --profile config/launch_profiles/2045_3sce_northsea.yaml
+```
+
+`config/cluster.json` should describe the cluster connection and scheduler
+entrypoint. The launch profile describes the actual model run:
+
+```yaml
+dataset: europe_v51
+model_config: config/run_2045_3sce.yaml
+format: csv
+solver: Gurobi
+seed: 1
+fixed_sample: true
+optimize: true
+perf: true
+perf_interval: 2.0
+```
+
+Explicit flags can still override profile values when useful:
+
+```bash
+sh scripts/copy_and_run_julia_on_hpc.sh Solstorm \
+  --profile config/launch_profiles/2045_3sce_northsea.yaml \
+  --dataset europe_v51 \
+  --model-config config/run_2045_3sce.yaml \
+  --format csv \
+  --solver Gurobi \
+  --seed 1 \
+  --fixed-sample \
+  --perf \
+  --perf-interval 2.0
 ```
 
 The default solver for this first Julia smoke test is HiGHS. Gurobi is loaded
@@ -307,6 +406,11 @@ For one-command deployment, set this in `config/cluster.json`:
 ```json
 "JULIA_SOLVER": "Gurobi"
 ```
+
+The default SGE host expression is the high-memory node group
+`compute-4-51|compute-4-52|compute-4-53|compute-4-55|compute-4-56`. Override it
+with `JULIA_SGE_HOSTS` in your environment or `config/cluster.json` if Solstorm
+node availability changes.
 
 The Julia project includes `Gurobi.jl`; on Solstorm, the script tries to load
 `gurobi/13.0` first and then `gurobi/12.0`. If Gurobi license discovery fails,
@@ -368,7 +472,9 @@ valid index tuples lets the model:
 ## Status and roadmap
 
 Items that are known to be missing or under investigation compared to the
-Python reference implementation are tracked in [TODO.md](TODO.md). Notable
-open points include the North Sea extensions and the implementation of
-emission limits, as well as a documented discrepancy in the annuity / present
-value calculation for investment costs.
+Python reference implementation are tracked in [TODO.md](TODO.md). The offshore
+wind-farm transmission cap is implemented (see above); the offshore energy-hub
+converter formulation is not, so hubs are read and validated but not yet capped.
+Notable remaining open points include the implementation of emission limits, as
+well as a documented discrepancy in the annuity / present value calculation for
+investment costs.

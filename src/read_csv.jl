@@ -625,6 +625,24 @@ function read_sets_csv(
     @info "Reading CSV sets from $dir"
 
     sets_dir = "Sets"
+    wind_farm_path = _optional_csv(dir, sets_dir, "OffshoreWindFarmNode.csv")
+    energy_hub_path = _optional_csv(dir, sets_dir, "OffshoreEnergyHub.csv")
+    if isnothing(wind_farm_path)
+        # Datasets written before the wind-farm/hub split called this OffshoreNode.csv.
+        # Accept it, but say so: under the old name it was also used for nodes that are
+        # offshore without generating, which the transmission cap cannot represent.
+        legacy_path = _optional_csv(dir, sets_dir, "OffshoreNode.csv")
+        if !isnothing(legacy_path)
+            @warn(
+                "Sets/OffshoreNode.csv is deprecated; rename it to " *
+                "Sets/OffshoreWindFarmNode.csv and move any energy hubs into " *
+                "Sets/OffshoreEnergyHub.csv.",
+                dataset = dir,
+            )
+            wind_farm_path = legacy_path
+        end
+    end
+
     generators = _read_vector_csv(_required_csv(dir, sets_dir, "Generator.csv"))
     gas_sets = natural_gas ? _read_natural_gas_sets_csv(dir, generators) : NaturalGasSets()
     base_links = _read_tuple2_csv(_required_csv(dir, sets_dir, "DirectionalLink.csv"))
@@ -641,6 +659,8 @@ function read_sets_csv(
         DependentStorage = _read_vector_csv(_required_csv(dir, sets_dir, "DependentStorage.csv")),
         Technology = _read_vector_csv(_required_csv(dir, sets_dir, "Technology.csv")),
         Node = _read_vector_csv(_required_csv(dir, sets_dir, "Node.csv")),
+        OffshoreWindFarmNode = isnothing(wind_farm_path) ? String[] : _read_vector_csv(wind_farm_path),
+        OffshoreEnergyHub = isnothing(energy_hub_path) ? String[] : _read_vector_csv(energy_hub_path),
         DirectionalLink = base_links,
         TransmissionType = _read_vector_csv(_required_csv(dir, sets_dir, "TransmissionType.csv")),
         TransmissionTypeOfDirectionalLink =
@@ -1180,6 +1200,14 @@ function read_params_csv(
     )
     par.genMaxInstalledCapRaw =
         _read_float_by_pair_csv(_required_csv(dir, generator, "genMaxInstalledCapRaw.csv"))
+    let path = _optional_csv(dir, generator, "MaxInstalledCapacityByPeriod.csv")
+        path === nothing ||
+            (par.genMaxInstalledCapByPeriod = _read_strategic_profiles_pair_csv(path))
+    end
+    let path = _optional_csv(dir, generator, "MaxBiomethaneAvailability.csv")
+        path === nothing ||
+            (par.genMaxBiomethaneAvailability = _read_strategic_profiles_csv(path))
+    end
     par.genRampUpCap = _read_float_by_string_csv(_required_csv(dir, generator, "genRampUpCap.csv"))
     par.genCapAvailType = _read_float_by_string_csv(_required_csv(dir, generator, "genCapAvailTypeRaw.csv"))
     par.genCO2Content = _read_float_by_string_csv(_required_csv(dir, generator, "genCO2TypeFactor.csv"))
@@ -1204,6 +1232,13 @@ function read_params_csv(
     par.lineEfficiency = _read_float_by_pair_csv(_required_csv(dir, transmission, "lineEfficiency.csv"))
     par.transmissionLifetime =
         _read_float_by_pair_csv(_required_csv(dir, transmission, "transmissionLifetime.csv"))
+    # Optional: only datasets with offshore energy hubs carry converter costs.
+    let p = _optional_csv(dir, transmission, "OffshoreConverterCapitalCost.csv")
+        isnothing(p) || (par.offshoreConvCapitalCost = _read_strategic_profile_csv(p))
+    end
+    let p = _optional_csv(dir, transmission, "OffshoreConverterOMCost.csv")
+        isnothing(p) || (par.offshoreConvOMCost = _read_strategic_profile_csv(p))
+    end
 
     storage = "Storage"
     par.storageBleedEff = _read_float_by_string_csv(_required_csv(dir, storage, "storageBleedEff.csv"))
@@ -1240,6 +1275,9 @@ function read_params_csv(
     general = "General"
     par.CO2cap = _read_strategic_profile_csv(_required_csv(dir, general, "CO2cap.csv"))
     par.CO2price = _read_strategic_profile_csv(_required_csv(dir, general, "CO2price.csv"))
+    let path = _optional_csv(dir, general, "AvailableBioEnergy.csv")
+        path === nothing || (par.availableBioEnergy = _read_strategic_profile_csv(path))
+    end
     if natural_gas
         par.NaturalGas = _read_natural_gas_params_csv(
             dir;

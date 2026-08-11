@@ -66,6 +66,16 @@ function test_hydrogen_csv_loading_and_validation()
     @test any(occursin("reformerEfficiency is missing 1 required key", issue) for issue in issues)
     params.Hydrogen.reformerEfficiency[("SMR", 1)] = missing
 
+    missing_storage_cost = pop!(params.Hydrogen.storageCapitalCost, ("SaltCavern", 1))
+    issues = OpenEMPIRE.validate_hydrogen(params, sets, periods)
+    @test any(occursin("storageCapitalCost is missing 1 required key", issue) for issue in issues)
+    params.Hydrogen.storageCapitalCost[("SaltCavern", 1)] = missing_storage_cost
+
+    missing_storage_om = pop!(params.Hydrogen.storageFixedOMCost, ("SteelTank", 1))
+    issues = OpenEMPIRE.validate_hydrogen(params, sets, periods)
+    @test any(occursin("storageFixedOMCost is missing 1 required key", issue) for issue in issues)
+    params.Hydrogen.storageFixedOMCost[("SteelTank", 1)] = missing_storage_om
+
     params.Hydrogen.reformerElectricityUse[("SMR_CCS", 1)] = -0.1
     issues = OpenEMPIRE.validate_hydrogen(params, sets, periods)
     @test any(occursin("may be negative only", issue) for issue in issues)
@@ -175,6 +185,7 @@ function test_hydrogen_full_model_smoke()
         :generator_investment,
         :storage_investment,
         :transmission_investment,
+        :offshore_converter_investment,
         :load_shedding,
         :generator_operation,
         :natural_gas_terminal_import,

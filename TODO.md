@@ -20,6 +20,12 @@ costperyearPW=(model.WACC/(1-((1+model.WACC)**(-model.storageLifetime[b]))))*mod
 costperperiodPW=costperyearPW*1000*(1-(1+model.discountrate)**-(min(value((len(model.PeriodActive)-i+1)*LeapYearsInvestment), value(model.storageLifetime[b]))))/(1-(1/(1+model.discountrate)))                
 ```
 
+One solution is to have annualization be mathematically equivalent to paying the investment cost upfront when the entire lifetime is represented. Such that the present value is based on evaluation at the end of a year, like the annuity. That is multiply the present value factor by `1/(1+model.discountrate)`:
+```python
+costperperiodPW=costperyearPW*1000*(1-(1+model.discountrate)**-(min(value((len(model.PeriodActive)-i+1)*LeapYearsInvestment), value(model.storageLifetime[b]))))/(1-(1/(1+model.discountrate)))/(1+model.discountrate)
+```
+
+
 ## Missing in Julia version
 - [ ] North Sea extensions
 - [ ] Implementation of emission limits

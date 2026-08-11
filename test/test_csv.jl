@@ -42,6 +42,7 @@ function _write_toy_csv_dataset(root)
     _write_csv(joinpath(dataset, "Generator", "genInitCap.csv"), "Node,Generator,Period,Value\nA,gas,1,1\nA,wind,1,2\n")
     _write_csv(joinpath(dataset, "Generator", "genMaxBuiltCap.csv"), "Node,Technology,Period,Value\nA,thermal,1,1000\nA,renewable,1,1000\n")
     _write_csv(joinpath(dataset, "Generator", "genMaxInstalledCapRaw.csv"), "Node,Technology,Value\nA,thermal,1000\nA,renewable,1000\n")
+    _write_csv(joinpath(dataset, "Generator", "MaxInstalledCapacityByPeriod.csv"), "Node,Technology,Period,Value\nA,renewable,1,50\n")
     _write_csv(joinpath(dataset, "Generator", "genRampUpCap.csv"), "Generator,Value\ngas,1\nwind,1\n")
     _write_csv(joinpath(dataset, "Generator", "genCapAvailTypeRaw.csv"), "Generator,Value\ngas,1\nwind,1\n")
     _write_csv(joinpath(dataset, "Generator", "genCO2TypeFactor.csv"), "Generator,Value\ngas,0.2\nwind,0\n")
@@ -93,6 +94,7 @@ function test_read_csv_dataset()
 
         sets = OpenEMPIRE.read_sets_csv(dataset)
         @test OpenEMPIRE.nodes(sets) == ["A", "B"]
+        @test isempty(OpenEMPIRE.offshore_wind_farm_nodes(sets))
         @test OpenEMPIRE.generators(sets, "A") == ["gas", "wind"]
         @test Set(OpenEMPIRE.arcs(sets)) == Set([("A", "B"), ("B", "A")])
 
@@ -101,6 +103,8 @@ function test_read_csv_dataset()
         @test params.genRefInitCap[("A", "wind")] == 2.0
         @test params.genCapAvailType["wind"] == 1.0
         @test params.genCO2Content["gas"] == 0.2
+        period_profile = params.genMaxInstalledCapByPeriod[("A", "renewable")]
+        @test only(period_profile.vals).val == 50.0
         @test params.transmissionLength[("A", "B")] == 10.0
         @test params.storageChargeEff["battery"] == 0.9
         @test params.maxHydroNode["A"] == 0.0
@@ -112,6 +116,39 @@ function test_read_csv_dataset()
         sets3, _ = OpenEMPIRE.read_data(csv_dataset)
         @test OpenEMPIRE.generators(sets3) == ["gas", "wind"]
     end
+end
+
+function test_internalempire_generator_max_installed_cap_by_period()
+    periods = OpenEMPIRE.create_timestruct(
+        2,
+        5,
+        1,
+        1,
+        0,
+        0,
+        1;
+        operational_hours_per_year = 1,
+    )
+    sets = OpenEMPIRE.EmpireSets(
+        Node = ["A"],
+        Generator = ["wind"],
+        Technology = ["renewable"],
+        GeneratorsOfTechnology = [("renewable", "wind")],
+        GeneratorsOfNode = [("A", "wind")],
+    )
+    params = OpenEMPIRE.EmpireParams(
+        genInitCap = Dict(("A", "wind") => StrategicProfile([10.0, 10.0])),
+        genMaxInstalledCapRaw = Dict(("A", "renewable") => 100.0),
+        genMaxInstalledCapByPeriod = Dict(
+            ("A", "renewable") => StrategicProfile([80.0, 0.0]),
+        ),
+    )
+
+    OpenEMPIRE.preprocess_max_installed_cap(params, sets, periods)
+
+    strategic_periods = collect(strat_periods(periods))
+    @test params.genMaxInstalledCap[("A", "renewable")][strategic_periods[1]] == 80.0
+    @test params.genMaxInstalledCap[("A", "renewable")][strategic_periods[2]] == 100.0
 end
 
 function test_read_bundled_csv_datasets()
@@ -150,6 +187,7 @@ function test_read_full_model_int_dataset()
     @test length(OpenEMPIRE.nodes(sets)) == 52
     @test length(OpenEMPIRE.generators(sets)) == 33
     @test length(OpenEMPIRE.arcs(sets)) == 436
+    @test params.availableBioEnergy !== nothing
 
     # The workbook carries no fuel cost for these five; the converter supplies the
     # europe_v51 values so the dataset is usable with the gas module off.
@@ -161,12 +199,21 @@ function test_read_full_model_int_dataset()
     end
 
     periods = OpenEMPIRE.create_timestruct(7, 5, 4, 24, 2, 24, 1)
+    first_period = first(periods)
+    @test params.availableBioEnergy[first_period] == 2.368e9
+    @test params.genMaxBiomethaneAvailability["Germany"][first_period] ≈
+          210231.42290671438
+    @test OpenEMPIRE.ccs_cost_fixed(params) == 0.0
+    @test all(OpenEMPIRE.ccs_cost_variable(params, period) == 0.0 for period in strat_periods(periods))
+
+    # InternalEMPIRE applies its default=0 maximum-installed-capacity parameter
+    # to every corridor, including NO2-France, even though the workbook omits it.
+    @test OpenEMPIRE.trans_max_inst_cap(params, "NO2", "France", first_period) == 0.0
 
     # Module off: gas is priced from its fuel cost like any other thermal unit.
     # It must never fall through to DEFAULT_GEN_MARGINAL_COST, which would make
     # gas generation free.
     OpenEMPIRE.preprocess_operational_cost(params, sets, periods)
-    first_period = first(periods)
     for generator in gas_generators
         @test haskey(params.genMargCost, generator)
         @test params.genMargCost[generator][first_period] > 0
@@ -187,6 +234,121 @@ function test_read_full_model_int_dataset()
     @test err isa ArgumentError
     @test any(occursin(generator, err.msg) for generator in gas_generators)
     @test occursin("genFuelCost", err.msg)
+end
+
+function test_internalempire_bioenergy_constraints()
+    periods = OpenEMPIRE.create_timestruct(
+        1,
+        5,
+        1,
+        1,
+        0,
+        0,
+        2;
+        operational_hours_per_year = 1,
+    )
+    generators = ["Bio", "BioCofiring", "Biomethane"]
+    sets = OpenEMPIRE.EmpireSets(
+        Node = ["A"],
+        Generator = generators,
+        Technology = ["Bio"],
+        GeneratorsOfTechnology = [("Bio", generator) for generator in generators],
+        GeneratorsOfNode = [("A", generator) for generator in generators],
+    )
+    params = OpenEMPIRE.EmpireParams(
+        availableBioEnergy = FixedProfile(100.0),
+        genMaxBiomethaneAvailability = Dict("A" => FixedProfile(2.0)),
+        genEfficiency = Dict(generator => FixedProfile(0.5) for generator in generators),
+    )
+    model = JuMP.Model()
+    OpenEMPIRE.create_variables(model, sets, periods)
+    OpenEMPIRE.create_bioenergy_constraints(model, sets, params, periods)
+
+    strategic_period = first(strat_periods(periods))
+    first_scenario = first(opscenarios(first(repr_periods(strategic_period))))
+    time = first(first_scenario)
+    biomass = model[:max_bio_availability][strategic_period, 1]
+    biomethane = model[:gen_fuel_use_limit]["A", strategic_period, 1]
+
+    @test length(model[:max_bio_availability]) == 2
+    @test length(model[:gen_fuel_use_limit]) == 2
+    @test JuMP.normalized_rhs(biomass) == 100.0
+    @test JuMP.normalized_rhs(biomethane) == 2000.0
+    @test JuMP.normalized_coefficient(biomass, model[:genOperational]["A", "Bio", time]) ≈ 7.2
+    @test JuMP.normalized_coefficient(
+        biomass,
+        model[:genOperational]["A", "BioCofiring", time],
+    ) ≈ 0.72
+    @test JuMP.normalized_coefficient(
+        biomethane,
+        model[:genOperational]["A", "Biomethane", time],
+    ) ≈ 7.2
+end
+
+function test_internalempire_missing_hydro_default()
+    sets = OpenEMPIRE.EmpireSets(
+        Generator = ["Regulated", "RunOfRiver"],
+        HydroGenerator = ["Regulated", "RunOfRiver"],
+        RegHydroGenerator = ["Regulated"],
+        Technology = ["Hydro"],
+        Node = ["Missing", "Present", "NoRegulatedHydro"],
+        GeneratorsOfTechnology = [
+            ("Hydro", "Regulated"),
+            ("Hydro", "RunOfRiver"),
+        ],
+        GeneratorsOfNode = [
+            ("Missing", "Regulated"),
+            ("Present", "Regulated"),
+            ("NoRegulatedHydro", "RunOfRiver"),
+        ],
+    )
+    params = OpenEMPIRE.EmpireParams(
+        maxRegHydroGenRaw = Dict("Present" => FixedProfile(7.0)),
+    )
+    config = Dict("internalempire_missing_hydro_raw_default_mw" => 1.0)
+
+    OpenEMPIRE._fill_internalempire_missing_hydro_raw!(params, sets, config)
+
+    @test params.maxRegHydroGenRaw["Missing"] == FixedProfile(1.0)
+    @test params.maxRegHydroGenRaw["Present"] == FixedProfile(7.0)
+    @test !haskey(params.maxRegHydroGenRaw, "NoRegulatedHydro")
+
+    unchanged = OpenEMPIRE.EmpireParams()
+    OpenEMPIRE._fill_internalempire_missing_hydro_raw!(unchanged, sets, Dict())
+    @test isempty(unchanged.maxRegHydroGenRaw)
+
+    @test_throws ArgumentError OpenEMPIRE._fill_internalempire_missing_hydro_raw!(
+        OpenEMPIRE.EmpireParams(),
+        sets,
+        Dict("internalempire_missing_hydro_raw_default_mw" => -1.0),
+    )
+end
+
+function test_internalempire_missing_line_efficiency_default()
+    sets = OpenEMPIRE.EmpireSets(
+        Node = ["A", "B", "C"],
+        DirectionalLink = [("A", "B"), ("B", "A"), ("B", "C")],
+    )
+    params = OpenEMPIRE.EmpireParams(
+        lineEfficiency = Dict(("A", "B") => 0.95),
+    )
+    config = Dict("internalempire_missing_line_efficiency_default" => 0.97)
+
+    OpenEMPIRE._fill_internalempire_missing_line_efficiency!(params, sets, config)
+
+    @test params.lineEfficiency[("A", "B")] == 0.95
+    @test params.lineEfficiency[("B", "A")] == 0.97
+    @test params.lineEfficiency[("B", "C")] == 0.97
+
+    unchanged = OpenEMPIRE.EmpireParams()
+    OpenEMPIRE._fill_internalempire_missing_line_efficiency!(unchanged, sets, Dict())
+    @test isempty(unchanged.lineEfficiency)
+
+    @test_throws ArgumentError OpenEMPIRE._fill_internalempire_missing_line_efficiency!(
+        OpenEMPIRE.EmpireParams(),
+        sets,
+        Dict("internalempire_missing_line_efficiency_default" => 1.01),
+    )
 end
 
 function test_native_timestruct_operational_weights()
