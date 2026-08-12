@@ -65,23 +65,27 @@ def solve_fixture(fixture_dir: Path, output_path: Path, emission_cap: bool = Fal
     )
     final_steel = [plant for plant in model.STEEL if "EAF" in plant or "BOF" in plant]
     model.steel_demand = pyo.Constraint(
-        expr=sum(model.steel[p, h] for p in final_steel for h in model.H)
-        + sum(model.steel_shed[h] for h in model.H)
-        == scalar["steel_demand_ton"]
+        model.H,
+        rule=lambda m, h: sum(m.steel[p, h] for p in final_steel)
+        + m.steel_shed[h]
+        == scalar["steel_demand_ton"] / scalar["hours_per_year"],
     )
     model.cement_demand = pyo.Constraint(
-        expr=sum(model.cement[p, h] for p in model.CEMENT for h in model.H)
-        + sum(model.cement_shed[h] for h in model.H)
-        == scalar["cement_demand_ton"]
+        model.H,
+        rule=lambda m, h: sum(m.cement[p, h] for p in m.CEMENT)
+        + m.cement_shed[h]
+        == scalar["cement_demand_ton"] / scalar["hours_per_year"],
     )
     model.ammonia_demand = pyo.Constraint(
-        expr=sum(model.ammonia[p, h] for p in model.AMMONIA for h in model.H)
-        + sum(model.ammonia_shed[h] for h in model.H)
-        == scalar["ammonia_demand_ton"]
+        model.H,
+        rule=lambda m, h: sum(m.ammonia[p, h] for p in m.AMMONIA)
+        + m.ammonia_shed[h]
+        == scalar["ammonia_demand_ton"] / scalar["hours_per_year"],
     )
     model.oil_demand = pyo.Constraint(
-        expr=sum(model.oil[h] + model.oil_shed[h] for h in model.H)
-        == scalar["oil_demand_ton"]
+        model.H,
+        rule=lambda m, h: m.oil[h] + m.oil_shed[h]
+        == scalar["oil_demand_ton"] / scalar["hours_per_year"],
     )
     model.raw_material = pyo.Constraint(
         model.H,

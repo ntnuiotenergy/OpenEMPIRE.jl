@@ -342,8 +342,12 @@ function _detect_input_format(path::AbstractString)
 end
 
 function _required_csv(dir::AbstractString, component::AbstractString, filename::AbstractString)
-    path = joinpath(dir, component, filename)
-    isfile(path) || throw(ArgumentError("Required CSV input file not found: $path"))
+    component_dir = joinpath(dir, component)
+    path = joinpath(component_dir, filename)
+    # `isfile` accepts a case-insensitive match on default macOS filesystems,
+    # hiding input-name bugs that fail after staging to Linux/Solstorm.
+    isdir(component_dir) && filename in readdir(component_dir) && isfile(path) ||
+        throw(ArgumentError("Required CSV input file not found with exact case: $path"))
     return path
 end
 
@@ -1364,7 +1368,7 @@ function _read_industry_params_csv(dir::AbstractString)
             ("Node", "Period", "Yearly_production_of_oil_(k_bbl/yr)"), component,
         ),
         availableBioEnergy = _read_sector_period_values(
-            _required_csv(dir, "General", "availableBioEnergy.csv"),
+            _required_csv(dir, "General", "AvailableBioEnergy.csv"),
             ("Period", "Available_bioenergy_(GJ)"), component,
         ),
         industryShedCost = _read_sector_scalar(

@@ -142,7 +142,7 @@ SCHEMAS.update({
     "Sets/CementProducers.csv": ("CementProducers",),
     "Sets/AmmoniaProducers.csv": ("AmmoniaProducers",),
     "Sets/OilProducers.csv": ("OilProducers",),
-    "General/availableBioEnergy.csv": ("Period", "Available_bioenergy_(GJ)"),
+    "General/AvailableBioEnergy.csv": ("Period", "Available_bioenergy_(GJ)"),
     "Industry/SteelPlants.csv": ("SteelPlants",),
     "Industry/CementPlants.csv": ("CementPlants",),
     "Industry/AmmoniaPlants.csv": ("AmmoniaPlants",),
@@ -895,6 +895,14 @@ def validate_hydrogen_tables(dataset: Path, base_manifest: dict[str, object]) ->
 def validate_industry_manifest(dataset: Path) -> dict[str, object]:
     path = dataset / "industry_conversion_manifest.json"
     manifest = json.loads(path.read_text(encoding="utf-8"))
+    expected_demand = (
+        "fixed hourly demand (FLEX_IND=false; yearly production / 8760)"
+    )
+    if manifest.get("demand_formulation") != expected_demand:
+        fail(
+            f"{path}: demand_formulation must be {expected_demand!r}, got "
+            f"{manifest.get('demand_formulation')!r}"
+        )
     listed: set[str] = set()
     for entry in manifest["files"]:
         relative = entry["path"]
@@ -921,7 +929,7 @@ def validate_industry_manifest(dataset: Path) -> dict[str, object]:
         "Sets/CementProducers.csv",
         "Sets/AmmoniaProducers.csv",
         "Sets/OilProducers.csv",
-        "General/availableBioEnergy.csv",
+        "General/AvailableBioEnergy.csv",
     }
     if listed != expected:
         fail(
@@ -1104,7 +1112,7 @@ def validate_industry_tables(dataset: Path, base_manifest: dict[str, object]) ->
     )
     _validate_complete_numeric_table(
         dataset,
-        "General/availableBioEnergy.csv",
+        "General/AvailableBioEnergy.csv",
         ("Period",),
         "Available_bioenergy_(GJ)",
         {(period,) for period in period_keys},

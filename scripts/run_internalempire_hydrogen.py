@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run an InternalEMPIRE Hydrogen parity case without editing its checkout."""
+"""Run an InternalEMPIRE Hydrogen/Industry parity case without editing its checkout."""
 
 from __future__ import annotations
 
@@ -51,11 +51,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="write patched runner/reference sources for inspection without executing",
     )
+    parser.add_argument(
+        "--industry",
+        action="store_true",
+        help="enable InternalEMPIRE's Industry module in addition to Hydrogen",
+    )
     return parser.parse_args()
 
 
 def write_objective_component_certificate(instance: object, path: Path) -> None:
-    """Write the twelve components used by OpenEMPIRE's parity summary."""
+    """Write the components used by OpenEMPIRE's parity summary."""
     from pyomo.environ import value
 
     periods = tuple(instance.Period)
@@ -125,6 +130,76 @@ def write_objective_component_certificate(instance: object, path: Path) -> None:
     hydrogen_reformer_operation = discounted_scenario_expression(
         instance.reformerOperationalCost
     )
+    industry_enabled = hasattr(instance, "steel_opex")
+    industry_steel_operation = (
+        discounted_scenario_expression(instance.steel_opex)
+        if industry_enabled
+        else 0.0
+    )
+    industry_cement_operation = (
+        discounted_scenario_expression(instance.cement_opex)
+        if industry_enabled
+        else 0.0
+    )
+    industry_ammonia_operation = (
+        discounted_scenario_expression(instance.ammonia_opex)
+        if industry_enabled
+        else 0.0
+    )
+    industry_oil_operation = (
+        discounted_scenario_expression(instance.oil_opex)
+        if industry_enabled
+        else 0.0
+    )
+    industry_steel_investment = (
+        sum(
+            value(
+                instance.discount_multiplier[period]
+                * instance.steel_plantInvCost[plant, period]
+                * instance.steelPlantBuiltCapacity[node, plant, period]
+            )
+            for node in instance.SteelProducers
+            for plant in instance.SteelPlants
+            for period in periods
+        )
+        if industry_enabled
+        else 0.0
+    )
+    industry_cement_investment = (
+        sum(
+            value(
+                instance.discount_multiplier[period]
+                * instance.cement_plantInvCost[plant, period]
+                * instance.cementPlantBuiltCapacity[node, plant, period]
+            )
+            for node in instance.CementProducers
+            for plant in instance.CementPlants
+            for period in periods
+        )
+        if industry_enabled
+        else 0.0
+    )
+    industry_ammonia_investment = (
+        sum(
+            value(
+                instance.discount_multiplier[period]
+                * instance.ammonia_plantInvCost[plant, period]
+                * instance.ammoniaPlantBuiltCapacity[node, plant, period]
+            )
+            for node in instance.AmmoniaProducers
+            for plant in instance.AmmoniaPlants
+            for period in periods
+        )
+        if industry_enabled
+        else 0.0
+    )
+    industry_investment = sum(
+        (
+            industry_steel_investment,
+            industry_cement_investment,
+            industry_ammonia_investment,
+        )
+    )
 
     def transport_shedding(variable_names: tuple[str, ...]) -> float:
         variables = tuple(getattr(instance, name) for name in variable_names)
@@ -166,6 +241,10 @@ def write_objective_component_certificate(instance: object, path: Path) -> None:
             hydrogen_terminal_import,
             hydrogen_reformer_operation,
             hydrogen_transport_shedding,
+            industry_steel_operation,
+            industry_cement_operation,
+            industry_ammonia_operation,
+            industry_oil_operation,
         )
     )
     objective = value(instance.Obj)
@@ -175,6 +254,7 @@ def write_objective_component_certificate(instance: object, path: Path) -> None:
             storage_investment,
             transmission_investment,
             offshore_converter_investment,
+            industry_investment,
         )
     )
     components = (
@@ -190,11 +270,80 @@ def write_objective_component_certificate(instance: object, path: Path) -> None:
         ("hydrogen_terminal_import", hydrogen_terminal_import),
         ("hydrogen_reformer_operation", hydrogen_reformer_operation),
         ("hydrogen_transport_shedding", hydrogen_transport_shedding),
+        ("industry_investment", industry_investment),
+        ("industry_steel_investment", industry_steel_investment),
+        ("industry_cement_investment", industry_cement_investment),
+        ("industry_ammonia_investment", industry_ammonia_investment),
+        ("industry_steel_operation", industry_steel_operation),
+        ("industry_cement_operation", industry_cement_operation),
+        ("industry_ammonia_operation", industry_ammonia_operation),
+        ("industry_oil_operation", industry_oil_operation),
     )
+    sector_volumes: list[tuple[str, float]] = []
+    if industry_enabled:
+        sector_specs = (
+            (
+                "steel",
+                instance.SteelProducers,
+                instance.SteelPlants_FinalSteel,
+                instance.steelProduced,
+                instance.steelLoadShed,
+            ),
+            (
+                "cement",
+                instance.CementProducers,
+                instance.CementPlants,
+                instance.cementProduced,
+                instance.cementLoadShed,
+            ),
+            (
+                "ammonia",
+                instance.AmmoniaProducers,
+                instance.AmmoniaPlants,
+                instance.ammoniaProduced,
+                instance.ammoniaLoadShed,
+            ),
+        )
+        for sector, nodes, plants, production_variable, shed_variable in sector_specs:
+            for period in periods:
+                production = sum(
+                    value(
+                        instance.sceProbab[scenario]
+                        * instance.GasSceProbab[gas_scenario]
+                        * instance.seasScale[season]
+                        * production_variable[
+                            node, plant, hour, period, scenario, gas_scenario
+                        ]
+                    )
+                    for scenario in scenarios
+                    for gas_scenario in gas_scenarios
+                    for node in nodes
+                    for plant in plants
+                    for season, hour in instance.HoursOfSeason
+                )
+                shedding = sum(
+                    value(
+                        instance.sceProbab[scenario]
+                        * instance.GasSceProbab[gas_scenario]
+                        * instance.seasScale[season]
+                        * shed_variable[node, hour, period, scenario, gas_scenario]
+                    )
+                    for scenario in scenarios
+                    for gas_scenario in gas_scenarios
+                    for node in nodes
+                    for season, hour in instance.HoursOfSeason
+                )
+                sector_volumes.extend(
+                    (
+                        (f"industry_{sector}_production_volume_period_{period}", production),
+                        (f"industry_{sector}_shed_volume_period_{period}", shedding),
+                    )
+                )
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(("component", "value"))
         writer.writerows(components)
+        writer.writerows(sector_volumes)
     print(f"objective_component_certificate={path}")
 
 
@@ -220,6 +369,8 @@ def main() -> None:
     )
     source = replace_once(source, "USE_TEMP_DIR = True", "USE_TEMP_DIR = False")
     source = replace_once(source, "hydrogen = False", "hydrogen = True")
+    if args.industry:
+        source = replace_once(source, "industry = False", "industry = True")
     source = replace_one_of(
         source,
         (
@@ -233,6 +384,14 @@ def main() -> None:
             ),
         ),
     )
+    if args.industry:
+        source = replace_one_of(
+            source,
+            (
+                ("_hydrogen_fast\"", "_industry_fast\""),
+                ("_hydrogen_full\"", "_industry_full\""),
+            ),
+        )
     source = replace_once(
         source,
         "workbook_path = 'Data handler/' + version",
@@ -358,6 +517,14 @@ def main() -> None:
         "        opt.options['ResultFile'] = f\"{name}.ilp\"",
         "        # ResultFile=.ilp requests an IIS, not an optimal-solution artifact.",
     )
+    empire_source = replace_once(
+        empire_source,
+        "    del results, instance, model",
+        "    _openempire_write_objective_component_certificate(\n"
+        "        instance, _openempire_objective_component_path\n"
+        "    )\n"
+        "    del results, instance, model",
+    )
     if args.prepare_only:
         prepared_runner = output_dir / "prepared_runner.py"
         prepared_empire = output_dir / "prepared_empire.py"
@@ -371,12 +538,15 @@ def main() -> None:
     empire_module.__file__ = str(empire_path)
     sys.modules["empire"] = empire_module
     exec(compile(empire_source, str(empire_path), "exec"), empire_module.__dict__)
+    empire_module._openempire_write_objective_component_certificate = (
+        write_objective_component_certificate
+    )
+    empire_module._openempire_objective_component_path = (
+        output_dir / "objective_components.csv"
+    )
 
     namespace = {"__name__": "__main__", "__file__": str(runner)}
     exec(compile(source, str(runner), "exec"), namespace)
-    write_objective_component_certificate(
-        namespace["model"], output_dir / "objective_components.csv"
-    )
 
 
 if __name__ == "__main__":

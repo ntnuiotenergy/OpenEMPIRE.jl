@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import heapq
 import math
 import os
 import re
@@ -47,6 +48,12 @@ STRATEGIC_COMPONENTS = {
     "co2PipelineCapBuilt": "CO2PipelineBuilt",
     "co2PipelineCapInstalled": "totalCO2PipelineCapacity",
     "co2SequestrationCapBuilt": "CO2SiteCapacityDeveloped",
+    "steelPlantBuiltCapacity": "steelPlantBuiltCapacity",
+    "steelPlantInstalledCapacity": "steelPlantInstalledCapacity",
+    "cementPlantBuiltCapacity": "cementPlantBuiltCapacity",
+    "cementPlantInstalledCapacity": "cementPlantInstalledCapacity",
+    "ammoniaPlantBuiltCapacity": "ammoniaPlantBuiltCapacity",
+    "ammoniaPlantInstalledCapacity": "ammoniaPlantInstalledCapacity",
 }
 
 OPERATIONAL_COMPONENTS = {
@@ -83,6 +90,14 @@ OPERATIONAL_COMPONENTS = {
     "transportHydrogenDemandShed": ("transport_hydrogenDemandShed", False),
     "co2PipelineFlow": ("CO2sentPipeline", False),
     "co2Sequestered": ("CO2sequestered", False),
+    "steelProduced": ("steelProduced", False),
+    "steelLoadShed": ("steelLoadShed", False),
+    "cementProduced": ("cementProduced", False),
+    "cementLoadShed": ("cementLoadShed", False),
+    "ammoniaProduced": ("ammoniaProduced", False),
+    "ammoniaLoadShed": ("ammoniaLoadShed", False),
+    "oilRefined": ("oilRefined", False),
+    "oilLoadShed": ("oilLoadShed", False),
 }
 
 JULIA_ONLY_COMPONENTS = {
@@ -109,6 +124,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--julia-solution", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--runner", default="run_EMPIRE_int_2030_gas_fast.py")
+    parser.add_argument("--industry", action="store_true")
     return parser.parse_args()
 
 
@@ -241,7 +257,11 @@ def check_solution(instance, solution_path: Path) -> None:
                 max_violation = violation
                 max_name = constraint.name
             if violation > 1e-6:
-                top_violations.append((violation, constraint.name))
+                item = (violation, constraint.name)
+                if len(top_violations) < 30:
+                    heapq.heappush(top_violations, item)
+                else:
+                    heapq.heappushpop(top_violations, item)
         print(
             f"constraint_family {component.name}: rows={len(component)} "
             f"count_gt_1e-6={count_gt_1e6} count_gt_1e-3={count_gt_1e3} "
@@ -254,14 +274,20 @@ def check_solution(instance, solution_path: Path) -> None:
         print(f"top_violation={violation:.12g} constraint={name}")
 
 
-def patched_runner_source(internal_repo: Path, runner: Path, output_dir: Path) -> str:
+def patched_runner_source(
+    internal_repo: Path, runner: Path, output_dir: Path, industry: bool,
+) -> str:
     source = runner.read_text(encoding="utf-8")
     source = replace_once(source, "USE_TEMP_DIR = True", "USE_TEMP_DIR = False")
     source = replace_once(source, "hydrogen = False", "hydrogen = True")
+    if industry:
+        source = replace_once(source, "industry = False", "industry = True")
     source = replace_once(
         source,
         "name += f\"_{2020 + NoOfPeriods * LeapYearsInvestment}_{NoOfScenarios}sce_gas_fast\"",
-        "name += f\"_{2020 + NoOfPeriods * LeapYearsInvestment}_{NoOfScenarios}sce_hydrogen_check\"",
+        "name += f\"_{2020 + NoOfPeriods * LeapYearsInvestment}_{NoOfScenarios}sce_"
+        + ("industry" if industry else "hydrogen")
+        + "_check\"",
     )
     source = replace_once(
         source,
@@ -306,7 +332,9 @@ def main() -> None:
         path.mkdir(parents=True, exist_ok=True)
 
     runner = internal_repo / args.runner
-    runner_source = patched_runner_source(internal_repo, runner, output_dir)
+    runner_source = patched_runner_source(
+        internal_repo, runner, output_dir, args.industry,
+    )
     empire_path = internal_repo / "empire.py"
     empire_source = empire_path.read_text(encoding="utf-8")
     solver_call = (
