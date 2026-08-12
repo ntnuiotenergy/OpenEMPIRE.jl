@@ -41,5 +41,6 @@ solver_crossover: 0
 solver_numericfocus: 1
 solver_presolve: 1
 solver_barhomogeneous: 1
+solver_seed: 2
 solver_feasibilitytol: 1.0e-9
 solver_barconvtol: 1.0e-8

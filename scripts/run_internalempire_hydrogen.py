@@ -56,6 +56,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="enable InternalEMPIRE's Industry module in addition to Hydrogen",
     )
+    parser.add_argument(
+        "--solver-seed",
+        type=int,
+        help="set Gurobi's deterministic Seed parameter",
+    )
     return parser.parse_args()
 
 
@@ -461,6 +466,13 @@ def main() -> None:
             ),
         ),
     )
+    if args.solver_seed is not None:
+        seed_anchor = "        opt.options['NumericFocus']=1"
+        empire_source = replace_once(
+            empire_source,
+            seed_anchor,
+            seed_anchor + f"\n        opt.options['Seed']={args.solver_seed}",
+        )
     empire_source = replace_one_of(
         empire_source,
         (

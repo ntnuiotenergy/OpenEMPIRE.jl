@@ -12,6 +12,7 @@ PYTHON=${PYTHON:-$HOME/.conda/envs/empire_env/bin/python}
 INTERNAL_REPO=${INTERNAL_REPO:-/storage/users/torgrif/InternalEMPIRE-industry-parity}
 INTERNAL_RUNNER=${INTERNAL_RUNNER:-run_EMPIRE_int_full_gas.py}
 OUTPUT_DIR=${OUTPUT_DIR:-/storage/users/torgrif/int_full_industry_ie}
+SOLVER_SEED=${SOLVER_SEED:-2}
 TARGET_NODE=${TARGET_NODE:-}
 
 function valid_target_node() {
@@ -49,7 +50,7 @@ if [[ -z "$JOB_ID" ]]; then
 
 	echo "Selected 503 GiB node: $SELECTED_NODE"
 	qsub -l hostname="$SELECTED_NODE" \
-		-v PYTHON="$PYTHON",INTERNAL_REPO="$INTERNAL_REPO",INTERNAL_RUNNER="$INTERNAL_RUNNER",OUTPUT_DIR="$OUTPUT_DIR",TARGET_NODE="$SELECTED_NODE" \
+		-v PYTHON="$PYTHON",INTERNAL_REPO="$INTERNAL_REPO",INTERNAL_RUNNER="$INTERNAL_RUNNER",OUTPUT_DIR="$OUTPUT_DIR",SOLVER_SEED="$SOLVER_SEED",TARGET_NODE="$SELECTED_NODE" \
 		"$0"
 	echo "Submitted. Monitor logs/internal_industry_full_<JOB_ID>.out"
 	exit 0
@@ -62,6 +63,7 @@ echo "Hostname:     $(hostname)"
 echo "Reference:    $INTERNAL_REPO"
 echo "Runner:       $INTERNAL_RUNNER"
 echo "Output:       $OUTPUT_DIR"
+echo "Solver seed:  $SOLVER_SEED"
 echo "Start time:   $(date)"
 echo "================================================"
 
@@ -83,6 +85,7 @@ fi
 	--internal-repo "$INTERNAL_REPO" \
 	--runner "$INTERNAL_RUNNER" \
 	--output-dir "$OUTPUT_DIR" \
+	--solver-seed "$SOLVER_SEED" \
 	--no-raw-solution \
 	--industry
 
