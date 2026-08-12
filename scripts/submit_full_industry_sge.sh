@@ -14,7 +14,7 @@ CONFIG_FILE=${CONFIG_FILE:-config/run_int_full_industry.yaml}
 INPUT_FORMAT=${INPUT_FORMAT:-csv}
 JULIA_CMD=${JULIA_CMD:-julia}
 JULIA_SOLVER=${JULIA_SOLVER:-Gurobi}
-JULIA_SEED=${JULIA_SEED:-1}
+JULIA_SEED=${JULIA_SEED:-2}
 RESULTS_DIR=${RESULTS_DIR:-/storage/users/torgrif/int_full_industry_jl}
 TARGET_NODE=${TARGET_NODE:-}
 
