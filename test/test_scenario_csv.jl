@@ -82,6 +82,48 @@ Period,Scenario,Season,Year,Month,Hour
     )
 end
 
+function _copula_cluster_time_rows()
+    starts = DateTime[
+        DateTime(2020, 1, 1), DateTime(2020, 4, 1), DateTime(2020, 7, 1), DateTime(2020, 10, 1),
+        DateTime(2021, 1, 1), DateTime(2021, 4, 1), DateTime(2021, 7, 1), DateTime(2021, 10, 1),
+    ]
+    rows = String[]
+    for start in starts
+        for h in 0:39
+            timestamp = Dates.format(start + Dates.Hour(h), dateformat"dd/mm/yyyy HH:MM")
+            value = h < 20 ? 10.0 + h * 0.1 : 1000.0 + h * 0.1
+            push!(rows, "$timestamp,$value")
+        end
+    end
+    return rows
+end
+
+# Two years of data, each regular season made of a "low" block of 20 hours
+# followed by a "high" block of 20 hours, so copula clustering (k=2) has a
+# clearly separable candidate space to work with.
+function _write_copula_cluster_scenario_data(root)
+    scenario_dir = joinpath(root, "ScenarioData")
+    rows = _copula_cluster_time_rows()
+    _write_raw_scenario_file(joinpath(scenario_dir, "electricload.csv"), rows)
+    _write_raw_scenario_file(joinpath(scenario_dir, "hydroseasonal.csv"), rows; scale = 10.0)
+    _write_raw_scenario_file(joinpath(scenario_dir, "solar.csv"), rows; scale = 0.01)
+    _write_raw_scenario_file(joinpath(scenario_dir, "windonshore.csv"), rows; scale = 0.02)
+    _write_raw_scenario_file(joinpath(scenario_dir, "windoffshore.csv"), rows; scale = 0.03)
+    _write_raw_scenario_file(joinpath(scenario_dir, "hydroror.csv"), rows; scale = 0.04)
+    return scenario_dir
+end
+
+function _copula_test_empire_params()
+    return OpenEMPIRE.EmpireParams(
+        genCapAvailType = Dict(
+            "Solar" => 0.0,
+            "Windonshore" => 0.0,
+            "Windoffshore" => 0.0,
+            "Hydrorun-of-the-river" => 0.0,
+        ),
+    )
+end
+
 function _parity_time_rows()
     starts = DateTime[
         DateTime(2020, 1, 1),
@@ -523,6 +565,226 @@ function test_fixed_sample_raw_csv_scenarios()
             read(joinpath(scenario_dir, filename), String) == filtered_outputs[filename]
             for filename in generated_files
         )
+    end
+end
+
+function test_copula_clusters_make_writes_csv()
+    mktempdir() do root
+        _write_copula_cluster_scenario_data(root)
+        sets = _scenario_test_sets()
+        dateformat = OpenEMPIRE._python_dateformat("%d/%m/%Y %H:%M")
+        load_table = OpenEMPIRE._read_raw_scenario_table(joinpath(root, "ScenarioData", "electricload.csv"), dateformat)
+        hydro_table = OpenEMPIRE._read_raw_scenario_table(joinpath(root, "ScenarioData", "hydroseasonal.csv"), dateformat)
+        generator_sources = OpenEMPIRE._raw_generator_sources(root, dateformat, sets)
+
+        rows = OpenEMPIRE.make_copula_clusters(
+            root,
+            OpenEMPIRE.REGULAR_SCENARIO_SEASONS,
+            4,
+            ["electricload"],
+            2,
+            load_table,
+            hydro_table,
+            generator_sources,
+            MersenneTwister(1);
+            n_init = 5,
+        )
+
+        path = joinpath(root, "Copulas", "CopulaClusters", "copula_clusters.csv")
+        @test isfile(path)
+        @test !isempty(rows)
+        @test all(r -> r.ClusterGroup in (0, 1), rows)
+        @test Set(r.Season for r in rows) == Set(String.(OpenEMPIRE.REGULAR_SCENARIO_SEASONS))
+        @test length(Set(r.ClusterGroup for r in rows)) == 2
+
+        csv_rows = collect(CSV.File(path; normalizenames = false))
+        @test length(csv_rows) == length(rows)
+        # Column layout and order match Python's make_copula_filter, including the
+        # rank-value columns the clustering ran on. The fixture has one node
+        # column per variable, so a single copula variable gives one Value column.
+        @test string.(propertynames(csv_rows[1])) ==
+            ["Year", "Season", "SampleIndex", "Value1", "ClusterGroup"]
+        @test all(r -> 0.0 < r.Value1 <= 1.0, csv_rows)
+
+        # Clustering consumes the scenario RNG, so an equal seed reproduces the
+        # catalog exactly, including the canonical ClusterGroup labels.
+        repeated = OpenEMPIRE.make_copula_clusters(
+            root,
+            OpenEMPIRE.REGULAR_SCENARIO_SEASONS,
+            4,
+            ["electricload"],
+            2,
+            load_table,
+            hydro_table,
+            generator_sources,
+            MersenneTwister(1);
+            n_init = 5,
+        )
+        @test repeated == rows
+    end
+end
+
+function test_copula_clusters_use_samples_from_clusters()
+    mktempdir() do root
+        _write_copula_cluster_scenario_data(root)
+        sets = _scenario_test_sets()
+        dateformat = OpenEMPIRE._python_dateformat("%d/%m/%Y %H:%M")
+        load_table = OpenEMPIRE._read_raw_scenario_table(joinpath(root, "ScenarioData", "electricload.csv"), dateformat)
+        hydro_table = OpenEMPIRE._read_raw_scenario_table(joinpath(root, "ScenarioData", "hydroseasonal.csv"), dateformat)
+        generator_sources = OpenEMPIRE._raw_generator_sources(root, dateformat, sets)
+        OpenEMPIRE.make_copula_clusters(
+            root,
+            OpenEMPIRE.REGULAR_SCENARIO_SEASONS,
+            4,
+            ["electricload"],
+            2,
+            load_table,
+            hydro_table,
+            generator_sources,
+            MersenneTwister(1);
+            n_init = 5,
+        )
+        clusters = OpenEMPIRE._read_copula_clusters(root)
+        clusters_by_season = Dict{String, Vector{OpenEMPIRE.CopulaClusterRow}}()
+        for c in clusters
+            push!(get!(clusters_by_season, c.Season, OpenEMPIRE.CopulaClusterRow[]), c)
+        end
+
+        params = _copula_test_empire_params()
+        cfg = Dict(
+            "time_format" => "%d/%m/%Y %H:%M",
+            "length_of_regular_season" => 4,
+            "number_of_scenarios" => 2,
+            "copula_clusters_use" => true,
+            "n_cluster" => 2,
+            "copulas_to_use" => ["electricload"],
+        )
+        periods = OpenEMPIRE.create_timestruct(1, 5, 4, 4, 2, 24, 2)
+
+        OpenEMPIRE.generate_scenario_csv!(root, periods, params, sets, cfg; rng = MersenneTwister(1))
+
+        _assert_profile_lengths(params.sloadRaw["A"], periods)
+
+        sampling_key_path = joinpath(root, "ScenarioData", "sampling_key.csv")
+        @test isfile(sampling_key_path)
+        regular_rows = [r for r in CSV.File(sampling_key_path; normalizenames = false) if String(r.Season) != "peak"]
+        @test !isempty(regular_rows)
+
+        used_clusters = Set{Int}()
+        for row in regular_rows
+            season = String(row.Season)
+            year = Int(row.Year)
+            hour = Int(row.Hour)
+            match = findfirst(c -> c.Year == year && c.SampleIndex == hour, clusters_by_season[season])
+            @test match !== nothing
+            push!(used_clusters, clusters_by_season[season][match].ClusterGroup)
+        end
+        @test used_clusters == Set([0, 1])
+    end
+end
+
+function test_copula_clusters_multiple_variables()
+    mktempdir() do root
+        _write_copula_cluster_scenario_data(root)
+        sets = _scenario_test_sets()
+        dateformat = OpenEMPIRE._python_dateformat("%d/%m/%Y %H:%M")
+        load_table = OpenEMPIRE._read_raw_scenario_table(joinpath(root, "ScenarioData", "electricload.csv"), dateformat)
+        hydro_table = OpenEMPIRE._read_raw_scenario_table(joinpath(root, "ScenarioData", "hydroseasonal.csv"), dateformat)
+        generator_sources = OpenEMPIRE._raw_generator_sources(root, dateformat, sets)
+
+        # Several variables at once: the joint distribution gains one dimension
+        # per (variable, node) pair, which is the case the empirical copula is for.
+        rows = OpenEMPIRE.make_copula_clusters(
+            root,
+            OpenEMPIRE.REGULAR_SCENARIO_SEASONS,
+            4,
+            ["electricload", "solar", "windoffshore"],
+            2,
+            load_table,
+            hydro_table,
+            generator_sources,
+            MersenneTwister(1);
+            n_init = 5,
+        )
+        @test !isempty(rows)
+        @test all(r -> r.ClusterGroup in (0, 1), rows)
+        @test Set(r.Season for r in rows) == Set(String.(OpenEMPIRE.REGULAR_SCENARIO_SEASONS))
+
+        # Every listed variable must resolve to a raw table.
+        for name in ("electricload", "hydroseasonal", "solar", "windonshore", "windoffshore", "hydroror")
+            @test OpenEMPIRE._copula_source_table(name, load_table, hydro_table, generator_sources) !== nothing
+        end
+    end
+end
+
+# The scenario filter outranks copula clustering, so a run driven by the filter
+# must not fail on a leftover `copula_clusters_use: true` with no catalog present.
+function test_filter_takes_precedence_over_copula_clusters()
+    mktempdir() do root
+        _write_copula_cluster_scenario_data(root)
+        sets = _scenario_test_sets()
+        params = _copula_test_empire_params()
+        cfg = Dict(
+            "time_format" => "%d/%m/%Y %H:%M",
+            "length_of_regular_season" => 4,
+            "number_of_scenarios" => 1,
+            "filter_make" => true,
+            "filter_use" => true,
+            "copula_clusters_use" => true,
+            "n_cluster" => 2,
+        )
+        periods = OpenEMPIRE.create_timestruct(1, 5, 4, 4, 2, 24, 1)
+
+        OpenEMPIRE.generate_scenario_csv!(root, periods, params, sets, cfg; rng = MersenneTwister(1))
+
+        # The filter catalog drove sampling, and no copula catalog was created.
+        @test isfile(joinpath(root, "ScenarioData", "filter_result.csv"))
+        @test !isfile(OpenEMPIRE._copula_cluster_path(root))
+        _assert_profile_lengths(params.sloadRaw["A"], periods)
+
+        filter_rows = collect(CSV.File(joinpath(root, "ScenarioData", "filter_result.csv"); normalizenames = false))
+        filter_keys = Set((String(r.Season), Int(r.Year), Int(r.SampleIndex)) for r in filter_rows)
+        for row in CSV.File(joinpath(root, "ScenarioData", "sampling_key.csv"); normalizenames = false)
+            String(row.Season) == "peak" && continue
+            @test (String(row.Season), Int(row.Year), Int(row.Hour)) in filter_keys
+        end
+    end
+end
+
+function test_copula_clusters_use_without_make_errors()
+    mktempdir() do root
+        _write_copula_cluster_scenario_data(root)
+        sets = _scenario_test_sets()
+        params = _copula_test_empire_params()
+        cfg = Dict(
+            "time_format" => "%d/%m/%Y %H:%M",
+            "length_of_regular_season" => 4,
+            "number_of_scenarios" => 1,
+            "copula_clusters_use" => true,
+            "n_cluster" => 2,
+        )
+        periods = OpenEMPIRE.create_timestruct(1, 5, 4, 4, 2, 24, 1)
+
+        @test_throws ArgumentError OpenEMPIRE.generate_scenario_csv!(root, periods, params, sets, cfg; rng = MersenneTwister(1))
+    end
+end
+
+function test_copula_clusters_invalid_copula_name_errors()
+    mktempdir() do root
+        _write_copula_cluster_scenario_data(root)
+        sets = _scenario_test_sets()
+        params = _copula_test_empire_params()
+        cfg = Dict(
+            "time_format" => "%d/%m/%Y %H:%M",
+            "length_of_regular_season" => 4,
+            "number_of_scenarios" => 1,
+            "copula_clusters_make" => true,
+            "n_cluster" => 2,
+            "copulas_to_use" => ["windpower"],
+        )
+        periods = OpenEMPIRE.create_timestruct(1, 5, 4, 4, 2, 24, 1)
+
+        @test_throws ArgumentError OpenEMPIRE.generate_scenario_csv!(root, periods, params, sets, cfg; rng = MersenneTwister(1))
     end
 end
 
@@ -1134,11 +1396,87 @@ Period,Scenario,Season,Year,Month,Hour
             "scenario_metadata.yaml",
         ))
         @test !haskey(unfiltered_metadata, "archived_filter_result")
+        staged_result = joinpath(root, "staged")
+        staged_dataset = joinpath(staged_result, "Input", "csv")
+        staged_config = joinpath(staged_result, "Input", "config.yaml")
+        mkpath(dirname(staged_config))
+        cp(dataset, staged_dataset)
+        cp(config_file, staged_config)
+        staged_key = joinpath(staged_dataset, "ScenarioData", "sampling_key.csv")
+        @test OpenEMPIRE.write_scenario_artifacts(
+            staged_result,
+            staged_dataset,
+            config;
+            config_file = staged_config,
+            dataset = "dataset",
+            input_format = :csv,
+            seed = 11,
+        ) == staged_key
+        @test !ispath(joinpath(staged_result, "Input", "ScenarioData", "sampling_key.csv"))
+        staged_metadata = YAML.load_file(joinpath(staged_result, "Input", "scenario_metadata.yaml"))
+        @test staged_metadata["staged_input"] == true
+        @test staged_metadata["archived_sampling_key"] ==
+              joinpath("Input", "csv", "ScenarioData", "sampling_key.csv")
 
         disabled_result = joinpath(root, "disabled")
         disabled_config = merge(config, Dict("use_scenario_generation" => false))
         @test OpenEMPIRE.write_scenario_artifacts(disabled_result, dataset, disabled_config) === nothing
         @test !ispath(joinpath(disabled_result, "Input", "ScenarioData", "sampling_key.csv"))
+    end
+end
+
+function test_write_scenario_copula_cluster_artifacts()
+    mktempdir() do root
+        dataset = joinpath(root, "dataset")
+        scenario_dir = joinpath(dataset, "ScenarioData")
+        _write_csv(
+            joinpath(scenario_dir, "sampling_key.csv"),
+            """
+Period,Scenario,Season,Year,Month,Hour
+1,1,winter,2020,1,4
+""",
+        )
+        copula_clusters = _write_csv(
+            OpenEMPIRE._copula_cluster_path(dataset),
+            "Season,Year,SampleIndex,ClusterGroup\nwinter,2020,0,0\nwinter,2020,1,1\n",
+        )
+
+        config = Dict(
+            "use_scenario_generation" => true,
+            "use_fixed_sample" => false,
+            "number_of_scenarios" => 1,
+            "length_of_regular_season" => 24,
+            "regular_seasons" => ["winter"],
+            "copula_clusters_make" => true,
+            "copula_clusters_use" => true,
+            "copulas_to_use" => ["electricload"],
+            "n_cluster" => 2,
+        )
+
+        result_dir = joinpath(root, "results")
+        OpenEMPIRE.write_scenario_artifacts(result_dir, dataset, config; seed = 3)
+
+        archived_copula = joinpath(result_dir, "Input", "ScenarioData", "copula_clusters.csv")
+        @test read(archived_copula, String) == read(copula_clusters, String)
+
+        metadata = YAML.load_file(joinpath(result_dir, "Input", "scenario_metadata.yaml"))
+        @test metadata["copula_clusters_make"] == true
+        @test metadata["copula_clusters_use"] == true
+        @test metadata["copulas_to_use"] == ["electricload"]
+        @test metadata["source_copula_clusters"] == copula_clusters
+        @test metadata["archived_copula_clusters"] ==
+              joinpath("Input", "ScenarioData", "copula_clusters.csv")
+
+        # Disabled copula clustering must not archive the catalog or claim it in metadata.
+        plain_result = joinpath(root, "plain")
+        plain_config = merge(
+            config,
+            Dict("copula_clusters_make" => false, "copula_clusters_use" => false),
+        )
+        OpenEMPIRE.write_scenario_artifacts(plain_result, dataset, plain_config)
+        @test !ispath(joinpath(plain_result, "Input", "ScenarioData", "copula_clusters.csv"))
+        plain_metadata = YAML.load_file(joinpath(plain_result, "Input", "scenario_metadata.yaml"))
+        @test !haskey(plain_metadata, "archived_copula_clusters")
     end
 end
 
@@ -1215,8 +1553,87 @@ function test_create_model_adds_storage_max_constraints()
         @test _sparse_axis_length(emp[:storage_max_inv_en]) == expected
         @test _sparse_axis_length(emp[:storage_max_inst_pow]) == expected
         @test _sparse_axis_length(emp[:storage_max_inst_en]) == expected
-        @test JuMP.num_constraints(emp; count_variable_in_set_constraints = false) == 81190
+        # 81190 core rows plus the 4 offshore wind-farm cap rows (Denmark is the test
+        # dataset's only offshore wind farm: 2 arc directions x 2 strategic periods).
+        # The cap is on by default now, so the Python side needs `north_sea: true` to
+        # reach the same total; the cap is non-binding here, so the objective is
+        # unchanged either way.
+        @test JuMP.num_constraints(emp; count_variable_in_set_constraints = false) == 81194
+        @test _sparse_axis_length(emp[:wind_farm_transmission_cap]) == 4
     end
+end
+
+function test_offshore_transmission_cap_is_on_by_default()
+    sets = OpenEMPIRE.EmpireSets(
+        Generator = ["Windoffshore"],
+        Technology = ["Wind"],
+        Node = ["Offshore", "Onshore"],
+        OffshoreWindFarmNode = ["Offshore"],
+        DirectionalLink = [("Offshore", "Onshore"), ("Onshore", "Offshore")],
+        TransmissionType = ["HVDC"],
+        TransmissionTypeOfDirectionalLink = [
+            ("Offshore", "Onshore", "HVDC"),
+            ("Onshore", "Offshore", "HVDC"),
+        ],
+        GeneratorsOfTechnology = [("Wind", "Windoffshore")],
+        GeneratorsOfNode = [("Offshore", "Windoffshore")],
+    )
+    periods = OpenEMPIRE.create_timestruct(1, 5, 1, 2, 0, 0, 1)
+    sp = first(strat_periods(periods))
+    params = OpenEMPIRE.EmpireParams()
+
+    # Default: a wind farm may not build more transmission than it has generation.
+    emp_on = JuMP.Model()
+    OpenEMPIRE.create_variables(emp_on, sets, periods)
+    OpenEMPIRE.create_transmission_constraints(emp_on, sets, params, periods)
+    @test _sparse_axis_length(emp_on[:wind_farm_transmission_cap]) == 2
+
+    cap = emp_on[:transmissionInstalledCap]["Offshore", "Onshore", sp]
+    gen = emp_on[:genInstalledCap]["Offshore", "Windoffshore", sp]
+    for arc in (("Offshore", "Onshore"), ("Onshore", "Offshore"))
+        constraint = emp_on[:wind_farm_transmission_cap][arc, sp]
+        @test JuMP.normalized_coefficient(constraint, cap) == 1.0
+        @test JuMP.normalized_coefficient(constraint, gen) == -1.0
+    end
+
+    # Still switchable off for experiments.
+    emp_off = JuMP.Model()
+    OpenEMPIRE.create_variables(emp_off, sets, periods)
+    OpenEMPIRE.create_transmission_constraints(
+        emp_off, sets, params, periods; offshore_transmission_cap = false,
+    )
+    @test !haskey(JuMP.object_dictionary(emp_off), :wind_farm_transmission_cap)
+end
+
+function test_offshore_wind_farm_without_generators_is_rejected()
+    # The cap's right-hand side sums the wind farm's own generators, so an entry with
+    # none would force its corridors to zero capacity and silently disconnect the node.
+    # That is what "all nodes minus onshore nodes" produces when it sweeps up energy
+    # hubs, so the set validation rejects it rather than solving a disconnected model.
+    make(; hub_nodes = String[], farm_generators = Tuple{String, String}[]) =
+        OpenEMPIRE.EmpireSets(
+            Generator = ["Windoffshore"],
+            Technology = ["Wind"],
+            Node = ["Hub", "Onshore"],
+            OffshoreWindFarmNode = ["Hub"],
+            OffshoreEnergyHub = hub_nodes,
+            DirectionalLink = [("Hub", "Onshore"), ("Onshore", "Hub")],
+            TransmissionType = ["HVDC"],
+            TransmissionTypeOfDirectionalLink = [
+                ("Hub", "Onshore", "HVDC"),
+                ("Onshore", "Hub", "HVDC"),
+            ],
+            GeneratorsOfTechnology = [("Wind", "Windoffshore")],
+            GeneratorsOfNode = farm_generators,
+        )
+
+    @test_throws ArgumentError make()
+    # A node cannot be both a wind farm and a hub.
+    @test_throws ArgumentError make(
+        hub_nodes = ["Hub"], farm_generators = [("Hub", "Windoffshore")],
+    )
+    # With generators of its own it is a legitimate wind farm.
+    @test make(farm_generators = [("Hub", "Windoffshore")]) isa OpenEMPIRE.EmpireSets
 end
 
 function test_emission_constraints_match_python_formulation()
@@ -1278,6 +1695,33 @@ function test_emission_constraints_match_python_formulation()
         emp[:genOperational]["A", "gas", winter_scenario_2],
     ) ≈ -gas_coefficient
     @test JuMP.normalized_rhs(emission_cap_1) ≈ 1000.0
+end
+
+function test_objective_matches_component_sum()
+    sets = OpenEMPIRE.EmpireSets(
+        Generator = ["gas"],
+        Storage = ["Battery"],
+        DependentStorage = ["Battery"],
+        Node = ["A", "B"],
+        GeneratorsOfNode = [("A", "gas")],
+        StoragesOfNode = [("A", "Battery")],
+        DirectionalLink = [("A", "B")],
+    )
+    periods = OpenEMPIRE.create_timestruct(1, 5, 1, 2, 0, 0, 1)
+    discounter = Discounter(0.05, 1, periods)
+    params = OpenEMPIRE.EmpireParams()
+
+    emp = JuMP.Model()
+    OpenEMPIRE.create_variables(emp, sets, periods)
+    objective = OpenEMPIRE.create_objective(emp, sets, params, periods, discounter)
+
+    components = OpenEMPIRE.objective_component_expressions(emp, sets, params, periods, discounter)
+
+    # Regression guard: the objective must be exactly the sum of the reported
+    # components, so a future edit can't add a cost term to one without the
+    # other and silently reintroduce the duplication this refactor removed.
+    @test JuMP.isequal_canonical(objective, sum(values(components)))
+    @test JuMP.isequal_canonical(JuMP.objective_function(emp), sum(values(components)))
 end
 
 function test_native_dual_weight_normalization()

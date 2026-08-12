@@ -9,6 +9,8 @@ using Clustering
 using Dates
 using DelimitedFiles
 using Random
+using Statistics
+using Unicode
 using YAML
 
 include("empire_sets.jl")

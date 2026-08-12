@@ -177,7 +177,9 @@ Base.@kwdef mutable struct EmpireParams
     genInitCap::Dict{Tuple{String, String}, TimeProfile}         = Dict{Tuple{String, String}, TimeProfile}()
     genMaxBuiltCap::Dict{Tuple{String, String}, TimeProfile}     = Dict{Tuple{String, String}, TimeProfile}()
     genMaxInstalledCapRaw::Dict{Tuple{String, String}, Float64}  = Dict{Tuple{String, String}, Float64}()
+    genMaxInstalledCapByPeriod::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
     genMaxInstalledCap::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
+    genMaxBiomethaneAvailability::Dict{String, TimeProfile}      = Dict{String, TimeProfile}()
     genRampUpCap::Dict{String, Float64}                          = Dict{String, Float64}()
     genCapAvailType::Dict{String, Float64}                       = Dict{String, Float64}()
     genCO2Content::Dict{String, Float64}                         = Dict{String, Float64}()
@@ -192,6 +194,13 @@ Base.@kwdef mutable struct EmpireParams
     transmissionTypeFixedOMCost::Dict{String, TimeProfile}                = Dict{String, TimeProfile}()
     lineEfficiency::Dict{Tuple{String, String}, Float64}                  = Dict{Tuple{String, String}, Float64}()
     transmissionLifetime::Dict{Tuple{String, String}, Float64}            = Dict{Tuple{String, String}, Float64}()
+
+    # Offshore energy-hub converters. Capital and O&M costs are per MW of converter
+    # capacity and are not corridor-specific, so unlike transmission they carry no
+    # length term. `offshoreConvInvCost` is derived in `preprocess_investment_costs`.
+    offshoreConvCapitalCost::Union{TimeProfile, Nothing}                  = nothing
+    offshoreConvOMCost::Union{TimeProfile, Nothing}                       = nothing
+    offshoreConvInvCost::Union{TimeProfile, Nothing}                      = nothing
 
     # Storage inputs from file
     storageBleedEff::Dict{String, Float64}                      = Dict{String, Float64}()
@@ -220,6 +229,7 @@ Base.@kwdef mutable struct EmpireParams
     # General parameters from file
     CO2cap::Union{Nothing, TimeProfile}   = nothing
     CO2price::Union{Nothing, TimeProfile} = nothing
+    availableBioEnergy::Union{Nothing, TimeProfile} = nothing
     seasonNames::Vector{String}           = String[]
     regularSeasonCount::Int               = 0
 
@@ -286,6 +296,8 @@ const DEFAULT_MAX_HYDRO_NODE       = nothing
 # `LigniteCCSadv` and omits `LigniteCCSsup`); a 1.0 default left it effectively unrampable-limited
 # in Julia while Python pinned it to 0.0.
 const DEFAULT_RAMPUP_CAP                 = 0.0
+# InternalEMPIRE's Pyomo parameter default, in TJ per node and strategic period.
+const DEFAULT_MAX_BIOMETHANE_AVAILABILITY = 999999.0
 # Efficiencies / availability factors default to 1.0 (lossless / fully available)
 const DEFAULT_BLEED_EFF                  = 1.0
 const DEFAULT_CHARGE_EFF                 = 1.0
@@ -301,6 +313,8 @@ const DEFAULT_STORAGE_INIT = 0.0
 const DEFAULT_GEN_LIFETIME     = 40
 const DEFAULT_STORAGE_LIFETIME = 40
 const DEFAULT_TRANS_LIFETIME   = 40
+# InternalEMPIRE: `model.offshoreConvLifetime = Param(default=40)` (empire.py:508).
+const DEFAULT_OFFSHORE_CONV_LIFETIME = 40
 
 # Investment / marginal costs default to zero
 const DEFAULT_GEN_INVEST_COST     = 0.0
@@ -329,6 +343,11 @@ discount_rate(par) = par.discountRate
 co2_price(par, sp) = par.CO2price === nothing ? 0.0 : par.CO2price[sp]
 co2_cap(par, sp) = par.CO2cap === nothing ? nothing : par.CO2cap[sp]
 co2_content(par, g) = get(par.genCO2Content, g, 0.0)
+available_bioenergy(par, sp) =
+    par.availableBioEnergy === nothing ? nothing : par.availableBioEnergy[sp]
+max_biomethane_availability(par, n, sp) =
+    haskey(par.genMaxBiomethaneAvailability, n) ?
+    par.genMaxBiomethaneAvailability[n][sp] : DEFAULT_MAX_BIOMETHANE_AVAILABILITY
 ccs_cost_variable(par, sp) = par.CCSCostTSVariable === nothing ? 0.0 : par.CCSCostTSVariable[sp]
 
 """
@@ -428,6 +447,12 @@ function trans_invest_cost(par, m, n, sp)
     p = _corridor_profile(par.transmissionInvCost, m, n)
     return p === nothing ? DEFAULT_TRANS_INVEST_COST : p[sp]
 end
+
+# Annuitised capital + O&M cost per MW of offshore energy-hub converter capacity.
+# `nothing` when the dataset ships no converter costs, which is how a dataset says
+# it has no hub converters to invest in.
+offshore_conv_invest_cost(par, sp) =
+    par.offshoreConvInvCost === nothing ? nothing : par.offshoreConvInvCost[sp]
 
 lost_load_cost(par, n, t) = haskey(par.nodeLostLoadCost, n) ? par.nodeLostLoadCost[n][t] : DEFAULT_LOST_LOAD_COST
 sload(par, n, t) = haskey(par.sload, n) ? par.sload[n][t] : DEFAULT_LOAD
@@ -857,6 +882,7 @@ function _check_hydrogen_params!(
     periods === nothing && return
     period_ids = Set(1:length(strat_periods(periods)))
     expected_plant_periods = Set((plant, period) for plant in reformer_plants for period in period_ids)
+    expected_storage_periods = Set((storage, period) for storage in storage_set for period in period_ids)
     expected_terminal_periods = Set(
         (node, terminal, period) for (node, terminal) in terminal_pairs for period in period_ids
     )
@@ -877,6 +903,8 @@ function _check_hydrogen_params!(
         ("reformerElectricityUse", expected_plant_periods, Set(keys(hydrogen.reformerElectricityUse))),
         ("reformerEmissionFactor", expected_plant_periods, Set(keys(hydrogen.reformerEmissionFactor))),
         ("reformerCO2CaptureFactor", expected_plant_periods, Set(keys(hydrogen.reformerCO2CaptureFactor))),
+        ("storageCapitalCost", expected_storage_periods, Set(keys(hydrogen.storageCapitalCost))),
+        ("storageFixedOMCost", expected_storage_periods, Set(keys(hydrogen.storageFixedOMCost))),
         ("terminalInitialCapacity", expected_terminal_periods, Set(keys(hydrogen.terminalInitialCapacity))),
         ("terminalCapitalCost", expected_terminal_periods, Set(keys(hydrogen.terminalCapitalCost))),
         ("terminalFixedOMCost", expected_terminal_periods, Set(keys(hydrogen.terminalFixedOMCost))),
@@ -990,6 +1018,7 @@ function validate(
             ("genScaleInitCap", par.genScaleInitCap),
             ("genInitCap", par.genInitCap),
             ("genMaxBuiltCap", par.genMaxBuiltCap),
+            ("genMaxInstalledCapByPeriod", par.genMaxInstalledCapByPeriod),
             ("genMaxInstalledCap", par.genMaxInstalledCap),
             ("transmissionInitCap", par.transmissionInitCap),
             ("transmissionMaxBuiltCap", par.transmissionMaxBuiltCap),
@@ -1015,6 +1044,7 @@ function validate(
             ("storPWInvCost", par.storPWInvCost),
             ("transmissionInvCost", par.transmissionInvCost),
             ("genMargCost", par.genMargCost),
+            ("genMaxBiomethaneAvailability", par.genMaxBiomethaneAvailability),
         )
         _check_profile_dict!(errs, name, d, periods; min = 0.0)
     end
@@ -1028,6 +1058,8 @@ function validate(
     _check_profile_scalar!(errs, "CCSCostTSVariable", par.CCSCostTSVariable, periods; min = 0.0)
     _check_profile_scalar!(errs, "CO2cap", par.CO2cap, periods; min = 0.0)
     _check_profile_scalar!(errs, "CO2price", par.CO2price, periods; min = 0.0)
+    par.availableBioEnergy === nothing ||
+        _check_profile_scalar!(errs, "availableBioEnergy", par.availableBioEnergy, periods; min = 0.0)
     _check_natural_gas_params!(errs, par, sets, periods)
     _check_hydrogen_params!(errs, par, sets, periods)
 
@@ -1087,6 +1119,7 @@ function validate(
                 ("sload", par.sload),
                 ("maxRegHydroGenRaw", par.maxRegHydroGenRaw),
                 ("maxRegHydroGen", par.maxRegHydroGen),
+                ("genMaxBiomethaneAvailability", par.genMaxBiomethaneAvailability),
             )
             _check_keys_in_set!(errs, name, d, nset, "node")
         end
@@ -1115,6 +1148,7 @@ function validate(
         for (name, d) in (
                 ("genMaxBuiltCap", par.genMaxBuiltCap),
                 ("genMaxInstalledCapRaw", par.genMaxInstalledCapRaw),
+                ("genMaxInstalledCapByPeriod", par.genMaxInstalledCapByPeriod),
                 ("genMaxInstalledCap", par.genMaxInstalledCap),
             )
             _check_tuple_keys_in_sets!(errs, name, d, nset, "node", Set(techs(sets)), "technology")

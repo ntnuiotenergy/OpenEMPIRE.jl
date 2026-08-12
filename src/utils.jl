@@ -1,6 +1,18 @@
 
+# Corridor data is stored once per corridor, in whichever direction the input file
+# lists it, so a lookup must try both orders.
+_pair_value(dict, m, n) = haskey(dict, (m, n)) ? dict[(m, n)] : get(dict, (n, m), nothing)
+
+# Annuity (capital recovery) factor.
+#
+# Matches InternalEMPIRE, which uses the exponent `1 - life` rather than `-life`
+# (empire.py:1086 and the eleven other investment types). That spreads the capital over
+# `life - 1` payments instead of `life`, so the annual charge is slightly larger: +0.8%
+# at a 40-year lifetime, +8.6% at 10 years. Whether that is deliberate is an open
+# question with Stian (issues_for_stian.md); the port follows the reference until it is
+# settled, because the two cannot agree on an objective while they disagree here.
 function annuity_factor(wacc, life)
-    return (1 - (1 + wacc)^(-life)) / wacc
+    return (1 - (1 + wacc)^(1 - life)) / wacc
 end
 
 function present_value(cost, discount_rate, years; at_start = true)
@@ -111,22 +123,70 @@ function preprocess_invest_cost(params::EmpireParams, sets, periods)
     end
 
     # Transmission investment costs
+    #
+    # Length and lifetime are stored once per corridor, in whichever direction the input
+    # file happens to list, but TransmissionTypeOfDirectionalLink carries both directions.
+    # Looking them up in only the iterated direction therefore missed over half the
+    # directed links, and a corridor whose *both* directions missed fell back to
+    # DEFAULT_TRANS_INVEST_COST = 0.0 -- i.e. it became free to build. On full_model_int
+    # that silently left 26 corridors unpriced, including every offshore energy-hub
+    # corridor, so the model bought transmission it had not paid for.
     params.transmissionInvCost = Dict{Tuple{String,String}, StrategicProfile}()
+    unpriced = Set{Tuple{String,String}}()
     for (m, n, tt) in sets.TransmissionTypeOfDirectionalLink
-        if haskey(params.transmissionTypeCapitalCost, tt) && haskey(params.transmissionLifetime, (m,n))
-            cap_cost = params.transmissionTypeCapitalCost[tt] # in €/(MW * km)
-            life = params.transmissionLifetime[(m,n)]
-            trans_length = params.transmissionLength[(m,n)] # in km
-            om_cost = get(params.transmissionTypeFixedOMCost, tt, 0.0) # in €/MW/year
-            profiles = FixedProfile[]
-            for sp in SP
-                cost_per_year = trans_length * cap_cost[sp] / annuity_factor(wacc, life) + om_cost[sp]
-                y = min(life, sum(duration_strat(spp) for spp in SP if spp >= sp))
-                invest_cost = present_value(cost_per_year, ρ, y; at_start = true) # in €/MW
-                push!(profiles, FixedProfile(invest_cost))
-            end
-            params.transmissionInvCost[(m, n)] = StrategicProfile(profiles)
+        # Lifetime falls back to DEFAULT_TRANS_LIFETIME, matching InternalEMPIRE's
+        # `Param(model.BidirectionalArc, default=40.0)` (empire.py:496). full_model_int
+        # omits a lifetime for the offshore energy-hub corridors, so requiring the key
+        # here left them with no cost at all instead of the default the reference uses.
+        life = trans_lifetime(params, m, n)
+        trans_length = _pair_value(params.transmissionLength, m, n)
+        if !haskey(params.transmissionTypeCapitalCost, tt) || trans_length === nothing
+            push!(unpriced, is_bidir(m, n) ? (m, n) : (n, m))
+            continue
         end
+        cap_cost = params.transmissionTypeCapitalCost[tt] # in €/(MW * km)
+        om_cost = get(params.transmissionTypeFixedOMCost, tt, 0.0) # in €/MW/year
+        profiles = FixedProfile[]
+        for sp in SP
+            # InternalEMPIRE scales *both* terms by corridor length (empire.py:1107):
+            #   annuity * length * TypeCapitalCost + length * TypeFixedOMCost
+            # The fixed O&M is per MW per km per year, not per MW per year, so omitting
+            # the length here understated transmission investment by ~40% on
+            # full_model_int.
+            cost_per_year = trans_length * (cap_cost[sp] / annuity_factor(wacc, life) + om_cost[sp])
+            y = min(life, sum(duration_strat(spp) for spp in SP if spp >= sp))
+            invest_cost = present_value(cost_per_year, ρ, y; at_start = true) # in €/MW
+            push!(profiles, FixedProfile(invest_cost))
+        end
+        params.transmissionInvCost[(m, n)] = StrategicProfile(profiles)
+    end
+
+    # A corridor is only genuinely unpriced if neither direction could be derived.
+    still_unpriced = sort([c for c in unpriced
+                           if _pair_value(params.transmissionInvCost, c[1], c[2]) === nothing])
+    isempty(still_unpriced) || @warn(
+        "No investment cost could be derived for these transmission corridors, so they " *
+        "fall back to a cost of 0 and are free to build. Check transmissionLength, " *
+        "transmissionLifetime and transmissionTypeCapitalCost for them.",
+        corridors = still_unpriced,
+    )
+
+    # Offshore energy-hub converter investment cost.
+    #
+    # Mirrors InternalEMPIRE's prepInvCost_rule (empire.py:1113-1115). Unlike
+    # transmission there is no length term -- the capital cost is already per MW of
+    # converter capacity -- and unlike generators there is no kW->MW factor of 1000.
+    if params.offshoreConvCapitalCost !== nothing
+        life = DEFAULT_OFFSHORE_CONV_LIFETIME
+        om = params.offshoreConvOMCost
+        profiles = FixedProfile[]
+        for sp in SP
+            cost_per_year = params.offshoreConvCapitalCost[sp] / annuity_factor(wacc, life)
+            om === nothing || (cost_per_year += om[sp])
+            y = min(life, sum(duration_strat(spp) for spp in SP if spp >= sp))
+            push!(profiles, FixedProfile(present_value(cost_per_year, ρ, y; at_start = true)))
+        end
+        params.offshoreConvInvCost = StrategicProfile(profiles)
     end
 end
 
@@ -141,9 +201,15 @@ function preprocess_max_installed_cap(params::EmpireParams, sets, periods)
         for sp in strat_periods(periods)
             max_cap = get(params.genMaxInstalledCapRaw, (n, gt), DEFAULT_GEN_MAX_INST_CAP_RAW)
             init_cap = sum(gencap_init(params, n, g, sp) for g in generators_tech(sets, n, gt); init = 0)
-            if init_cap > max_cap
-                @warn "Initial capacity $init_cap for technology $gt at node $n exceeds maximum installed capacity $max_cap. Setting maximum installed capacity to initial capacity."
+            period_cap = haskey(params.genMaxInstalledCapByPeriod, (n, gt)) ?
+                         params.genMaxInstalledCapByPeriod[(n, gt)][sp] : 0.0
+            if max_cap <= init_cap
+                if init_cap > max_cap
+                    @warn "Initial capacity $init_cap for technology $gt at node $n exceeds maximum installed capacity $max_cap. Setting maximum installed capacity to initial capacity."
+                end
                 max_cap = init_cap
+            elseif init_cap < period_cap < max_cap
+                max_cap = period_cap
             end
             push!(vals, max_cap)
         end

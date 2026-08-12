@@ -24,7 +24,7 @@ compute_operational_duals: False
 print_in_iamc_format: False
 write_in_lp_format: False
 serialize_instance: False
-north_sea: False
+offshore_transmission_cap: False                       # Off to match this config's Python baseline run
 leap_years_investment: 5
 time_format: "%d/%m/%Y %H:%M"
 

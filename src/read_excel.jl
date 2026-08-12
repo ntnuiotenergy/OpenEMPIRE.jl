@@ -168,6 +168,11 @@ function read_params_xlsx(dirX)
         par.genInitCap = filehandle["InitialCapacity"][:][4:end,:] |> data -> strat_profiles_gen(data)
         par.genMaxBuiltCap = filehandle["MaxBuiltCapacity"][:][4:end,:] |> data -> strat_profiles_gen(data)
         par.genMaxInstalledCapRaw = filehandle["MaxInstalledCapacity"][:][4:end,:] |> data -> param_load(data; value_col = 3)
+        if "MaxBiomethaneAvailability" in XLSX.sheetnames(filehandle)
+            par.genMaxBiomethaneAvailability =
+                filehandle["MaxBiomethaneAvailability"][:][4:end, :] |>
+                data -> strat_profiles(data)
+        end
         par.genRampUpCap = filehandle["RampRate"][:][4:end,:] |> data -> param_load(data)
         par.genCapAvailType = filehandle["GeneratorTypeAvailability"][:][4:end,:] |> data -> param_load(data)
         par.genCO2Content = filehandle["CO2Content"][:][4:end,:] |> data -> param_load(data)
@@ -217,6 +222,10 @@ function read_params_xlsx(dirX)
     XLSX.openxlsx(joinpath(dirX, "General.xlsx")) do filehandle
         par.CO2cap = data = filehandle["CO2Cap"][:][4:end,:] |> data -> strat_profile(data)
         par.CO2price = data = filehandle["CO2Price"][:][4:end,:] |> data -> strat_profile(data)
+        if "AvailableBioEnergy" in XLSX.sheetnames(filehandle)
+            par.availableBioEnergy =
+                filehandle["AvailableBioEnergy"][:][4:end, :] |> data -> strat_profile(data)
+        end
     end
 
     return par

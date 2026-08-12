@@ -191,6 +191,7 @@ function _natural_gas_solved_fixture(
         sets,
         periods;
         natural_gas = natural_gas_gate,
+        gas_transport_demand = natural_gas_gate,
     )
     OpenEMPIRE.create_constraints(
         model,
@@ -198,6 +199,10 @@ function _natural_gas_solved_fixture(
         params,
         periods;
         natural_gas = natural_gas_gate,
+        # These fixtures exercise the transport-demand formulation itself, so it is
+        # enabled here. Runs leave it off unless hydrogen is modelled, matching
+        # InternalEMPIRE -- see create_natural_gas_constraints!.
+        gas_transport_demand = natural_gas_gate,
     )
     strategic_period = only(collect(strat_periods(periods)))
     for node in ("A", "B")
@@ -223,7 +228,6 @@ function _natural_gas_solved_fixture(
         params,
         periods,
         discounter;
-        natural_gas = natural_gas_gate,
     )
     JuMP.optimize!(model)
     return model, periods, sets, params, discounter
@@ -503,14 +507,11 @@ function test_full_model_int_gas_generators_are_priced()
         @test haskey(parameters.genMargCost, generator)
         cost = OpenEMPIRE.gen_marginal_cost(parameters, generator, sp)
         @test cost > 0
-        # Non-CCS gas generators reduce exactly to variable O&M under a cap; the
-        # CCS variants additionally carry base OpenEMPIRE's CCS transport and
-        # storage term, which InternalEMPIRE does not model.
-        if ("CCS", generator) in sets.GeneratorsOfTechnology
-            @test cost > parameters.genVariableOMCost[generator]
-        else
-            @test cost ≈ parameters.genVariableOMCost[generator]
-        end
+        # InternalEMPIRE's CCS transport-and-storage objective terms are
+        # commented out. The converted full_model_int fixture therefore zeros
+        # both data-driven CCS charges, so every gas generator reduces exactly
+        # to variable O&M while the emission cap is active.
+        @test cost ≈ parameters.genVariableOMCost[generator]
     end
 end
 
@@ -635,16 +636,19 @@ function test_natural_gas_multi_period_scenario_weighting()
     )
 
     model = JuMP.Model()
-    OpenEMPIRE.create_variables(model, sets, periods; natural_gas = true)
+    OpenEMPIRE.create_variables(
+        model, sets, periods; natural_gas = true, gas_transport_demand = true,
+    )
     OpenEMPIRE.create_constraints(
         model,
         sets,
         params,
         periods;
         natural_gas = true,
+        gas_transport_demand = true,
     )
     discounter = OpenEMPIRE.Discounter(0.05, 1, periods)
-    OpenEMPIRE.create_objective(model, sets, params, periods, discounter; natural_gas = true)
+    OpenEMPIRE.create_objective(model, sets, params, periods, discounter)
 
     imports = model[:ngTerminalImport]
     objective = JuMP.objective_function(model)

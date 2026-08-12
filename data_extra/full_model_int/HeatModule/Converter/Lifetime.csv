@@ -1,0 +1,4 @@
+ElectrToHeatConv,ElectrToHeatConvLifetime
+Convector,30
+HeatPumpAir,15
+HeatPumpGround,20

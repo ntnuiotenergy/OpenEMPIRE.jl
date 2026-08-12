@@ -1491,6 +1491,9 @@ const SCENARIO_ARTIFACT_CONFIG_KEYS = (
     "filter_make",
     "filter_use",
     "n_cluster",
+    "copula_clusters_make",
+    "copula_clusters_use",
+    "copulas_to_use",
 )
 
 function _insert_if_not_nothing!(dict, key::AbstractString, value)
@@ -1499,16 +1502,28 @@ function _insert_if_not_nothing!(dict, key::AbstractString, value)
     return dict
 end
 
+function _is_same_or_child_path(path::AbstractString, parent::AbstractString)
+    relative = relpath(abspath(path), abspath(parent))
+    escapes_parent = relative == ".." || startswith(relative, "../") || startswith(relative, "..\\")
+    return relative == "." || !escapes_parent
+end
+
 """
     write_scenario_artifacts(result_dir, data_folder, config; kwargs...)
 
-Archive the scenario sampling key, optional scenario filter, and run metadata
-under `joinpath(result_dir, "Input")` when scenario generation is enabled.
+Archive the scenario sampling key, optional scenario filter or copula clusters,
+and run metadata under `joinpath(result_dir, "Input")` when scenario generation
+is enabled.
+
+When `data_folder` is already staged under `joinpath(result_dir, "Input")`, the
+existing staged `ScenarioData/sampling_key.csv` is referenced directly instead
+of duplicated under `Input/ScenarioData`.
 
 The archived `Input/ScenarioData/sampling_key.csv` is enough to replay the
 exact sampled scenario tree together with the run config and original dataset.
 When filtering is enabled and `filter_result.csv` exists, the exact candidate
-catalog is archived beside the sampling key.
+catalog is archived beside the sampling key; likewise for
+`copula_clusters.csv` when copula clustering is enabled.
 Returns the archived sampling-key path, or `nothing` when no sampling key is
 available or scenario generation is disabled.
 """
@@ -1527,25 +1542,56 @@ function write_scenario_artifacts(
     isfile(source_key) || return nothing
 
     input_dir = joinpath(result_dir, "Input")
+    is_staged_input = _is_same_or_child_path(data_folder, input_dir)
+    # When the dataset is already staged under `Input/`, every artifact is referenced
+    # where it stands rather than copied beside itself. `scenario_dir` is bound outside
+    # the branch because the filter and copula archiving below need it in both cases.
     scenario_dir = joinpath(input_dir, "ScenarioData")
-    mkpath(scenario_dir)
+    is_staged_input || mkpath(scenario_dir)
 
-    archived_key = joinpath(scenario_dir, "sampling_key.csv")
-    cp(source_key, archived_key; force = true)
+    archived_key = if is_staged_input
+        source_key
+    else
+        copied_key = joinpath(scenario_dir, "sampling_key.csv")
+        cp(source_key, copied_key; force = true)
+        copied_key
+    end
 
     source_filter = joinpath(data_folder, "ScenarioData", "filter_result.csv")
     filter_enabled =
         get(config, "filter_make", false) || get(config, "filter_use", false)
     archived_filter = if filter_enabled && isfile(source_filter)
-        destination = joinpath(scenario_dir, "filter_result.csv")
-        cp(source_filter, destination; force = true)
-        destination
+        if is_staged_input
+            source_filter
+        else
+            destination = joinpath(scenario_dir, "filter_result.csv")
+            cp(source_filter, destination; force = true)
+            destination
+        end
+    else
+        nothing
+    end
+
+    source_copula = _copula_cluster_path(data_folder)
+    copula_enabled =
+        get(config, "copula_clusters_make", false) || get(config, "copula_clusters_use", false)
+    archived_copula = if copula_enabled && isfile(source_copula)
+        if is_staged_input
+            source_copula
+        else
+            destination = joinpath(scenario_dir, "copula_clusters.csv")
+            cp(source_copula, destination; force = true)
+            destination
+        end
     else
         nothing
     end
 
     if config_file !== nothing && isfile(config_file)
-        cp(config_file, joinpath(input_dir, "config.yaml"); force = true)
+        archived_config = joinpath(input_dir, "config.yaml")
+        if abspath(config_file) != abspath(archived_config)
+            cp(config_file, archived_config; force = true)
+        end
     end
 
     generated_files = Dict(
@@ -1558,6 +1604,7 @@ function write_scenario_artifacts(
         "scenario_data_folder" => joinpath(data_folder, "ScenarioData"),
         "source_sampling_key" => source_key,
         "archived_sampling_key" => relpath(archived_key, result_dir),
+        "staged_input" => is_staged_input,
         "generated_scenario_files_present" => generated_files,
     )
     _insert_if_not_nothing!(metadata, "dataset", dataset)
@@ -1567,6 +1614,10 @@ function write_scenario_artifacts(
     if archived_filter !== nothing
         metadata["source_filter_result"] = source_filter
         metadata["archived_filter_result"] = relpath(archived_filter, result_dir)
+    end
+    if archived_copula !== nothing
+        metadata["source_copula_clusters"] = source_copula
+        metadata["archived_copula_clusters"] = relpath(archived_copula, result_dir)
     end
     for key in SCENARIO_ARTIFACT_CONFIG_KEYS
         haskey(config, key) && (metadata[key] = config[key])
@@ -1600,6 +1651,17 @@ function write_investment_csvs(output_dir::AbstractString, emp::JuMP.Model, sets
     end
     _write_csv_rows(joinpath(output_dir, "transmissionInvCap.csv"), trans_rows)
     _write_csv_rows(joinpath(output_dir, "transmissionInstalledCap.csv"), trans_cap_rows)
+
+    offshore_inv = emp[:offshoreConvInvCap]
+    offshore_cap = emp[:offshoreConvInstalledCap]
+    offshore_inv_rows = NamedTuple{(:Node, :Period, :offshoreConvInvCap), Tuple{String, Int, Float64}}[]
+    offshore_cap_rows = NamedTuple{(:Node, :Period, :offshoreConvInstalledCap), Tuple{String, Int, Float64}}[]
+    for n in offshore_energy_hubs(sets), (period_index, sp) in strategic_periods
+        push!(offshore_inv_rows, (Node = n, Period = period_index, offshoreConvInvCap = _solution_value(offshore_inv[n, sp])))
+        push!(offshore_cap_rows, (Node = n, Period = period_index, offshoreConvInstalledCap = _solution_value(offshore_cap[n, sp])))
+    end
+    _write_csv_rows(joinpath(output_dir, "offshoreConvInvCap.csv"), offshore_inv_rows)
+    _write_csv_rows(joinpath(output_dir, "offshoreConvInstalledCap.csv"), offshore_cap_rows)
 
     stor_pw_inv = emp[:storPWInvCap]
     stor_pw_cap = emp[:storPWInstalledCap]

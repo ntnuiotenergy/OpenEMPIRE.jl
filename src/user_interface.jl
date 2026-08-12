@@ -1,6 +1,25 @@
 _optimizer_constructor(optimizer) =
     optimizer isa DataType ? (() -> Base.invokelatest(optimizer)) : optimizer
 
+# InternalEMPIRE declares `lineEfficiency` on every directional link with a
+# Pyomo default of 0.97. Its workbook omits 158 offshore-link cells, whereas the
+# ordinary OpenEMPIRE accessor default is lossless (1.0). Keep this compatibility
+# assumption explicit and removable instead of changing the package-wide default.
+const INTERNALEMPIRE_MISSING_LINE_EFFICIENCY_DEFAULT_KEY =
+    "internalempire_missing_line_efficiency_default"
+
+function _fill_internalempire_missing_line_efficiency!(params, sets, config)
+    haskey(config, INTERNALEMPIRE_MISSING_LINE_EFFICIENCY_DEFAULT_KEY) || return params
+    default = Float64(config[INTERNALEMPIRE_MISSING_LINE_EFFICIENCY_DEFAULT_KEY])
+    0.0 <= default <= 1.0 || throw(ArgumentError(
+        "$(INTERNALEMPIRE_MISSING_LINE_EFFICIENCY_DEFAULT_KEY) must be between 0 and 1",
+    ))
+    for link in arcs(sets)
+        haskey(params.lineEfficiency, link) || (params.lineEfficiency[link] = default)
+    end
+    return params
+end
+
 function _optimizer_with_attributes(optimizer, optimizer_attributes)
     return optimizer_with_attributes(_optimizer_constructor(optimizer), optimizer_attributes...)
 end
@@ -15,6 +34,30 @@ function _config_bool(config, key::AbstractString, default::Bool)::Bool
         throw(ArgumentError("Unsupported boolean value for $key: $value"))
     end
     return Bool(value)
+end
+
+"""
+    _offshore_transmission_cap_setting(config)
+
+Resolve the `offshore_transmission_cap` run-config key, which defaults to `true`.
+
+The cap used to be gated by `north_sea`, defaulting to `false`. That flag is gone:
+InternalEMPIRE has no north-sea module, only a separate treatment of offshore wind,
+and an offshore wind farm should not be allowed to build more transmission capacity
+than it has generation. A leftover `north_sea` key is therefore *ignored*, and warned
+about rather than silently accepted -- the port previously ran production jobs with
+`north_sea: true` set against a build that never read it.
+"""
+function _offshore_transmission_cap_setting(config)
+    if haskey(config, "north_sea")
+        @warn(
+            "Ignoring the obsolete `north_sea` config key. The offshore transmission cap " *
+            "is now always applied unless `offshore_transmission_cap: false` is set. " *
+            "Remove `north_sea` from the config.",
+            north_sea = config["north_sea"],
+        )
+    end
+    return _config_bool(config, "offshore_transmission_cap", true)
 end
 
 """
@@ -103,6 +146,7 @@ function _prepare_model_inputs(
         weather_scenarios,
         gas_scenarios,
     )
+    OpenEMPIRE._fill_internalempire_missing_line_efficiency!(params, sets, config)
     _report_progress(
         progress,
         "Build 4/12: input data loaded ($(length(nodes(sets))) nodes, $(length(generators(sets))) generators, $(length(storages(sets))) storages)",
@@ -234,6 +278,7 @@ function create_model(
         sets,
         periods;
         natural_gas = gas_enabled,
+        gas_transport_demand = hydrogen_enabled,
         hydrogen = hydrogen_enabled,
         industry = industry_enabled,
         progress,
@@ -244,7 +289,9 @@ function create_model(
         sets,
         params,
         periods;
+        offshore_transmission_cap = _offshore_transmission_cap_setting(config),
         natural_gas = gas_enabled,
+        gas_transport_demand = hydrogen_enabled,
         hydrogen = hydrogen_enabled,
         industry = industry_enabled,
         progress,
