@@ -76,6 +76,7 @@ end
     test_industry_gas_only_model()
     test_industry_model_results_and_oos()
     test_industry_controlled_solution_parity()
+    test_industry_sector_volume_certificate()
 end
 
 @testset "CSV scenarios" begin

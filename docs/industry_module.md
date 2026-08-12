@@ -20,7 +20,8 @@ demand are active. Refinery heat demand is reported but unconstrained, matching 
 intended `HEATMODULE=false` scope.
 
 The module co-optimizes steel, cement, and ammonia capacity and hourly production.
-Annual demand is flexible within each scenario and season-weighted. It includes
+Demand follows InternalEMPIRE with `FLEX_IND=false`: in every operational hour,
+production plus shedding equals annual production divided by 8,760. It includes
 Scrap/EAF material balance, the 45% Scrap limit, season-reset 10% ramp limits,
 lifetime/retirement trajectories, and shedding. Production is coupled to
 electricity, natural gas, Hydrogen, biomass, emissions, and captured-CO2 balances.

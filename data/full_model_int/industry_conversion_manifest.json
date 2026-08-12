@@ -23,13 +23,13 @@
       }
     ]
   },
-  "demand_formulation": "flexible season-weighted annual demand",
+  "demand_formulation": "fixed hourly demand (FLEX_IND=false; yearly production / 8760)",
   "refinery_heat_semantics": "Refinery heat consumption is recorded but unconstrained while the Heat module is disabled, matching InternalEMPIRE HEATMODULE=false.",
   "duplicate_rows_resolved_last_source_row_wins": 0,
   "pyomo_default_rows_materialized": 222,
   "files": [
     {
-      "path": "General/availableBioEnergy.csv",
+      "path": "General/AvailableBioEnergy.csv",
       "bytes": 123,
       "rows": 7,
       "sha256": "1dc17b9e8ee6befdcbf92b61440315fd5fb9cb465140438d324a00e82dd8f0b6"

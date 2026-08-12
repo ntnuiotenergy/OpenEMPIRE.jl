@@ -298,9 +298,9 @@ def convert_biomass(source: Path, target: Path, periods: int) -> list[dict[str, 
     selected, _ = select_table(
         read_sheet(excel, "AvailableBioEnergy", skiprows=2), [0, 1], periods
     )
-    frame, audit = canonicalize(finalize(selected), "General/availableBioEnergy.csv")
-    validate_numeric(frame, "General/availableBioEnergy.csv", periods)
-    write_csv(frame, target / "General" / "availableBioEnergy.csv")
+    frame, audit = canonicalize(finalize(selected), "General/AvailableBioEnergy.csv")
+    validate_numeric(frame, "General/AvailableBioEnergy.csv", periods)
+    write_csv(frame, target / "General" / "AvailableBioEnergy.csv")
     return audit
 
 
@@ -355,14 +355,14 @@ def write_manifest(
         + [
             target / "Sets" / f"{name}.csv" for name in PRODUCER_SHEETS.values()
         ]
-        + [target / "General" / "availableBioEnergy.csv"]
+        + [target / "General" / "AvailableBioEnergy.csv"]
     )
     manifest = {
         "schema_version": 1,
         "converter": "scripts/convert_industry_inputs.py",
         "periods": periods,
         "source": source,
-        "demand_formulation": "flexible season-weighted annual demand",
+        "demand_formulation": "fixed hourly demand (FLEX_IND=false; yearly production / 8760)",
         "refinery_heat_semantics": (
             "Refinery heat consumption is recorded but unconstrained while the Heat "
             "module is disabled, matching InternalEMPIRE HEATMODULE=false."
@@ -381,12 +381,12 @@ def update_dataset_manifest(target: Path) -> None:
     managed = sorted(
         [*list((target / "Industry").glob("*.csv"))]
         + [target / "Sets" / f"{name}.csv" for name in PRODUCER_SHEETS.values()]
-        + [target / "General" / "availableBioEnergy.csv"]
+        + [target / "General" / "AvailableBioEnergy.csv"]
         + [target / "industry_conversion_manifest.json"]
     )
     related = {
         *(f"Sets/{name}.csv" for name in PRODUCER_SHEETS.values()),
-        "General/availableBioEnergy.csv",
+        "General/AvailableBioEnergy.csv",
         "industry_conversion_manifest.json",
     }
     retained = [

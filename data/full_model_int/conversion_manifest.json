@@ -1223,9 +1223,9 @@
     },
     {
       "path": "industry_conversion_manifest.json",
-      "bytes": 9574,
+      "bytes": 9598,
       "rows": null,
-      "sha256": "46e9825884f0a80a7b8aa795bb244777d7b93191aed622dcfc4d68f7b399433a"
+      "sha256": "b9675059810f2a4841ced64fa187d26e2dc68ef5dd7816c62c0c9747ec0c46dd"
     }
   ],
   "owner_confirmed_corrections": {

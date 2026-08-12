@@ -542,82 +542,57 @@ function create_industry_constraints!(
     emp[:industry_cement_ramp] = cement_ramp
     emp[:industry_ammonia_ramp] = ammonia_ramp
 
-    steel_demand = JuMP.ConstraintRef[]
-    cement_demand = JuMP.ConstraintRef[]
-    ammonia_demand = JuMP.ConstraintRef[]
-    refinery_demand = JuMP.ConstraintRef[]
-    for (period_index, strategic_period) in enumerate(strategic_periods)
-        for scenario_index in 1:_opscenario_count(strategic_period)
-            for node in industry.SteelProducer
-                expression = JuMP.AffExpr(0.0)
-                for representative_period in repr_periods(strategic_period)
-                    scenario = _operational_scenario_at(representative_period, scenario_index)
-                    for operational_period in scenario
-                        weight = multiple_strat(strategic_period, operational_period)
-                        for plant in industry.FinalSteelPlant
-                            JuMP.add_to_expression!(expression, weight, emp[:steelProduced][node, plant, operational_period])
-                        end
-                        JuMP.add_to_expression!(expression, weight, emp[:steelLoadShed][node, operational_period])
-                    end
-                end
-                constraint = @constraint(emp, expression == params.steelYearlyProduction[(node, period_index)])
-                JuMP.set_name(constraint, "industry_steel_demand[$node,$(strategic_period)_sc$scenario_index]")
-                push!(steel_demand, constraint)
-            end
-            for node in industry.CementProducer
-                expression = JuMP.AffExpr(0.0)
-                for representative_period in repr_periods(strategic_period)
-                    scenario = _operational_scenario_at(representative_period, scenario_index)
-                    for operational_period in scenario
-                        weight = multiple_strat(strategic_period, operational_period)
-                        for plant in industry.ActiveCementPlant
-                            JuMP.add_to_expression!(expression, weight, emp[:cementProduced][node, plant, operational_period])
-                        end
-                        JuMP.add_to_expression!(expression, weight, emp[:cementLoadShed][node, operational_period])
-                    end
-                end
-                constraint = @constraint(emp, expression == params.cementYearlyProduction[node])
-                JuMP.set_name(constraint, "industry_cement_demand[$node,$(strategic_period)_sc$scenario_index]")
-                push!(cement_demand, constraint)
-            end
-            for node in industry.AmmoniaProducer
-                expression = JuMP.AffExpr(0.0)
-                for representative_period in repr_periods(strategic_period)
-                    scenario = _operational_scenario_at(representative_period, scenario_index)
-                    for operational_period in scenario
-                        weight = multiple_strat(strategic_period, operational_period)
-                        for plant in industry.ActiveAmmoniaPlant
-                            JuMP.add_to_expression!(expression, weight, emp[:ammoniaProduced][node, plant, operational_period])
-                        end
-                        JuMP.add_to_expression!(expression, weight, emp[:ammoniaLoadShed][node, operational_period])
-                    end
-                end
-                constraint = @constraint(emp, expression == params.ammoniaYearlyProduction[(node, period_index)])
-                JuMP.set_name(constraint, "industry_ammonia_demand[$node,$(strategic_period)_sc$scenario_index]")
-                push!(ammonia_demand, constraint)
-            end
-            if industry.RefineryActive
-                for node in industry.OilProducer
-                    expression = JuMP.AffExpr(0.0)
-                    for representative_period in repr_periods(strategic_period)
-                        scenario = _operational_scenario_at(representative_period, scenario_index)
-                        for operational_period in scenario
-                            weight = multiple_strat(strategic_period, operational_period)
-                            JuMP.add_to_expression!(expression, weight, emp[:oilRefined][node, operational_period])
-                            JuMP.add_to_expression!(expression, weight, emp[:oilLoadShed][node, operational_period])
-                        end
-                    end
-                    constraint = @constraint(emp, expression == params.refineryYearlyProduction[(node, period_index)])
-                    JuMP.set_name(constraint, "industry_refinery_demand[$node,$(strategic_period)_sc$scenario_index]")
-                    push!(refinery_demand, constraint)
-                end
-            end
-        end
+    @constraint(
+        emp,
+        industry_steel_demand[
+            node in industry.SteelProducer, operational_period in periods,
+        ],
+        sum(
+            emp[:steelProduced][node, plant, operational_period]
+            for plant in industry.FinalSteelPlant;
+            init = 0.0,
+        ) + emp[:steelLoadShed][node, operational_period] ==
+        params.steelYearlyProduction[(node, context[operational_period].strategic)] /
+        params.hoursPerYear,
+    )
+    @constraint(
+        emp,
+        industry_cement_demand[
+            node in industry.CementProducer, operational_period in periods,
+        ],
+        sum(
+            emp[:cementProduced][node, plant, operational_period]
+            for plant in industry.ActiveCementPlant;
+            init = 0.0,
+        ) + emp[:cementLoadShed][node, operational_period] ==
+        params.cementYearlyProduction[node] / params.hoursPerYear,
+    )
+    @constraint(
+        emp,
+        industry_ammonia_demand[
+            node in industry.AmmoniaProducer, operational_period in periods,
+        ],
+        sum(
+            emp[:ammoniaProduced][node, plant, operational_period]
+            for plant in industry.ActiveAmmoniaPlant;
+            init = 0.0,
+        ) + emp[:ammoniaLoadShed][node, operational_period] ==
+        params.ammoniaYearlyProduction[(node, context[operational_period].strategic)] /
+        params.hoursPerYear,
+    )
+    if industry.RefineryActive
+        @constraint(
+            emp,
+            industry_refinery_demand[
+                node in industry.OilProducer, operational_period in periods,
+            ],
+            emp[:oilRefined][node, operational_period] +
+            emp[:oilLoadShed][node, operational_period] ==
+            params.refineryYearlyProduction[(
+                node, context[operational_period].strategic,
+            )] / params.hoursPerYear,
+        )
     end
-    emp[:industry_steel_demand] = steel_demand
-    emp[:industry_cement_demand] = cement_demand
-    emp[:industry_ammonia_demand] = ammonia_demand
-    industry.RefineryActive && (emp[:industry_refinery_demand] = refinery_demand)
 
     @constraint(emp, industry_max_scrap_capacity[plant in industry.ActiveSteelPlant, strategic_period in strategic_periods; occursin("scrap", lowercase(plant))],
         sum(emp[:steelPlantInstalledCapacity][node, plant, strategic_period] for node in industry.SteelProducer; init = 0.0) <=

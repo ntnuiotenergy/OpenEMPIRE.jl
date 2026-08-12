@@ -74,6 +74,13 @@ function test_industry_validation_and_units()
               for issue in OpenEMPIRE.validate_industry(params, sets, periods))
 
     mktempdir() do directory
+        general = joinpath(directory, "General")
+        mkpath(general)
+        write(joinpath(general, "availableBioEnergy.csv"), "Period,Value\n1,1\n")
+        @test_throws ArgumentError OpenEMPIRE._required_csv(
+            directory, "General", "AvailableBioEnergy.csv",
+        )
+
         path = joinpath(directory, "Constants.csv")
         write(path, "Parameter,Value,Unit,Source\nramp_fraction_per_hour,nope,share,test\n")
         error = try
@@ -197,9 +204,15 @@ function test_industry_model_results_and_oos()
     @test length(model[:industry_max_scrap_capacity]) == 1
     @test haskey(JuMP.object_dictionary(model), :industry_biomass_limit)
 
+    steel_node = first(sets.Industry.SteelProducer)
+    operational_period = first(periods)
+    @test JuMP.normalized_rhs(
+        model[:industry_steel_demand][steel_node, operational_period],
+    ) ≈ params.Industry.steelYearlyProduction[(steel_node, 1)] /
+         params.Industry.hoursPerYear
+
     node = first(intersect(Set(sets.Industry.CementProducer), Set(sets.NaturalGas.Node)))
     plant = first(filter(p -> occursin("ng", lowercase(p)), sets.Industry.ActiveCementPlant))
-    operational_period = first(periods)
     gas_constraint = model[:natural_gas_flow_balance][node, operational_period]
     @test JuMP.normalized_coefficient(
         gas_constraint, model[:cementProduced][node, plant, operational_period],
@@ -299,4 +312,15 @@ function test_industry_controlled_solution_parity()
             ))
         end
     end
+end
+
+function test_industry_sector_volume_certificate()
+    python = get(
+        ENV,
+        "OPENEMPIRE_PYTHON",
+        something(Sys.which("python3"), Sys.which("python"), ""),
+    )
+    isempty(python) && return @test_skip "Python is unavailable"
+    script = joinpath(pkgdir(OpenEMPIRE), "test", "test_industry_result_certificate.py")
+    @test success(run(ignorestatus(`$python $script`)))
 end
