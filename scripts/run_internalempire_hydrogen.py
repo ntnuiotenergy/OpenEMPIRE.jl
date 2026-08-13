@@ -372,7 +372,16 @@ def main() -> None:
             ("using_solstorm = False", "using_solstorm = False"),
         ),
     )
-    source = replace_once(source, "USE_TEMP_DIR = True", "USE_TEMP_DIR = False")
+    # Pyomo's shell solver writes a very large intermediate LP. Keep it on the
+    # explicitly isolated /storage output tree rather than the compute node's
+    # small local disk.
+    source = replace_one_of(
+        source,
+        (
+            ("USE_TEMP_DIR = True", "USE_TEMP_DIR = True"),
+            ("USE_TEMP_DIR = False", "USE_TEMP_DIR = True"),
+        ),
+    )
     source = replace_once(source, "hydrogen = False", "hydrogen = True")
     if args.industry:
         source = replace_once(source, "industry = False", "industry = True")
