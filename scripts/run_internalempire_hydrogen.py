@@ -61,6 +61,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         help="set Gurobi's deterministic Seed parameter",
     )
+    parser.add_argument(
+        "--industry-algebra-fingerprint",
+        type=Path,
+        help="build without optimizing/results and write the Industry fingerprint",
+    )
     return parser.parse_args()
 
 
@@ -354,6 +359,8 @@ def write_objective_component_certificate(instance: object, path: Path) -> None:
 
 def main() -> None:
     args = parse_args()
+    if args.industry_algebra_fingerprint is not None and not args.industry:
+        raise ValueError("--industry-algebra-fingerprint requires --industry")
     internal_repo = args.internal_repo.resolve()
     output_dir = args.output_dir.resolve()
     work_dir = output_dir / "work"
@@ -567,6 +574,31 @@ def main() -> None:
     )
 
     namespace = {"__name__": "__main__", "__file__": str(runner)}
+    if args.industry_algebra_fingerprint is not None:
+        from industry_algebra_fingerprint import export_internal_fingerprints
+
+        class FingerprintComplete(Exception):
+            pass
+
+        class BuildOnlySolver:
+            def __init__(self) -> None:
+                self.options: dict[str, object] = {}
+
+            def solve(self, instance: object, *_args: object, **_kwargs: object) -> None:
+                export_internal_fingerprints(
+                    instance,
+                    args.industry_algebra_fingerprint.resolve(),
+                    tabs,
+                )
+                raise FingerprintComplete
+
+        empire_module.SolverFactory = lambda *_args, **_kwargs: BuildOnlySolver()
+        try:
+            exec(compile(source, str(runner), "exec"), namespace)
+        except FingerprintComplete:
+            return
+        raise RuntimeError("InternalEMPIRE runner returned without fingerprinting")
+
     exec(compile(source, str(runner), "exec"), namespace)
 
 
