@@ -77,6 +77,7 @@ end
     test_industry_model_results_and_oos()
     test_industry_controlled_solution_parity()
     test_industry_sector_volume_certificate()
+    test_industry_verifier_reconciliation_gates()
 end
 
 @testset "CSV scenarios" begin
