@@ -22,6 +22,7 @@ function snapshot_commit() {
 
 AUDIT_COMMIT=${AUDIT_COMMIT:-$(snapshot_commit)}
 AUDIT_DIR=${AUDIT_DIR:-/storage/users/torgrif/industry-algebra-audit-${AUDIT_COMMIT}-$(date +%Y%m%d)}
+LOG_DIR=${LOG_DIR:-$AUDIT_DIR/logs}
 CONFIG_FILE=${CONFIG_FILE:-config/run_int_full_industry.yaml}
 DATA_DIR=${DATA_DIR:-data/full_model_int}
 PYTHON=${PYTHON:-$HOME/.conda/envs/empire_env/bin/python}
@@ -97,7 +98,7 @@ if [[ -z "${JOB_ID:-}" ]]; then
 	}
 	verify_memory "$JULIA_NODE"
 	verify_memory "$INTERNAL_NODE"
-	mkdir -p logs "$AUDIT_DIR"
+	mkdir -p "$LOG_DIR" "$AUDIT_DIR"
 	{
 		echo "audit_commit=$AUDIT_COMMIT"
 		echo "config=$CONFIG_FILE"
@@ -107,10 +108,10 @@ if [[ -z "${JOB_ID:-}" ]]; then
 		echo "julia_node=$JULIA_NODE"
 		echo "internal_node=$INTERNAL_NODE"
 	} >"$AUDIT_DIR/submission.txt"
-	qsub -N indalg_jl -l hostname="$JULIA_NODE" -o logs -e logs \
+	qsub -N indalg_jl -l hostname="$JULIA_NODE" -o "$LOG_DIR" -e "$LOG_DIR" \
 		-v SIDE=julia,AUDIT_DIR="$AUDIT_DIR",AUDIT_COMMIT="$AUDIT_COMMIT",CONFIG_FILE="$CONFIG_FILE",DATA_DIR="$DATA_DIR" \
 		"$0"
-	qsub -N indalg_ie -l hostname="$INTERNAL_NODE" -o logs -e logs \
+	qsub -N indalg_ie -l hostname="$INTERNAL_NODE" -o "$LOG_DIR" -e "$LOG_DIR" \
 		-v SIDE=internal,AUDIT_DIR="$AUDIT_DIR",AUDIT_COMMIT="$AUDIT_COMMIT",PYTHON="$PYTHON",INTERNAL_REPO="$INTERNAL_REPO",INTERNAL_RUNNER="$INTERNAL_RUNNER" \
 		"$0"
 	exit 0
@@ -126,8 +127,14 @@ echo "start=$(date --iso-8601=seconds)"
 case "$SIDE" in
 	julia)
 		module load Julia/1.9.3 2>/dev/null || module load julia/1.9.3 2>/dev/null || true
+		JULIA_DATA="$AUDIT_DIR/julia_data"
+		[[ ! -e "$JULIA_DATA" ]] || {
+			echo "ERROR: Julia audit data copy already exists: $JULIA_DATA"
+			exit 1
+		}
+		cp -R "$DATA_DIR" "$JULIA_DATA"
 		julia --project=. scripts/write_industry_algebra_fingerprint.jl \
-			"$CONFIG_FILE" "$DATA_DIR" "$AUDIT_DIR/julia.fingerprint"
+			"$CONFIG_FILE" "$JULIA_DATA" "$AUDIT_DIR/julia.fingerprint"
 		;;
 	internal)
 		[[ -x "$PYTHON" ]] || {
