@@ -319,13 +319,13 @@
       "path": "ScenarioData/hydroror.csv",
       "bytes": 27886467,
       "rows": 43824,
-      "sha256": "67bbd04ff76c7eb9518c6109fa4f5618a70b818a7189f413432c65d347a939db"
+      "sha256": "bce9d5589070ba00bb8b0a35ee2276d24b4fccb99a107d2df69f08f34e06a7ac"
     },
     {
       "path": "ScenarioData/hydroseasonal.csv",
       "bytes": 8660314,
       "rows": 43824,
-      "sha256": "0e85b83c94d7535af73a56732786dd8317f36d1a9179999dad39ed0b9d4ffeab"
+      "sha256": "e3a906801c0e212a8d43857cd6f73b2659ea22137fce518608ed608d0cd7d33a"
     },
     {
       "path": "ScenarioData/sampling_key.csv",
@@ -418,10 +418,16 @@
       "sha256": "ecebb834a93b20fa89c8de5650ee6ea64a768571d81d8dccad53ca27a05d7065"
     },
     {
-      "path": "Sets/OffshoreNode.csv",
-      "bytes": 218,
-      "rows": 17,
-      "sha256": "ee5718532a3f44364e287e4e3b2bdf543c719dc7a1cf68f11072261649f9f847"
+      "path": "Sets/OffshoreEnergyHub.csv",
+      "bytes": 30,
+      "rows": 1,
+      "sha256": "37fd1e66a2556a4358d5cbf94bda16fe1cb6f60b74106c10777b20bbde4a56f7"
+    },
+    {
+      "path": "Sets/OffshoreWindFarmNode.csv",
+      "bytes": 196,
+      "rows": 14,
+      "sha256": "200645c7a4bf6ee30a3d7be1b30858f8b536ccc4ecf444200483d9b512ffe33b"
     },
     {
       "path": "Sets/OnshoreNode.csv",
@@ -572,6 +578,18 @@
       "bytes": 45,
       "rows": 1,
       "sha256": "663bd7054961860065a67e04bb454dd9091ab5e18e35aca323fbd99f402e252a"
+    },
+    {
+      "path": "Transmission/OffshoreConverterCapitalCost.csv",
+      "bytes": 99,
+      "rows": 7,
+      "sha256": "52177aa8fcd6b82d8814b473e9215a12f61df38ced6b4e1ba3af4a0cac31d03b"
+    },
+    {
+      "path": "Transmission/OffshoreConverterOMCost.csv",
+      "bytes": 131,
+      "rows": 7,
+      "sha256": "500bfba30aa9df0f794a32863ba1acdef2ec0a5dff4a62931f5feea74ae18bda"
     },
     {
       "path": "Transmission/lineEfficiency.csv",

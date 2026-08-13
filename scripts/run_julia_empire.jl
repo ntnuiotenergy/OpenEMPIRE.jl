@@ -92,7 +92,7 @@ function _optional_float(value, key)
     isempty(text) && return nothing
     try
         return parse(Float64, text)
-    catch err
+    catch
         throw(ArgumentError("Unsupported floating-point value for $key: $value"))
     end
 end
@@ -125,11 +125,11 @@ function _optimizer_attributes(value, config, options)
         for (config_key, gurobi_name) in config_attribute_names
             _set_optimizer_attribute!(attributes, gurobi_name, get(config, config_key, nothing))
         end
-        float_config_attribute_names = (
-            "solver_feasibilitytol" => "FeasibilityTol",
-            "solver_barconvtol" => "BarConvTol",
-        )
-        for (config_key, gurobi_name) in float_config_attribute_names
+    float_config_attribute_names = (
+        "solver_feasibilitytol" => "FeasibilityTol",
+        "solver_barconvtol" => "BarConvTol",
+    )
+    for (config_key, gurobi_name) in float_config_attribute_names
             _set_optimizer_attribute!(
                 attributes,
                 gurobi_name,
@@ -633,6 +633,7 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
             :generator_investment,
             :storage_investment,
             :transmission_investment,
+            :offshore_converter_investment,
             :load_shedding,
             :generator_operation,
         )]

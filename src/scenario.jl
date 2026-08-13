@@ -260,20 +260,88 @@ function _read_raw_scenario_table(path::AbstractString, dateformat::DateFormat)
     return RawScenarioTable(columns, timestamps, years, months, values)
 end
 
+const OFFSHORE_WIND_GENERATORS = ("Windoffshore", "Windoffshoregrounded", "Windoffshorefloating")
+
+"""
+Raw scenario columns skipped so the port reproduces InternalEMPIRE's results.
+
+`full_model_int` supplies Norway as five per-elspot-area columns, but
+`scenario_random.py` only special-cases a single aggregate `"NO"` column and its
+`dict_countries` has no `NO1`..`NO5` keys, so those columns match neither branch and are
+dropped. With `genCapAvailStochRaw` defaulting to 0.0, Norwegian solar, onshore wind and
+run-of-river cannot generate at all in the reference.
+
+That looks like a defect rather than a modelling choice, and it is worth about 2.9% of
+system cost, so it is raised with Stian in `issues_for_stian.md`. It is mirrored here
+only to keep the two models comparable. **Empty this set the moment the reference
+handles those columns** -- it is the one place the port knowingly reproduces a bug.
+"""
+const INTERNALEMPIRE_SKIPPED_COLUMNS = ("NO1", "NO2", "NO3", "NO4", "NO5")
+
+"""
+    _fold_name(s)
+
+Accent-folded, lowercased form of a node name, used only to match a raw scenario
+column against the dataset's spelling of the same node.
+
+`COUNTRY_NODE_MAPPING` carries the open datasets' ASCII spellings
+(`HelgolanderBucht`, `Nordsoen`, `SorligeNordsjoI/II`), while `full_model_int`
+spells the same four nodes with diacritics. Without folding, those columns resolved
+to a name no node had and their availability was dropped in silence -- the four
+wind farms simply never generated.
+"""
+function _fold_name(s::AbstractString)
+    folded = replace(
+        s,
+        'ø' => 'o', 'Ø' => 'O', 'å' => 'a', 'Å' => 'A',
+        'æ' => "ae", 'Æ' => "AE", 'ð' => 'd', 'Ð' => 'D', 'þ' => "th", 'Þ' => "TH",
+    )
+    return lowercase(Unicode.normalize(folded; stripmark = true))
+end
+
 function _node_name(raw::AbstractString, node_set::Set{String})
     raw in node_set && return raw
     mapped = get(COUNTRY_NODE_MAPPING, raw, raw)
     mapped in node_set && return mapped
+    # Fall back to an accent-insensitive match against the dataset's own spelling.
+    target = _fold_name(mapped)
+    for node in node_set
+        _fold_name(node) == target && return node
+    end
     return nothing
 end
 
-function _node_names_for_generator(raw::AbstractString, generator::AbstractString, node_set::Set{String})
+function _node_names_for_generator(
+    raw::AbstractString,
+    generator::AbstractString,
+    node_set::Set{String},
+    offshore_node_set::Set{String},
+)
+    # With the north sea modelled, InternalEMPIRE samples the offshore series three
+    # times (scenario_random.py): Windoffshoregrounded and Windoffshorefloating through
+    # `dict_offshr_nodes`, then Windoffshoregrounded again through `dict_countries`. So
+    # grounded offshore wind gets availability at the offshore farms *and* at the
+    # country nodes, while floating is confined to the farms. Only floating is
+    # restricted here; treating both as offshore-only strips the country-level grounded
+    # capacity and makes the system markedly more expensive.
+    offshore_only = generator == "Windoffshorefloating"
+
+    # See INTERNALEMPIRE_SKIPPED_COLUMNS: mirrors the reference dropping these.
+    if !offshore_only && raw in INTERNALEMPIRE_SKIPPED_COLUMNS
+        return String[]
+    end
+
     exact = _node_name(raw, node_set)
-    exact !== nothing && return [exact]
+    if exact !== nothing
+        offshore_only && !(exact in offshore_node_set) && return String[]
+        return [exact]
+    end
 
     if raw == "NO"
-        start_area = generator in ("Windoffshore", "Windoffshoregrounded", "Windoffshorefloating") ? 2 : 1
-        return [node for node in ("NO$(i)" for i in start_area:5) if node in node_set]
+        start_area = offshore_only ? 2 : 1
+        candidates = [node for node in ("NO$(i)" for i in start_area:5) if node in node_set]
+        offshore_only && (candidates = [n for n in candidates if n in offshore_node_set])
+        return candidates
     end
 
     return String[]
@@ -1226,11 +1294,12 @@ end
 
 function _generator_columns(table::RawScenarioTable, generator::AbstractString, sets)
     node_set = Set(nodes(sets))
+    offshore_node_set = union(offshore_wind_farm_nodes(sets), offshore_energy_hubs(sets))
     node_gens = Set(sets.GeneratorsOfNode)
     mapping = Tuple{String, Vector{Tuple{String, String}}}[]
     for col in table.columns
         pairs = Tuple{String, String}[]
-        for node in _node_names_for_generator(col, generator, node_set)
+        for node in _node_names_for_generator(col, generator, node_set, offshore_node_set)
             (node, generator) in node_gens && push!(pairs, (node, generator))
         end
         !isempty(pairs) && push!(mapping, (col, pairs))

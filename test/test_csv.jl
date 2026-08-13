@@ -93,7 +93,7 @@ function test_read_csv_dataset()
 
         sets = OpenEMPIRE.read_sets_csv(dataset)
         @test OpenEMPIRE.nodes(sets) == ["A", "B"]
-        @test isempty(OpenEMPIRE.offshore_nodes(sets))
+        @test isempty(OpenEMPIRE.offshore_wind_farm_nodes(sets))
         @test OpenEMPIRE.generators(sets, "A") == ["gas", "wind"]
         @test Set(OpenEMPIRE.arcs(sets)) == Set([("A", "B"), ("B", "A")])
 
@@ -151,6 +151,9 @@ function test_read_full_model_int_dataset()
     @test length(OpenEMPIRE.nodes(sets)) == 52
     @test length(OpenEMPIRE.generators(sets)) == 33
     @test length(OpenEMPIRE.arcs(sets)) == 436
+    @test OpenEMPIRE.offshore_energy_hubs(sets) == Set(["EnergyhubEU"])
+    @test params.offshoreConvCapitalCost !== nothing
+    @test params.offshoreConvOMCost !== nothing
     @test params.availableBioEnergy !== nothing
 
     # The workbook carries no fuel cost for these five; the converter supplies the
@@ -208,29 +211,28 @@ function test_internalempire_bioenergy_constraints()
         1,
         0,
         0,
-        2;
-        operational_hours_per_year = 1,
+        2,
     )
-    generators = ["Bio", "BioCofiring", "Biomethane"]
+    generator_names = ["Bio", "BioCofiring", "Biomethane"]
     sets = OpenEMPIRE.EmpireSets(
         Node = ["A"],
-        Generator = generators,
+        Generator = generator_names,
         Technology = ["Bio"],
-        GeneratorsOfTechnology = [("Bio", generator) for generator in generators],
-        GeneratorsOfNode = [("A", generator) for generator in generators],
+        GeneratorsOfTechnology = [("Bio", generator) for generator in generator_names],
+        GeneratorsOfNode = [("A", generator) for generator in generator_names],
     )
     params = OpenEMPIRE.EmpireParams(
         availableBioEnergy = FixedProfile(100.0),
         genMaxBiomethaneAvailability = Dict("A" => FixedProfile(2.0)),
-        genEfficiency = Dict(generator => FixedProfile(0.5) for generator in generators),
+        genEfficiency = Dict(generator => FixedProfile(0.5) for generator in generator_names),
     )
     model = JuMP.Model()
     OpenEMPIRE.create_variables(model, sets, periods)
     OpenEMPIRE.create_bioenergy_constraints(model, sets, params, periods)
 
     strategic_period = first(strat_periods(periods))
-    first_scenario = first(opscenarios(first(repr_periods(strategic_period))))
-    time = first(first_scenario)
+    time = first(first(opscenarios(first(repr_periods(strategic_period)))))
+    expected_fuel_coefficient = multiple_strat(strategic_period, time) * 3.6 / 0.5
     biomass = model[:max_bio_availability][strategic_period, 1]
     biomethane = model[:gen_fuel_use_limit]["A", strategic_period, 1]
 
@@ -238,15 +240,18 @@ function test_internalempire_bioenergy_constraints()
     @test length(model[:gen_fuel_use_limit]) == 2
     @test JuMP.normalized_rhs(biomass) == 100.0
     @test JuMP.normalized_rhs(biomethane) == 2000.0
-    @test JuMP.normalized_coefficient(biomass, model[:genOperational]["A", "Bio", time]) ≈ 7.2
+    @test JuMP.normalized_coefficient(
+        biomass,
+        model[:genOperational]["A", "Bio", time],
+    ) ≈ expected_fuel_coefficient
     @test JuMP.normalized_coefficient(
         biomass,
         model[:genOperational]["A", "BioCofiring", time],
-    ) ≈ 0.72
+    ) ≈ 0.1 * expected_fuel_coefficient
     @test JuMP.normalized_coefficient(
         biomethane,
         model[:genOperational]["A", "Biomethane", time],
-    ) ≈ 7.2
+    ) ≈ expected_fuel_coefficient
 end
 
 function test_internalempire_missing_hydro_default()
@@ -280,7 +285,6 @@ function test_internalempire_missing_hydro_default()
     unchanged = OpenEMPIRE.EmpireParams()
     OpenEMPIRE._fill_internalempire_missing_hydro_raw!(unchanged, sets, Dict())
     @test isempty(unchanged.maxRegHydroGenRaw)
-
     @test_throws ArgumentError OpenEMPIRE._fill_internalempire_missing_hydro_raw!(
         OpenEMPIRE.EmpireParams(),
         sets,
@@ -318,6 +322,7 @@ function test_write_solution_csv_tables()
         Storage = ["battery"],
         Technology = ["Solar"],
         Node = ["A", "B"],
+        OffshoreEnergyHub = ["B"],
         DirectionalLink = [("A", "B"), ("B", "A")],
         TransmissionType = ["HVDC"],
         TransmissionTypeOfDirectionalLink = [("A", "B", "HVDC"), ("B", "A", "HVDC")],
@@ -371,6 +376,8 @@ function test_write_solution_csv_tables()
     @constraint(emp, emp[:transmissionOperational]["A", "B", second_time] == 14.0)
     @constraint(emp, emp[:transmissionOperational]["B", "A", first_time] == 15.0)
     @constraint(emp, emp[:transmissionOperational]["B", "A", second_time] == 16.0)
+    @constraint(emp, emp[:offshoreConvInvCap]["B", sp] == 17.0)
+    @constraint(emp, emp[:offshoreConvInstalledCap]["B", sp] == 18.0)
     @objective(emp, Min, emp[:genInvCap]["A", "Solar", sp])
     optimize!(emp)
 
@@ -386,6 +393,8 @@ function test_write_solution_csv_tables()
             "investment_costs.csv",
             "loadShed.csv",
             "marginal_costs.csv",
+            "offshoreConvInstalledCap.csv",
+            "offshoreConvInvCap.csv",
             "results_objective.csv",
             "results_output_EuropePlot.csv",
             "results_output_EuropeSummary.csv",
@@ -422,6 +431,21 @@ function test_write_solution_csv_tables()
         trans_inv = collect(CSV.File(joinpath(output_dir, "transmissionInvCap.csv")))
         @test propertynames(first(trans_inv)) == [:FromNode, :ToNode, :Period, :transmissionInvCap]
         @test trans_inv[1].transmissionInvCap ≈ 11.0
+
+        offshore_conv_inv = collect(CSV.File(joinpath(output_dir, "offshoreConvInvCap.csv")))
+        @test propertynames(first(offshore_conv_inv)) ==
+              [:Node, :Period, :offshoreConvInvCap]
+        @test length(offshore_conv_inv) == 1
+        @test offshore_conv_inv[1].Node == "B"
+        @test offshore_conv_inv[1].Period == 1
+        @test offshore_conv_inv[1].offshoreConvInvCap ≈ 17.0
+        offshore_conv_cap = collect(CSV.File(joinpath(output_dir, "offshoreConvInstalledCap.csv")))
+        @test propertynames(first(offshore_conv_cap)) ==
+              [:Node, :Period, :offshoreConvInstalledCap]
+        @test length(offshore_conv_cap) == 1
+        @test offshore_conv_cap[1].Node == "B"
+        @test offshore_conv_cap[1].Period == 1
+        @test offshore_conv_cap[1].offshoreConvInstalledCap ≈ 18.0
 
         gen_operational = collect(CSV.File(joinpath(output_dir, "genOperational.csv")))
         @test propertynames(first(gen_operational)) ==
