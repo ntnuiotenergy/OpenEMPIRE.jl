@@ -27,6 +27,8 @@ wacc: 0.05                                             # Weighted average cost o
 optimization_solver: "Gurobi"                          # Mathematical solver used for optimization tasks
 use_scenario_generation: True                          # Indicates if scenarios should be generated dynamically
 use_fixed_sample: True                                 # full_model_int ships a sampling_key.csv (FIX_SAMPLE in run_EMPIRE_int.py)
+# InternalEMPIRE's missing maxRegHydroGenRaw entries use Pyomo default=1 MW.
+internalempire_missing_hydro_raw_default_mw: 1.0
 load_change_module: False                              #
 filter_make : False                                    #
 filter_use : False                                     #

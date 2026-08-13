@@ -31,6 +31,9 @@ end
     test_read_csv_dataset()
     test_read_bundled_csv_datasets()
     test_read_full_model_int_dataset()
+    test_internalempire_bioenergy_constraints()
+    test_internalempire_missing_hydro_default()
+    test_ccs_fixed_cost_is_data_driven()
     test_native_timestruct_operational_weights()
     test_write_solution_csv_tables()
     test_europe_summary_uses_per_scenario_totals()
@@ -83,6 +86,7 @@ end
 end
 
 @testset "Runner spec" begin
+    test_gurobi_numeric_attribute_parsing()
     test_resolve_julia_run_spec()
 end
 

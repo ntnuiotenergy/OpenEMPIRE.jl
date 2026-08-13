@@ -9,6 +9,32 @@ function _runner_spec_error(f)
     return nothing
 end
 
+function test_gurobi_numeric_attribute_parsing()
+    config = Dict{String, Any}(
+        "solver_method" => 2,
+        "solver_crossover" => 1,
+        "solver_presolve" => 2,
+        "solver_feasibilitytol" => 1e-8,
+        "solver_barconvtol" => "1e-7",
+    )
+    options = _parse_args([
+        "--gurobi-crossover=0",
+        "--gurobi-presolve=1",
+        "--gurobi-feasibility-tol=1e-9",
+        "--gurobi-bar-conv-tol=1e-8",
+    ])
+
+    @test _optimizer_attributes("Gurobi", config, options) == (
+        "Method" => 2,
+        "Crossover" => 0,
+        "Presolve" => 1,
+        "FeasibilityTol" => 1e-9,
+        "BarConvTol" => 1e-8,
+    )
+    @test_throws ArgumentError _optional_float("not-a-number", "FeasibilityTol")
+    @test_throws ArgumentError _parse_args(["--gurobi-preslove=1"])
+end
+
 function test_resolve_julia_run_spec()
     mktempdir() do root
         source = joinpath(root, "source")

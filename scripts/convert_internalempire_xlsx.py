@@ -85,6 +85,7 @@ CORE_TABLES: dict[str, list[tuple[str, list[int], str, str]]] = {
         ("InitialCapacity", [0, 1, 2, 3], "Generator", "genInitCap"),
         ("MaxBuiltCapacity", [0, 1, 2, 3], "Generator", "genMaxBuiltCap"),
         ("MaxInstalledCapacity", [0, 1, 2], "Generator", "genMaxInstalledCapRaw"),
+        ("MaxBiomethaneAvailability", [0, 1, 2], "Generator", "MaxBiomethaneAvailability"),
         ("RampRate", [0, 1], "Generator", "genRampUpCap"),
         ("GeneratorTypeAvailability", [0, 1], "Generator", "genCapAvailTypeRaw"),
         ("CO2Content", [0, 1], "Generator", "genCO2TypeFactor"),
@@ -111,6 +112,7 @@ CORE_TABLES: dict[str, list[tuple[str, list[int], str, str]]] = {
         ("seasonScale", [0, 1], "General", "seasScale"),
         ("CO2Cap", [0, 1], "General", "CO2cap"),
         ("CO2Price", [0, 1], "General", "CO2price"),
+        ("AvailableBioEnergy", [0, 1], "General", "AvailableBioEnergy"),
     ],
     "Storage.xlsx": [
         ("StorageBleedEfficiency", [0, 1], "Storage", "storageBleedEff"),
@@ -177,7 +179,6 @@ EXTRA_CORE_TABLES: dict[str, list[tuple[str, list[int], str, str]]] = {
     ],
     "Generator.xlsx": [
         ("MaxInstalledCapacityByPeriod", [0, 1, 2, 3], "Generator", "MaxInstalledCapacityByPeriod"),
-        ("MaxBiomethaneAvailability", [0, 1, 2], "Generator", "MaxBiomethaneAvailability"),
         ("CO2Captured", [0, 1], "Generator", "CO2Captured"),
     ],
     "Transmission.xlsx": [
@@ -186,9 +187,7 @@ EXTRA_CORE_TABLES: dict[str, list[tuple[str, list[int], str, str]]] = {
         ("Latitude", [0, 1], "Node", "Latitude"),
         ("Longitude", [0, 1], "Node", "Longitude"),
     ],
-    "General.xlsx": [
-        ("AvailableBioEnergy", [0, 1], "General", "AvailableBioEnergy"),
-    ],
+    "General.xlsx": [],
 }
 
 # --------------------------------------------------------------------------------------
@@ -533,6 +532,7 @@ def convert_core_tables(source: Path, out: Path, extra_out: Path, periods: int) 
 PYOMO_PERIOD_DEFAULTS = {
     ("Generator", "genMaxBuiltCap"): ("500000.0", False),
     ("Transmission", "transmissionMaxBuiltCap"): ("10000.0", True),
+    ("Transmission", "transmissionMaxInstalledCapRaw"): ("0.0", True),
     ("Storage", "storENMaxBuiltCap"): ("500000.0", False),
     ("Storage", "storPWMaxBuiltCap"): ("500000.0", False),
 }
@@ -550,6 +550,11 @@ PYOMO_PERIOD_DEFAULTS = {
 # This does not change any run with natural_gas=true: that path drops the ordinary
 # fuel term for gas-fuelled generators and prices them through the module instead.
 FUEL_COST_FALLBACK_DATASET = "europe_v51"
+
+# InternalEMPIRE currently comments out the declarations, input load, and both
+# objective uses of CCS transport-and-storage cost. Remove this bug-for-bug
+# compatibility switch when the reference starts charging those inputs.
+INTERNALEMPIRE_OMITS_CCS_TRANSPORT_AND_STORAGE_COST = True
 
 
 def fill_missing_gas_fuel_costs(out: Path, periods: int) -> None:
@@ -595,6 +600,24 @@ def fill_missing_gas_fuel_costs(out: Path, periods: int) -> None:
     write_csv(pd.concat([df, extra], ignore_index=True), target)
     logger.info("genFuelCost.csv: added %d rows for %s from %s (was missing entirely)",
                 len(added), ", ".join(missing_techs), FUEL_COST_FALLBACK_DATASET)
+
+
+def mirror_internalempire_ccs_cost_omission(out: Path) -> None:
+    if not INTERNALEMPIRE_OMITS_CCS_TRANSPORT_AND_STORAGE_COST:
+        return
+
+    variable_path = out / "Generator" / "CCSCostTSVariable.csv"
+    variable = pd.read_csv(variable_path)
+    variable.iloc[:, -1] = 0.0
+    write_csv(variable, variable_path)
+    write_csv(
+        pd.DataFrame({"CCSCostTSFixed": [0.0]}),
+        out / "Generator" / "CCSCostTSFixed.csv",
+    )
+    logger.info(
+        "Zeroed CCS transport-and-storage costs to mirror InternalEMPIRE's "
+        "commented-out objective terms"
+    )
 
 
 def materialize_pyomo_period_defaults(out: Path, periods: int) -> None:
@@ -1060,6 +1083,13 @@ Self-contained CSV conversion of the InternalEMPIRE `{dataset}` input.
 It contains the electricity model and the natural-gas inputs currently
 implemented by OpenEMPIRE.jl. The horizon is {periods} strategic periods.
 
+`Generator/CCSCostTSVariable.csv` and `Generator/CCSCostTSFixed.csv` are zeroed
+because InternalEMPIRE's declarations, input load, and objective terms for both CCS
+transport-and-storage costs are commented out. The converter isolates this temporary
+reference compatibility rule in
+`INTERNALEMPIRE_OMITS_CCS_TRANSPORT_AND_STORAGE_COST`; remove it when the reference
+starts charging those inputs.
+
 Regenerate it from the workspace root with:
 
 ```bash
@@ -1089,8 +1119,8 @@ def write_readme(source: Path, extra_out: Path, dataset: str, periods: int) -> N
         "  `<Sheet>_extra.csv` holds the columns of a core sheet that the model does not",
         "  read (sources, commentary, intermediate calculations), prefixed by the sheet's",
         "  key columns. The other files are sheets of the core workbooks that only the",
-        "  internal modules read (`MaxInstalledCapacityByPeriod`, `AvailableBioEnergy`,",
-        "  `Latitude`/`Longitude`, the natural-gas and industry sets).",
+        "  internal modules read (`MaxInstalledCapacityByPeriod`, `Latitude`/`Longitude`,",
+        "  and the natural-gas and industry sets).",
         "- `CO2/`, `NaturalGas/`, `Hydrogen/`, `Industry/`, `Transport/`, `HeatModule/` —",
         "  module tables, extracted with the exact sheet/column selections in",
         "  `InternalEMPIRE/reader.py`.",
@@ -1170,6 +1200,7 @@ def main() -> None:
     convert_core_tables(source, out, extra_out, args.periods)
     materialize_pyomo_period_defaults(out, args.periods)
     fill_missing_gas_fuel_costs(out, args.periods)
+    mirror_internalempire_ccs_cost_omission(out)
     copy_scenario_data(source, out, extra_out)
     convert_extra_tables(source, extra_out, args.periods)
     if not args.skip_modules:

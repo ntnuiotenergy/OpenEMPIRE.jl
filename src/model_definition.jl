@@ -247,6 +247,8 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
         ) <= max_hydro_node(par, n)
     )
 
+    create_bioenergy_constraints(emp, sets, par, periods; progress)
+
     # Tracking installed capacity from investments across strategic periods that are within
     # the technology lifetime
     @info " - installed capacity constraints: $(length(node_generators(sets)) * length(SP))"
@@ -280,6 +282,65 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
         max_inst_tech[n in N, tc in techs(sets), sp in SP],
         sum(genCap[n, g, sp] for g in generators_tech(sets, n, tc)) <= max_inst_cap(par, n, tc, sp)
     )
+end
+
+"""
+    create_bioenergy_constraints(emp, sets, par, periods; progress=nothing)
+
+Add InternalEMPIRE's scenario-wise biomass and node-wise biomethane limits.
+The source tables use GJ for biomass and TJ for biomethane.
+"""
+function create_bioenergy_constraints(
+        emp::JuMP.Model,
+        sets,
+        par,
+        periods::TimeStructure;
+        progress = nothing,
+    )
+    par.availableBioEnergy === nothing &&
+        isempty(par.genMaxBiomethaneAvailability) && return nothing
+
+    _report_progress(progress, "Creating biomass and biomethane availability constraints")
+    N = nodes(sets)
+    SP = strat_periods(periods)
+    genOp = emp[:genOperational]
+
+    if par.availableBioEnergy !== nothing
+        @constraint(
+            emp,
+            max_bio_availability[sp in SP, sc in 1:_opscenario_count(sp)],
+            sum(
+                multiple_strat(sp, t) *
+                (occursin("cofiring", lowercase(g)) ? 0.1 : 1.0) *
+                genOp[n, g, t] * 3.6 / par.genEfficiency[g][sp]
+                for n in N
+                for g in generators(sets, n) if occursin("bio", lowercase(g))
+                for rp in repr_periods(sp)
+                for (scenario_index, scenario) in enumerate(opscenarios(rp))
+                if scenario_index == sc
+                for t in scenario;
+                init = 0.0
+            ) <= available_bioenergy(par, sp)
+        )
+    end
+
+    if !isempty(par.genMaxBiomethaneAvailability)
+        @constraint(
+            emp,
+            gen_fuel_use_limit[n in N, sp in SP, sc in 1:_opscenario_count(sp)],
+            sum(
+                multiple_strat(sp, t) * genOp[n, g, t] * 3.6 / par.genEfficiency[g][sp]
+                for g in generators(sets, n) if occursin("biomethane", lowercase(g))
+                for rp in repr_periods(sp)
+                for (scenario_index, scenario) in enumerate(opscenarios(rp))
+                if scenario_index == sc
+                for t in scenario;
+                init = 0.0
+            ) <= 1e3 * max_biomethane_availability(par, n, sp)
+        )
+    end
+
+    return nothing
 end
 
 function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)

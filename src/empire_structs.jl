@@ -29,6 +29,9 @@ Base.@kwdef mutable struct EmpireParams
     genVariableOMCost::Dict{String, Float64}                     = Dict{String, Float64}()
     genFuelCost::Dict{String, TimeProfile}                       = Dict{String, TimeProfile}()
     CCSCostTSVariable::Union{Nothing, TimeProfile}               = nothing
+    # EUR per tCO2 of annual capture capability. `nothing` preserves the
+    # historical default; a CSV value of 0.0 explicitly disables the charge.
+    CCSCostTSFixed::Union{Nothing, Float64}                      = nothing
     genEfficiency::Dict{String, TimeProfile}                     = Dict{String, TimeProfile}()
     genRefInitCap::Dict{Tuple{String, String}, Float64}          = Dict{Tuple{String, String}, Float64}()
     genScaleInitCap::Dict{String, TimeProfile}                   = Dict{String, TimeProfile}()
@@ -36,6 +39,7 @@ Base.@kwdef mutable struct EmpireParams
     genMaxBuiltCap::Dict{Tuple{String, String}, TimeProfile}     = Dict{Tuple{String, String}, TimeProfile}()
     genMaxInstalledCapRaw::Dict{Tuple{String, String}, Float64}  = Dict{Tuple{String, String}, Float64}()
     genMaxInstalledCap::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
+    genMaxBiomethaneAvailability::Dict{String, TimeProfile}      = Dict{String, TimeProfile}()
     genRampUpCap::Dict{String, Float64}                          = Dict{String, Float64}()
     genCapAvailType::Dict{String, Float64}                       = Dict{String, Float64}()
     genCO2Content::Dict{String, Float64}                         = Dict{String, Float64}()
@@ -85,6 +89,7 @@ Base.@kwdef mutable struct EmpireParams
     # General parameters from file
     CO2cap::Union{Nothing, TimeProfile}   = nothing
     CO2price::Union{Nothing, TimeProfile} = nothing
+    availableBioEnergy::Union{Nothing, TimeProfile} = nothing
     seasonNames::Vector{String}           = String[]
     regularSeasonCount::Int               = 0
 
@@ -141,6 +146,8 @@ const DEFAULT_MAX_HYDRO_NODE       = nothing
 # `LigniteCCSadv` and omits `LigniteCCSsup`); a 1.0 default left it effectively unrampable-limited
 # in Julia while Python pinned it to 0.0.
 const DEFAULT_RAMPUP_CAP                 = 0.0
+# InternalEMPIRE's Pyomo parameter default, in TJ per node and strategic period.
+const DEFAULT_MAX_BIOMETHANE_AVAILABILITY = 999999.0
 # Efficiencies / availability factors default to 1.0 (lossless / fully available)
 const DEFAULT_BLEED_EFF                  = 1.0
 const DEFAULT_CHARGE_EFF                 = 1.0
@@ -187,6 +194,17 @@ co2_price(par, sp) = par.CO2price === nothing ? 0.0 : par.CO2price[sp]
 co2_cap(par, sp) = par.CO2cap === nothing ? nothing : par.CO2cap[sp]
 co2_content(par, g) = get(par.genCO2Content, g, 0.0)
 ccs_cost_variable(par, sp) = par.CCSCostTSVariable === nothing ? 0.0 : par.CCSCostTSVariable[sp]
+
+"""Historical fixed CCS transport-and-storage charge, in EUR/tCO2."""
+const DEFAULT_CCS_COST_FIXED = 1149873.72
+
+ccs_cost_fixed(par) =
+    par.CCSCostTSFixed === nothing ? DEFAULT_CCS_COST_FIXED : par.CCSCostTSFixed
+available_bioenergy(par, sp) =
+    par.availableBioEnergy === nothing ? nothing : par.availableBioEnergy[sp]
+max_biomethane_availability(par, n, sp) =
+    haskey(par.genMaxBiomethaneAvailability, n) ?
+    par.genMaxBiomethaneAvailability[n][sp] : DEFAULT_MAX_BIOMETHANE_AVAILABILITY
 
 # General properties
 load(par, n, t) = haskey(par.sload, n) ? par.sload[n][t] : DEFAULT_LOAD
@@ -448,6 +466,7 @@ function validate(
             ("genInitCap", par.genInitCap),
             ("genMaxBuiltCap", par.genMaxBuiltCap),
             ("genMaxInstalledCap", par.genMaxInstalledCap),
+            ("genMaxBiomethaneAvailability", par.genMaxBiomethaneAvailability),
             ("transmissionInitCap", par.transmissionInitCap),
             ("transmissionMaxBuiltCap", par.transmissionMaxBuiltCap),
             ("transmissionMaxInstalledCap", par.transmissionMaxInstalledCap),
@@ -485,6 +504,7 @@ function validate(
     _check_profile_scalar!(errs, "CCSCostTSVariable", par.CCSCostTSVariable, periods; min = 0.0)
     _check_profile_scalar!(errs, "CO2cap", par.CO2cap, periods; min = 0.0)
     _check_profile_scalar!(errs, "CO2price", par.CO2price, periods; min = 0.0)
+    _check_profile_scalar!(errs, "availableBioEnergy", par.availableBioEnergy, periods; min = 0.0)
 
     # Index checks (only if a set is provided)
     if sets !== nothing
@@ -538,6 +558,7 @@ function validate(
                 ("nodeLostLoadCost", par.nodeLostLoadCost),
                 ("sloadAnnualDemand", par.sloadAnnualDemand),
                 ("maxHydroNode", par.maxHydroNode),
+                ("genMaxBiomethaneAvailability", par.genMaxBiomethaneAvailability),
                 ("sloadRaw", par.sloadRaw),
                 ("sload", par.sload),
                 ("maxRegHydroGenRaw", par.maxRegHydroGenRaw),

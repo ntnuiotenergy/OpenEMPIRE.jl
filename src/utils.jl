@@ -45,8 +45,7 @@ function preprocess_invest_cost(params::EmpireParams, sets, periods)
 
     # Generator investment costs
 
-    # TODO: avoid hardcoding of ccs data
-    ccs_cost_fix = 1149873.72
+    ccs_cost_fix = ccs_cost_fixed(params)
     ccs_rem_frac = 0.9
 
     params.genInvCost = Dict{String, StrategicProfile}()

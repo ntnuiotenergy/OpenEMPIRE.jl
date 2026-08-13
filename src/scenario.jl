@@ -70,6 +70,11 @@ regular_scenario_seasons(config) = Tuple(String.(get(config, "regular_seasons", 
 scenario_peak_count(config) = Int(get(config, "n_peak_seasons", 2))
 scenario_peak_hours(config) = Int(get(config, "len_peak_season", 24))
 
+# Bug-for-bug compatibility with InternalEMPIRE's Pyomo Param(default=1.0) for
+# absent seasonal-hydro samples. Remove when the reference uses explicit input.
+const INTERNALEMPIRE_MISSING_HYDRO_RAW_DEFAULT_KEY =
+    "internalempire_missing_hydro_raw_default_mw"
+
 const LoadScenarioRow = NamedTuple{
     (:Node, :Operationalhour, :Scenario, :Period, :ElectricLoadRaw_in_MW),
     Tuple{String, Int, String, Int, Float64},
@@ -129,7 +134,14 @@ function read_scenario_data!(
     scenario_files = _generated_scenario_csv_files(data_folder)
     has_csvs = isfile.(scenario_files)
     if all(has_csvs)
-        return read_generated_scenario_csv!(data_folder, periods, params, sets, season_for_hour)
+        return read_generated_scenario_csv!(
+            data_folder,
+            periods,
+            params,
+            sets,
+            season_for_hour,
+            config,
+        )
     elseif any(has_csvs)
         missing_files = collect(scenario_files)[.!collect(has_csvs)]
         throw(ArgumentError(
@@ -1530,6 +1542,7 @@ function generate_scenario_csv!(data_folder, periods, params::EmpireParams, sets
 
     params.sloadRaw = _build_node_profiles(load_profiles, periods)
     params.maxRegHydroGenRaw = _build_node_profiles(hydro_profiles, periods)
+    _fill_internalempire_missing_hydro_raw!(params, sets, config)
     params.genCapAvail = _build_generator_profiles(gen_profiles, periods)
     _fill_missing_stochastic_availability!(params, sets, periods)
     _validate_stochastic_availability(params, sets)
@@ -1646,6 +1659,7 @@ function read_generated_scenario_csv!(
     params::EmpireParams,
     sets,
     season_for_hour::Dict{Int, Int},
+    config = Dict{String, Any}(),
 )
     sload_file, hydro_file, availability_file = _generated_scenario_csv_files(data_folder)
 
@@ -1661,6 +1675,7 @@ function read_generated_scenario_csv!(
         season_for_hour,
         :HydroGeneratorMaxSeasonalProduction,
     )
+    _fill_internalempire_missing_hydro_raw!(params, sets, config)
     params.genCapAvail = _read_generated_generator_profiles(
         availability_file,
         periods,
@@ -1669,5 +1684,20 @@ function read_generated_scenario_csv!(
     _fill_missing_stochastic_availability!(params, sets, periods)
     _validate_stochastic_availability(params, sets)
 
+    return params
+end
+
+function _fill_internalempire_missing_hydro_raw!(params, sets, config)
+    haskey(config, INTERNALEMPIRE_MISSING_HYDRO_RAW_DEFAULT_KEY) || return params
+    default = Float64(config[INTERNALEMPIRE_MISSING_HYDRO_RAW_DEFAULT_KEY])
+    default >= 0 || throw(ArgumentError(
+        "$(INTERNALEMPIRE_MISSING_HYDRO_RAW_DEFAULT_KEY) must be non-negative",
+    ))
+
+    for node in nodes(sets)
+        any(generator -> is_reg_hydro(sets, generator), generators(sets, node)) || continue
+        haskey(params.maxRegHydroGenRaw, node) && continue
+        params.maxRegHydroGenRaw[node] = FixedProfile(default)
+    end
     return params
 end

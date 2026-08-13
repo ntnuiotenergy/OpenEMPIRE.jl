@@ -219,6 +219,15 @@ function _read_strategic_profiles_pair_csv(
     return profiles
 end
 
+"""Read the first numeric data value from a one-column CSV."""
+function _read_scalar_csv(path::AbstractString; value_col::Int = 1)
+    for row in _csv_rows(path)
+        _is_blank(row[value_col]) && continue
+        return _float_cell(row[value_col])
+    end
+    throw(ArgumentError("No numeric value found in $path"))
+end
+
 function _read_strategic_profile_csv(
         path::AbstractString;
         period_col::Int = 1,
@@ -306,6 +315,10 @@ function read_params_csv(dir::AbstractString)
     par.genVariableOMCost = _read_float_by_string_csv(_required_csv(dir, generator, "genVariableOMCost.csv"))
     par.genFuelCost = _read_strategic_profiles_csv(_required_csv(dir, generator, "genFuelCost.csv"))
     par.CCSCostTSVariable = _read_strategic_profile_csv(_required_csv(dir, generator, "CCSCostTSVariable.csv"))
+    ccs_fixed_path = _optional_csv(dir, generator, "CCSCostTSFixed.csv")
+    if ccs_fixed_path !== nothing
+        par.CCSCostTSFixed = _read_scalar_csv(ccs_fixed_path)
+    end
     par.genEfficiency = _read_strategic_profiles_csv(_required_csv(dir, generator, "genEfficiency.csv"))
     par.genRefInitCap = _read_float_by_pair_csv(_required_csv(dir, generator, "genRefInitCap.csv"))
     par.genScaleInitCap = _read_strategic_profiles_csv(_required_csv(dir, generator, "genScaleInitCap.csv"))
@@ -313,6 +326,10 @@ function read_params_csv(dir::AbstractString)
     par.genMaxBuiltCap = _read_strategic_profiles_pair_csv(_required_csv(dir, generator, "genMaxBuiltCap.csv"))
     par.genMaxInstalledCapRaw =
         _read_float_by_pair_csv(_required_csv(dir, generator, "genMaxInstalledCapRaw.csv"))
+    biomethane_path = _optional_csv(dir, generator, "MaxBiomethaneAvailability.csv")
+    if biomethane_path !== nothing
+        par.genMaxBiomethaneAvailability = _read_strategic_profiles_csv(biomethane_path)
+    end
     par.genRampUpCap = _read_float_by_string_csv(_required_csv(dir, generator, "genRampUpCap.csv"))
     par.genCapAvailType = _read_float_by_string_csv(_required_csv(dir, generator, "genCapAvailTypeRaw.csv"))
     par.genCO2Content = _read_float_by_string_csv(_required_csv(dir, generator, "genCO2TypeFactor.csv"))
@@ -371,6 +388,10 @@ function read_params_csv(dir::AbstractString)
     general = "General"
     par.CO2cap = _read_strategic_profile_csv(_required_csv(dir, general, "CO2cap.csv"))
     par.CO2price = _read_strategic_profile_csv(_required_csv(dir, general, "CO2price.csv"))
+    bioenergy_path = _optional_csv(dir, general, "AvailableBioEnergy.csv")
+    if bioenergy_path !== nothing
+        par.availableBioEnergy = _read_strategic_profile_csv(bioenergy_path)
+    end
 
     return par
 end
