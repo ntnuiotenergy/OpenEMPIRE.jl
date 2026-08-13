@@ -4,6 +4,13 @@ Self-contained CSV conversion of the InternalEMPIRE `full_model_int` input.
 It contains the electricity model and the natural-gas inputs currently
 implemented by OpenEMPIRE.jl. The horizon is 7 strategic periods.
 
+`Generator/CCSCostTSVariable.csv` and `Generator/CCSCostTSFixed.csv` are zeroed
+because InternalEMPIRE's declarations, input load, and objective terms for both CCS
+transport-and-storage costs are commented out. The converter isolates this temporary
+reference compatibility rule in
+`INTERNALEMPIRE_OMITS_CCS_TRANSPORT_AND_STORAGE_COST`; remove it when the reference
+starts charging those inputs.
+
 Regenerate it from the workspace root with:
 
 ```bash

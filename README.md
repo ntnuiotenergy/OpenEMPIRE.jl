@@ -63,13 +63,14 @@ prices. The bundled `full_model_int` source currently contains one complete gas
 price scenario; higher counts require a complete
 `NaturalGas/TerminalCost_stochastic.csv`.
 
-Run the deterministic full-model input by copying
-`config/run_full_model_int.yaml`, setting `natural_gas: true`, and running:
+Run the parity-tested full-model profile with:
 
 ```bash
 julia --project=. scripts/run_julia_empire.jl \
   --dataset=full_model_int \
-  --config=/path/to/run_full_model_int_gas.yaml
+  --config=config/run_int_full_gas.yaml \
+  --solver=Gurobi \
+  --fixed-sample
 ```
 
 Gas outputs are written below `<result-dir>/output/` as `ng*.csv`,

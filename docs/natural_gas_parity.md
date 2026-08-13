@@ -51,6 +51,31 @@ interface:
 | Tolerance | `atol=1e-8`, `rtol=1e-9` |
 | Overall | PASS |
 
+## Full-model InternalEMPIRE comparison
+
+The independent full-scale seed-3 comparison used `full_model_int` at 2055,
+five weather scenarios, 168-hour regular seasons, one gas-price scenario, and
+the same fixed sampling key on both implementations. Both Gurobi runs returned
+certified optimal status with crossover disabled:
+
+| Implementation | Objective (EUR) |
+|---|---:|
+| OpenEMPIRE.jl | `696652745459.713` |
+| InternalEMPIRE | `696652793394.099` |
+
+The difference is `47934.386 EUR`, or `0.068806709 ppm`. Stable installed-capacity
+keys were complete on both sides; the largest generator-capacity difference was
+`0.042270 MW`, and aggregate gas-for-power differed by `13.222 ppm`.
+
+This is accepted as practical parity, with one numerical caveat kept explicit:
+the returned-objective difference is larger than Julia's tighter reconstructed
+barrier bracket (`4000 EUR`). The aligned barrier intervals overlap narrowly, but
+the strict bracket verifier therefore still reports a difference. Julia's final
+displayed primal residual was `0.573`, versus `0.0133` for InternalEMPIRE. The
+different presolve/uncrush paths are documented rather than hidden by loosening a
+tolerance. `config/run_int_full_gas.yaml` records the certified barrier-only Julia
+profile used for this investigation.
+
 Re-measured after reserve and storage rows were scaled by `NATURAL_GAS_ROW_SCALE`
 to match InternalEMPIRE's `/1e3` conditioning. The absolute figure moved from
 `8.881784197e-16` because the scaled rows change LP numerics slightly; the

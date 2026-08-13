@@ -24,6 +24,8 @@ wacc: 0.05
 optimization_solver: "HiGHS"
 use_scenario_generation: True
 use_fixed_sample: True                                 # solution comparison feeds the reference's own key
+# InternalEMPIRE's missing maxRegHydroGenRaw entries use Pyomo default=1 MW.
+internalempire_missing_hydro_raw_default_mw: 1.0
 load_change_module: False
 filter_make: False
 filter_use: False

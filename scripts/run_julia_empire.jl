@@ -31,6 +31,9 @@ function _parse_args(args)
         "fixed-investment-dir" => "",
         "gurobi-method" => "",
         "gurobi-crossover" => "",
+        "gurobi-presolve" => "",
+        "gurobi-feasibility-tol" => "",
+        "gurobi-bar-conv-tol" => "",
     )
 
     for arg in args
@@ -42,6 +45,7 @@ function _parse_args(args)
             options["fixed-sample"] = "true"
         elseif startswith(arg, "--") && occursin("=", arg)
             key, value = split(arg[3:end], "="; limit = 2)
+            haskey(options, key) || throw(ArgumentError("Unsupported argument: --$key"))
             options[key] = value
         elseif !startswith(arg, "--")
             options["dataset"] = arg
@@ -81,8 +85,20 @@ function _optional_int(value, key)
     end
 end
 
-function _set_optimizer_attribute!(attributes, name, value)
-    parsed = _optional_int(value, name)
+function _optional_float(value, key)
+    (value === nothing || ismissing(value)) && return nothing
+    value isa Real && return Float64(value)
+    text = strip(string(value))
+    isempty(text) && return nothing
+    try
+        return parse(Float64, text)
+    catch err
+        throw(ArgumentError("Unsupported floating-point value for $key: $value"))
+    end
+end
+
+function _set_optimizer_attribute!(attributes, name, value, parser = _optional_int)
+    parsed = parser(value, name)
     parsed === nothing && return attributes
     for index in eachindex(attributes)
         if first(attributes[index]) == name
@@ -96,7 +112,7 @@ end
 
 function _optimizer_attributes(value, config, options)
     if value == "Gurobi"
-        attributes = Pair{String, Int}[]
+        attributes = Pair{String, Union{Int, Float64}}[]
         config_attribute_names = (
             "solver_method" => "Method",
             "solver_crossover" => "Crossover",
@@ -109,8 +125,33 @@ function _optimizer_attributes(value, config, options)
         for (config_key, gurobi_name) in config_attribute_names
             _set_optimizer_attribute!(attributes, gurobi_name, get(config, config_key, nothing))
         end
+        float_config_attribute_names = (
+            "solver_feasibilitytol" => "FeasibilityTol",
+            "solver_barconvtol" => "BarConvTol",
+        )
+        for (config_key, gurobi_name) in float_config_attribute_names
+            _set_optimizer_attribute!(
+                attributes,
+                gurobi_name,
+                get(config, config_key, nothing),
+                _optional_float,
+            )
+        end
         _set_optimizer_attribute!(attributes, "Method", options["gurobi-method"])
         _set_optimizer_attribute!(attributes, "Crossover", options["gurobi-crossover"])
+        _set_optimizer_attribute!(attributes, "Presolve", options["gurobi-presolve"])
+        _set_optimizer_attribute!(
+            attributes,
+            "FeasibilityTol",
+            options["gurobi-feasibility-tol"],
+            _optional_float,
+        )
+        _set_optimizer_attribute!(
+            attributes,
+            "BarConvTol",
+            options["gurobi-bar-conv-tol"],
+            _optional_float,
+        )
         return Tuple(attributes)
     end
     return ()

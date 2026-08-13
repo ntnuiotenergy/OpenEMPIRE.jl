@@ -503,14 +503,10 @@ function test_full_model_int_gas_generators_are_priced()
         @test haskey(parameters.genMargCost, generator)
         cost = OpenEMPIRE.gen_marginal_cost(parameters, generator, sp)
         @test cost > 0
-        # Non-CCS gas generators reduce exactly to variable O&M under a cap; the
-        # CCS variants additionally carry base OpenEMPIRE's CCS transport and
-        # storage term, which InternalEMPIRE does not model.
-        if ("CCS", generator) in sets.GeneratorsOfTechnology
-            @test cost > parameters.genVariableOMCost[generator]
-        else
-            @test cost ≈ parameters.genVariableOMCost[generator]
-        end
+        # With an emission cap, gas fuel purchased through terminals, and the
+        # full_model_int CCS transport/storage inputs explicitly set to zero to
+        # match InternalEMPIRE, every gas generator reduces to variable O&M here.
+        @test cost ≈ parameters.genVariableOMCost[generator]
     end
 end
 
