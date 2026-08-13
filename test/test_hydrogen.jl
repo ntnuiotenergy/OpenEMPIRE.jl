@@ -386,6 +386,12 @@ function test_hydrogen_full_result_verifier()
         "test_hydrogen_result_verifier.py",
     )
     @test success(run(ignorestatus(`$python $test_script`)))
+    fingerprint_tests = joinpath(
+        pkgdir(OpenEMPIRE),
+        "test",
+        "test_hydrogen_algebra_fingerprint.py",
+    )
+    @test success(run(ignorestatus(`$python $fingerprint_tests`)))
 end
 
 function test_hydrogen_oos_capacity_validation()

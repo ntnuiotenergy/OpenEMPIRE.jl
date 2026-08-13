@@ -63,6 +63,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="write patched runner/reference sources for inspection without executing",
     )
+    parser.add_argument(
+        "--algebra-fingerprint",
+        type=Path,
+        help="build without optimizing and write a Hydrogen/CO2 algebra fingerprint",
+    )
     return parser.parse_args()
 
 
@@ -386,6 +391,31 @@ def main() -> None:
     exec(compile(empire_source, str(empire_path), "exec"), empire_module.__dict__)
 
     namespace = {"__name__": "__main__", "__file__": str(runner)}
+    if args.algebra_fingerprint is not None:
+        from hydrogen_algebra_fingerprint import export_internal_fingerprints
+
+        class FingerprintComplete(Exception):
+            pass
+
+        class BuildOnlySolver:
+            def __init__(self) -> None:
+                self.options: dict[str, object] = {}
+
+            def solve(self, instance: object, *_args: object, **_kwargs: object) -> None:
+                export_internal_fingerprints(
+                    instance,
+                    args.algebra_fingerprint.resolve(),
+                    tabs,
+                )
+                raise FingerprintComplete
+
+        empire_module.SolverFactory = lambda *_args, **_kwargs: BuildOnlySolver()
+        try:
+            exec(compile(source, str(runner), "exec"), namespace)
+        except FingerprintComplete:
+            return
+        raise RuntimeError("InternalEMPIRE runner returned without fingerprinting the model")
+
     exec(compile(source, str(runner), "exec"), namespace)
     write_objective_component_certificate(
         namespace["model"], output_dir / "objective_components.csv"
