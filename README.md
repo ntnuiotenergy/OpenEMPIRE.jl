@@ -270,8 +270,8 @@ To run directly on Solstorm after copying the repo there:
 sh scripts/run_empire_julia_basic_sge.sh test
 ```
 
-The script selects one of the high-memory Solstorm nodes, instantiates the
-Julia project with `Pkg.instantiate()`, and runs:
+The script asks SGE to choose an available high-memory Solstorm node,
+instantiates the Julia project with `Pkg.instantiate()`, and runs:
 
 ```bash
 julia --project=. scripts/run_julia_empire.jl --dataset=test
@@ -291,7 +291,38 @@ Edit `config/cluster.json` with your Solstorm username and remote directory,
 then run:
 
 ```bash
-sh scripts/copy_and_run_julia_on_hpc.sh Solstorm
+sh scripts/copy_and_run_julia_on_hpc.sh Solstorm \
+  --profile config/launch_profiles/2045_3sce_northsea.yaml
+```
+
+`config/cluster.json` should describe the cluster connection and scheduler
+entrypoint. The launch profile describes the actual model run:
+
+```yaml
+dataset: europe_v51
+model_config: config/run_2045_3sce.yaml
+format: csv
+solver: Gurobi
+seed: 1
+fixed_sample: true
+optimize: true
+perf: true
+perf_interval: 2.0
+```
+
+Explicit flags can still override profile values when useful:
+
+```bash
+sh scripts/copy_and_run_julia_on_hpc.sh Solstorm \
+  --profile config/launch_profiles/2045_3sce_northsea.yaml \
+  --dataset europe_v51 \
+  --model-config config/run_2045_3sce.yaml \
+  --format csv \
+  --solver Gurobi \
+  --seed 1 \
+  --fixed-sample \
+  --perf \
+  --perf-interval 2.0
 ```
 
 The default solver for this first Julia smoke test is HiGHS. Gurobi is loaded
@@ -306,6 +337,11 @@ For one-command deployment, set this in `config/cluster.json`:
 ```json
 "JULIA_SOLVER": "Gurobi"
 ```
+
+The default SGE host expression is the high-memory node group
+`compute-4-51|compute-4-52|compute-4-53|compute-4-55|compute-4-56`. Override it
+with `JULIA_SGE_HOSTS` in your environment or `config/cluster.json` if Solstorm
+node availability changes.
 
 The Julia project includes `Gurobi.jl`; on Solstorm, the script tries to load
 `gurobi/13.0` first and then `gurobi/12.0`. If Gurobi license discovery fails,

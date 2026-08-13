@@ -15,6 +15,9 @@ include("test_csv.jl")
 include("test_scenario_csv.jl")
 include("test_out_of_sample.jl")
 include("test_runner_performance.jl")
+include("test_runner_manifest.jl")
+include("test_runner_staging.jl")
+include("test_runner_spec.jl")
 #include("test_interface.jl")
 include("test_timestruct.jl")
 include("test_solve.jl")
@@ -27,6 +30,7 @@ end
 @testset "CSV" begin
     test_read_csv_dataset()
     test_read_bundled_csv_datasets()
+    test_read_full_model_int_dataset()
     test_native_timestruct_operational_weights()
     test_write_solution_csv_tables()
     test_europe_summary_uses_per_scenario_totals()
@@ -56,6 +60,7 @@ end
     test_offshore_transmission_cap_is_on_by_default()
     test_offshore_wind_farm_without_generators_is_rejected()
     test_emission_constraints_match_python_formulation()
+    test_objective_matches_component_sum()
     test_native_dual_weight_normalization()
     test_create_model_respects_emission_cap_config()
 end
@@ -66,6 +71,18 @@ end
 
 @testset "Runner performance" begin
     test_runner_performance_helpers()
+end
+
+@testset "Runner manifest" begin
+    test_runner_manifest_helpers()
+end
+
+@testset "Runner staging" begin
+    test_stage_run_inputs_copies_without_mutating_source()
+end
+
+@testset "Runner spec" begin
+    test_resolve_julia_run_spec()
 end
 
 @testset "Validate" begin

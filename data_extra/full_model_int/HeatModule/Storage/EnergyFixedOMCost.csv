@@ -1,0 +1,15 @@
+StorageTypes,Period,EnergyFixedOMCost_in_euro_per_kWh
+HotWaterTankLarge,1,0.086
+HotWaterTankLarge,2,0.086
+HotWaterTankLarge,3,0.086
+HotWaterTankLarge,4,0.086
+HotWaterTankLarge,5,0.086
+HotWaterTankLarge,6,0.086
+HotWaterTankLarge,7,0.086
+HotWaterTankSmall,1,16.66666666666667
+HotWaterTankSmall,2,16.66666666666667
+HotWaterTankSmall,3,16.66666666666667
+HotWaterTankSmall,4,16.66666666666667
+HotWaterTankSmall,5,16.66666666666667
+HotWaterTankSmall,6,16.66666666666667
+HotWaterTankSmall,7,16.66666666666667

@@ -116,35 +116,10 @@ end
 function create_objective(emp::JuMP.Model, sets, par, periods::TimeStructure, discounter::Discounter; progress = nothing)
     @info "Creating objective function"
     _report_progress(progress, "Creating objective function")
-    N = nodes(sets)
-    SP = strat_periods(periods)
 
-    genInvCap = emp[:genInvCap]
-    transInvCap = emp[:transmissionInvCap]
-    storInvCapPow = emp[:storPWInvCap]
-    storInvCapEn = emp[:storENInvCap]
+    components = objective_component_expressions(emp, sets, par, periods, discounter)
 
-    shed = emp[:loadShed]
-    genOp = emp[:genOperational]
-
-    return @objective(
-        emp,
-        Min,
-        sum(
-            objective_weight(sp, discounter) * (
-                    sum(gen_invest_cost(par, g, sp) * genInvCap[n, g, sp] for n in N, g in generators(sets, n); init = 0) +
-                    sum(trans_invest_cost(par, m, n, sp) * transInvCap[m, n, sp] for (m, n) in bidir_arcs(sets); init = 0) +
-                    sum(stor_pw_invest_cost(par, s, sp) * storInvCapPow[n, s, sp] for n in N, s in storages(sets, n); init = 0) +
-                    sum(stor_en_invest_cost(par, s, sp) * storInvCapEn[n, s, sp] for n in N, s in storages(sets, n); init = 0)
-                ) for sp in SP
-        ) + sum(
-            objective_weight(t, discounter; type = "avg_year") * (
-                    sum(lost_load_cost(par, n, t) * shed[n, t] for n in N; init = 0) +
-                    sum(gen_marginal_cost(par, g, t) * genOp[n, g, t] for n in N for g in generators(sets, n); init = 0)
-                )
-            for t in periods
-        )
-    )
+    return @objective(emp, Min, sum(values(components)))
 end
 
 # Create all constraints in the model
