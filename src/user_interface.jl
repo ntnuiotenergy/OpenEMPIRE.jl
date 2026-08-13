@@ -204,6 +204,7 @@ function create_model(
         params,
         periods;
         natural_gas = gas_enabled,
+        north_sea = _config_bool(config, "north_sea", false),
         progress,
     )
     _report_progress(progress, "Build 12/12: creating objective")

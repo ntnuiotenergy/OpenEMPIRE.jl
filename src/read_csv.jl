@@ -452,6 +452,7 @@ function read_sets_csv(dir::AbstractString; natural_gas::Bool = false)
     sets_dir = "Sets"
     generators = _read_vector_csv(_required_csv(dir, sets_dir, "Generator.csv"))
     gas_sets = natural_gas ? _read_natural_gas_sets_csv(dir, generators) : NaturalGasSets()
+    offshore_node_path = _optional_csv(dir, sets_dir, "OffshoreNode.csv")
     return OpenEMPIRE.EmpireSets(
         Generator = generators,
         ThermalGenerators = _read_vector_csv(_required_csv(dir, sets_dir, "ThermalGenerators.csv")),
@@ -461,6 +462,7 @@ function read_sets_csv(dir::AbstractString; natural_gas::Bool = false)
         DependentStorage = _read_vector_csv(_required_csv(dir, sets_dir, "DependentStorage.csv")),
         Technology = _read_vector_csv(_required_csv(dir, sets_dir, "Technology.csv")),
         Node = _read_vector_csv(_required_csv(dir, sets_dir, "Node.csv")),
+        OffshoreNode = isnothing(offshore_node_path) ? String[] : _read_vector_csv(offshore_node_path),
         DirectionalLink = _read_tuple2_csv(_required_csv(dir, sets_dir, "DirectionalLink.csv")),
         TransmissionType = _read_vector_csv(_required_csv(dir, sets_dir, "TransmissionType.csv")),
         TransmissionTypeOfDirectionalLink =

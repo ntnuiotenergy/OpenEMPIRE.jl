@@ -176,57 +176,10 @@ function create_objective(
 )
     @info "Creating objective function"
     _report_progress(progress, "Creating objective function")
-    N = nodes(sets)
-    SP = strat_periods(periods)
 
-    genInvCap = emp[:genInvCap]
-    transInvCap = emp[:transmissionInvCap]
-    storInvCapPow = emp[:storPWInvCap]
-    storInvCapEn = emp[:storENInvCap]
+    components = objective_component_expressions(emp, sets, par, periods, discounter)
 
-    shed = emp[:loadShed]
-    genOp = emp[:genOperational]
-    gas_costs = natural_gas ?
-                natural_gas_objective_expressions(emp, sets, par, periods, discounter) :
-                (
-        terminal_import = JuMP.AffExpr(0.0),
-        transport_shedding = JuMP.AffExpr(0.0),
-    )
-
-    # See the note in `objective_component_expressions`: `sum` over a generator
-    # folds left, copying the whole partial expression each step, so summing over
-    # every operational period is O(n^2) in time and allocation.
-    investment = JuMP.AffExpr(0.0)
-    for sp in SP
-        weight = objective_weight(sp, discounter)
-        for n in N, g in generators(sets, n)
-            JuMP.add_to_expression!(investment, weight * gen_invest_cost(par, g, sp), genInvCap[n, g, sp])
-        end
-        for (m, n) in bidir_arcs(sets)
-            JuMP.add_to_expression!(investment, weight * trans_invest_cost(par, m, n, sp), transInvCap[m, n, sp])
-        end
-        for n in N, s in storages(sets, n)
-            JuMP.add_to_expression!(investment, weight * stor_pw_invest_cost(par, s, sp), storInvCapPow[n, s, sp])
-            JuMP.add_to_expression!(investment, weight * stor_en_invest_cost(par, s, sp), storInvCapEn[n, s, sp])
-        end
-    end
-    operation = JuMP.AffExpr(0.0)
-    for t in periods
-        weight = objective_weight(t, discounter; type = "avg_year")
-        for n in N
-            JuMP.add_to_expression!(operation, weight * lost_load_cost(par, n, t), shed[n, t])
-            for g in generators(sets, n)
-                JuMP.add_to_expression!(operation, weight * gen_marginal_cost(par, g, t), genOp[n, g, t])
-            end
-        end
-    end
-
-    return @objective(
-        emp,
-        Min,
-        investment + operation +
-        gas_costs.terminal_import + gas_costs.transport_shedding
-    )
+    return @objective(emp, Min, sum(values(components)))
 end
 
 # Create all constraints in the model
@@ -235,6 +188,7 @@ function create_constraints(
     sets,
     par,
     periods::TimeStructure;
+    north_sea::Bool = false,
     natural_gas::Bool = false,
     progress = nothing,
 )
@@ -268,7 +222,7 @@ function create_constraints(
 
     create_generator_constraints(emp, sets, par, periods; progress)
     create_storage_constraints(emp, sets, par, periods; progress)
-    create_transmission_constraints(emp, sets, par, periods; progress)
+    create_transmission_constraints(emp, sets, par, periods; north_sea, progress)
     create_emission_constraints(emp, sets, par, periods; progress)
     natural_gas && create_natural_gas_constraints!(emp, sets, par, periods)
     return nothing
@@ -470,7 +424,17 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
 
 end
 
-function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
+function _canonical_arc(m, n)
+    return is_bidir(m, n) ? (m, n) : (n, m)
+end
+
+function _offshore_endpoint(sets, m, n)
+    is_offshore(sets, m) && return m
+    is_offshore(sets, n) && return n
+    return nothing
+end
+
+function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; north_sea::Bool = false, progress = nothing)
     @info "Creating transmission constraints"
     _report_progress(progress, "Creating transmission constraints")
     N = nodes(sets)
@@ -504,12 +468,46 @@ function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::Ti
     )
 
     # Constraints on maximum installed capacity for each transmission line
-    return @constraint(
+    @constraint(
         emp,
         trans_installed_cap[(m, n) in bidir_arcs(sets), sp in SP; !isnothing(trans_max_inst_cap(par, m, n, sp))],
         transCap[m, n, sp] <= trans_max_inst_cap(par, m, n, sp)
     )
 
+    if north_sea
+        @info " - offshore wind-farm transmission capacity constraints"
+        _report_progress(progress, "Creating offshore wind-farm transmission capacity constraints")
+        genCap = emp[:genInstalledCap]
+        # The cap's right-hand side is a sum over the offshore endpoint's generators, so
+        # an offshore node with none of its own gives an empty sum and pins every adjacent
+        # corridor to zero capacity. Python behaves identically, so this is not corrected
+        # here -- but it is silent, and it disconnects the node, so say so. It happens when
+        # OffshoreNode is derived as "all nodes minus onshore nodes" and picks up energy
+        # hubs or platforms, which the Python internal model caps through a separate
+        # converter formulation instead.
+        for node in offshore_nodes(sets)
+            isempty(generators(sets, node)) && @warn(
+                "Offshore node has no generators, so wind_farm_transmission_cap will " *
+                "force every adjacent corridor to zero transmission capacity. Remove it " *
+                "from Sets/OffshoreNode.csv unless that is intended.",
+                node,
+            )
+        end
+        # Python builds this over ordered node pairs, producing duplicate rows for the
+        # two directions of an offshore-adjacent corridor. Keep the same row structure
+        # while pointing both directions at Julia's canonical corridor capacity.
+        return @constraint(
+            emp,
+            wind_farm_transmission_cap[
+                (m, n) in arcs(sets), sp in SP;
+                !isnothing(_offshore_endpoint(sets, m, n))
+            ],
+            transCap[_canonical_arc(m, n)..., sp] <=
+                sum(genCap[_offshore_endpoint(sets, m, n), g, sp] for g in generators(sets, _offshore_endpoint(sets, m, n)); init = 0)
+        )
+    end
+
+    return nothing
 end
 
 

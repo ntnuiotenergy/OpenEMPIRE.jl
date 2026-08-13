@@ -93,6 +93,7 @@ function test_read_csv_dataset()
 
         sets = OpenEMPIRE.read_sets_csv(dataset)
         @test OpenEMPIRE.nodes(sets) == ["A", "B"]
+        @test isempty(OpenEMPIRE.offshore_nodes(sets))
         @test OpenEMPIRE.generators(sets, "A") == ["gas", "wind"]
         @test Set(OpenEMPIRE.arcs(sets)) == Set([("A", "B"), ("B", "A")])
 

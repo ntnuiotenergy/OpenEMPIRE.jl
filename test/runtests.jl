@@ -17,6 +17,9 @@ include("test_scenario_csv.jl")
 include("test_natural_gas.jl")
 include("test_out_of_sample.jl")
 include("test_runner_performance.jl")
+include("test_runner_manifest.jl")
+include("test_runner_staging.jl")
+include("test_runner_spec.jl")
 #include("test_interface.jl")
 include("test_timestruct.jl")
 include("test_solve.jl")
@@ -49,10 +52,20 @@ end
     test_create_model_with_raw_csv_scenarios()
     test_generate_scenarios_without_model()
     test_write_scenario_sampling_key_artifacts()
+    test_write_scenario_copula_cluster_artifacts()
+    test_copula_clusters_make_writes_csv()
+    test_copula_clusters_use_samples_from_clusters()
+    test_copula_clusters_multiple_variables()
+    test_filter_takes_precedence_over_copula_clusters()
+    test_copula_clusters_use_without_make_errors()
+    test_copula_clusters_invalid_copula_name_errors()
     test_create_model_accepts_optimizer_type()
     test_storage_constraints_match_python_formulation()
     test_create_model_adds_storage_max_constraints()
+    test_north_sea_transmission_cap_is_config_gated()
+    test_north_sea_cap_pins_generatorless_offshore_node_to_zero()
     test_emission_constraints_match_python_formulation()
+    test_objective_matches_component_sum()
     test_native_dual_weight_normalization()
     test_create_model_respects_emission_cap_config()
 end
@@ -78,6 +91,18 @@ end
 
 @testset "Runner performance" begin
     test_runner_performance_helpers()
+end
+
+@testset "Runner manifest" begin
+    test_runner_manifest_helpers()
+end
+
+@testset "Runner staging" begin
+    test_stage_run_inputs_copies_without_mutating_source()
+end
+
+@testset "Runner spec" begin
+    test_resolve_julia_run_spec()
 end
 
 @testset "Validate" begin

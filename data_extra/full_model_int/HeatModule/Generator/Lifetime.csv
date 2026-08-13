@@ -1,0 +1,13 @@
+GeneratorTechnology,generatorLifetime
+WasteToEnergyCHP,25
+WasteToEnergyHOP,25
+DistrictHeatGasBoiler,25
+BioWoodChipCHP,25
+BioWoodChipHOP,25
+IndividualOilBoiler,20
+IndividualGasBoiler,20
+DistrictHeatGeo,25
+DistrictHeatHydrogenBoiler,25
+IndividualHydrogenBoiler,20
+NaturalGasIndustrialBurner,15
+HydrogenIndustrialBurner,15
