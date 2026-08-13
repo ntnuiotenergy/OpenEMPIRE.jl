@@ -133,6 +133,9 @@ case "$SIDE" in
 			exit 1
 		}
 		cp -R "$DATA_DIR" "$JULIA_DATA"
+		# The staged source snapshot is recursively read-only. The scenario
+		# generator must be able to populate ScenarioData in this private copy.
+		chmod -R u+w "$JULIA_DATA"
 		julia --project=. scripts/write_industry_algebra_fingerprint.jl \
 			"$CONFIG_FILE" "$JULIA_DATA" "$AUDIT_DIR/julia.fingerprint"
 		;;
