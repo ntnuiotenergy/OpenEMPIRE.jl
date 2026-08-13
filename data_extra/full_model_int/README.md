@@ -11,7 +11,7 @@ Horizon: 7 investment periods (`NoOfPeriods` in `run_EMPIRE_int.py`).
   read (sources, commentary, intermediate calculations), prefixed by the sheet's
   key columns. The other files are sheets of the core workbooks that only the
   internal modules read (`MaxInstalledCapacityByPeriod`, `AvailableBioEnergy`,
-  `OffshoreConverter*`, `Latitude`/`Longitude`, the natural-gas and industry sets).
+  `Latitude`/`Longitude`, the natural-gas and industry sets).
 - `CO2/`, `NaturalGas/`, `Hydrogen/`, `Industry/`, `Transport/`, `HeatModule/` —
   module tables, extracted with the exact sheet/column selections in
   `InternalEMPIRE/reader.py`.

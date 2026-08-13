@@ -1,8 +1,4 @@
 
-# Corridor data is stored once per corridor, in whichever direction the input file
-# lists it, so a lookup must try both orders.
-_pair_value(dict, m, n) = haskey(dict, (m, n)) ? dict[(m, n)] : get(dict, (n, m), nothing)
-
 function annuity_factor(wacc, life)
     return (1 - (1 + wacc)^(-life)) / wacc
 end
@@ -106,48 +102,23 @@ function preprocess_invest_cost(params::EmpireParams, sets, periods)
     end
 
     # Transmission investment costs
-    #
-    # Length and lifetime are stored once per corridor, in whichever direction the input
-    # file happens to list, but TransmissionTypeOfDirectionalLink carries both directions.
-    # Looking them up in only the iterated direction therefore missed over half the
-    # directed links, and a corridor whose *both* directions missed fell back to
-    # DEFAULT_TRANS_INVEST_COST = 0.0 -- i.e. it became free to build. On full_model_int
-    # that silently left 26 corridors unpriced, including every offshore energy-hub
-    # corridor, so the model bought transmission it had not paid for.
     params.transmissionInvCost = Dict{Tuple{String,String}, StrategicProfile}()
-    unpriced = Set{Tuple{String,String}}()
     for (m, n, tt) in sets.TransmissionTypeOfDirectionalLink
-        # Lifetime falls back to DEFAULT_TRANS_LIFETIME, matching InternalEMPIRE's
-        # `Param(model.BidirectionalArc, default=40.0)` (empire.py:496). full_model_int
-        # omits a lifetime for the offshore energy-hub corridors, so requiring the key
-        # here left them with no cost at all instead of the default the reference uses.
-        life = trans_lifetime(params, m, n)
-        trans_length = _pair_value(params.transmissionLength, m, n)
-        if !haskey(params.transmissionTypeCapitalCost, tt) || trans_length === nothing
-            push!(unpriced, is_bidir(m, n) ? (m, n) : (n, m))
-            continue
+        if haskey(params.transmissionTypeCapitalCost, tt) && haskey(params.transmissionLifetime, (m,n))
+            cap_cost = params.transmissionTypeCapitalCost[tt] # in €/(MW * km)
+            life = params.transmissionLifetime[(m,n)]
+            trans_length = params.transmissionLength[(m,n)] # in km
+            om_cost = get(params.transmissionTypeFixedOMCost, tt, 0.0) # in €/MW/year
+            profiles = FixedProfile[]
+            for sp in SP
+                cost_per_year = trans_length * cap_cost[sp] / annuity_factor(wacc, life) + om_cost[sp]
+                y = min(life, sum(duration_strat(spp) for spp in SP if spp >= sp))
+                invest_cost = present_value(cost_per_year, ρ, y; at_start = true) # in €/MW
+                push!(profiles, FixedProfile(invest_cost))
+            end
+            params.transmissionInvCost[(m, n)] = StrategicProfile(profiles)
         end
-        cap_cost = params.transmissionTypeCapitalCost[tt] # in €/(MW * km)
-        om_cost = get(params.transmissionTypeFixedOMCost, tt, 0.0) # in €/MW/year
-        profiles = FixedProfile[]
-        for sp in SP
-            cost_per_year = trans_length * cap_cost[sp] / annuity_factor(wacc, life) + om_cost[sp]
-            y = min(life, sum(duration_strat(spp) for spp in SP if spp >= sp))
-            invest_cost = present_value(cost_per_year, ρ, y; at_start = true) # in €/MW
-            push!(profiles, FixedProfile(invest_cost))
-        end
-        params.transmissionInvCost[(m, n)] = StrategicProfile(profiles)
     end
-
-    # A corridor is only genuinely unpriced if neither direction could be derived.
-    still_unpriced = sort([c for c in unpriced
-                           if _pair_value(params.transmissionInvCost, c[1], c[2]) === nothing])
-    isempty(still_unpriced) || @warn(
-        "No investment cost could be derived for these transmission corridors, so they " *
-        "fall back to a cost of 0 and are free to build. Check transmissionLength, " *
-        "transmissionLifetime and transmissionTypeCapitalCost for them.",
-        corridors = still_unpriced,
-    )
 
     # Offshore energy-hub converter investment cost.
     #

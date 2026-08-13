@@ -562,6 +562,18 @@
       "sha256": "663bd7054961860065a67e04bb454dd9091ab5e18e35aca323fbd99f402e252a"
     },
     {
+      "path": "Transmission/OffshoreConverterCapitalCost.csv",
+      "bytes": 99,
+      "rows": 7,
+      "sha256": "52177aa8fcd6b82d8814b473e9215a12f61df38ced6b4e1ba3af4a0cac31d03b"
+    },
+    {
+      "path": "Transmission/OffshoreConverterOMCost.csv",
+      "bytes": 131,
+      "rows": 7,
+      "sha256": "500bfba30aa9df0f794a32863ba1acdef2ec0a5dff4a62931f5feea74ae18bda"
+    },
+    {
       "path": "Transmission/lineEfficiency.csv",
       "bytes": 6648,
       "rows": 278,
