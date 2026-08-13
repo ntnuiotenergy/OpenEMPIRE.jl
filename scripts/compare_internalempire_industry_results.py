@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare reduced InternalEMPIRE and OpenEMPIRE.jl Industry objectives."""
+"""Compare InternalEMPIRE and OpenEMPIRE.jl Industry result certificates."""
 
 from __future__ import annotations
 
@@ -62,6 +62,10 @@ def parse_args() -> argparse.Namespace:
         help="Optional Julia Gurobi log; summary objective bound is used if omitted",
     )
     parser.add_argument("--objective-ppm", type=float, default=20.0)
+    parser.add_argument("--sector-ppm", type=float, default=20.0)
+    parser.add_argument("--sector-atol", type=float, default=10.0)
+    parser.add_argument("--volume-ppm", type=float, default=20.0)
+    parser.add_argument("--volume-atol", type=float, default=1.0e-3)
     parser.add_argument("--capacity-atol", type=float, default=1e-3)
     parser.add_argument("--capacity-rtol", type=float, default=1e-5)
     parser.add_argument("--top", type=int, default=10)
@@ -79,6 +83,17 @@ def parse_args() -> argparse.Namespace:
         help="fail unless the objective difference is within the tighter solver bracket",
     )
     return parser.parse_args()
+
+
+def reconciled(
+    left: float,
+    right: float,
+    *,
+    atol: float,
+    ppm: float,
+) -> bool:
+    """Return whether two values meet an absolute-or-relative parity tolerance."""
+    return abs(left - right) <= atol or ppm_difference(left, right) <= ppm
 
 
 def read_components(path: Path) -> dict[str, float]:
@@ -305,7 +320,7 @@ def main() -> int:
     internal_sum_error = math.fsum(internal[name] for name in component_names) - internal_total
     julia_sum_error = math.fsum(julia.values()) - julia_total
 
-    print("InternalEMPIRE ↔ OpenEMPIRE.jl reduced Industry verification")
+    print("InternalEMPIRE ↔ OpenEMPIRE.jl Industry verification")
     print(f"internal_objective={internal_total:.17g}")
     print(f"julia_objective={julia_total:.17g}")
     print(f"objective_abs_diff={abs(internal_total - julia_total):.17g}")
@@ -375,14 +390,42 @@ def main() -> int:
     julia_investments = julia_industry_investments(
         args.julia_run.resolve(), args.wacc, args.discount_rate, args.period_years
     )
-    print("\nIndustry sector investment costs:")
+    print("\nIndustry sector costs:")
+    sector_costs_ok = True
     for sector in ("steel", "cement", "ammonia"):
-        left = internal[f"industry_{sector}_investment"]
+        investment_name = f"industry_{sector}_investment"
+        if investment_name not in internal:
+            raise ValueError(
+                f"InternalEMPIRE certificate is missing component: {investment_name}"
+            )
+        left = internal[investment_name]
         right = julia_investments[sector]
+        investment_ok = reconciled(
+            left,
+            right,
+            atol=args.sector_atol,
+            ppm=args.sector_ppm,
+        )
+        sector_costs_ok &= investment_ok
         print(
             f"{sector}_investment: ie={left:.17g} jl={right:.17g} "
             f"signed_jl_minus_ie={right - left:.17g} "
-            f"ppm={ppm_difference(left, right):.9f}"
+            f"ppm={ppm_difference(left, right):.9f} ok={investment_ok}"
+        )
+        operation_name = f"industry_{sector}_operation"
+        left = internal[operation_name]
+        right = julia[operation_name]
+        operation_ok = reconciled(
+            left,
+            right,
+            atol=args.sector_atol,
+            ppm=args.sector_ppm,
+        )
+        sector_costs_ok &= operation_ok
+        print(
+            f"{sector}_operation: ie={left:.17g} jl={right:.17g} "
+            f"signed_jl_minus_ie={right - left:.17g} "
+            f"ppm={ppm_difference(left, right):.9f} ok={operation_ok}"
         )
     print("\nIndustry annualized volumes (Julia result versus fixed demand RHS):")
     julia_volumes = julia_industry_volumes(args.julia_run.resolve())
@@ -400,18 +443,44 @@ def main() -> int:
         if args.require_sector_volumes and not internal_available:
             volumes_ok = False
         internal_text = "unavailable"
+        julia_volume_total = production + shed
+        julia_balance_ok = reconciled(
+            expected,
+            julia_volume_total,
+            atol=args.volume_atol,
+            ppm=args.volume_ppm,
+        )
+        volumes_ok &= julia_balance_ok
         if internal_available:
             internal_production = internal[internal_production_name]
             internal_shed = internal[internal_shed_name]
+            internal_volume_total = internal_production + internal_shed
+            internal_balance_ok = reconciled(
+                expected,
+                internal_volume_total,
+                atol=args.volume_atol,
+                ppm=args.volume_ppm,
+            )
+            cross_ok = reconciled(
+                internal_volume_total,
+                julia_volume_total,
+                atol=args.volume_atol,
+                ppm=args.volume_ppm,
+            )
+            volumes_ok &= internal_balance_ok and cross_ok
             internal_text = (
                 f"ie_production={internal_production:.17g} "
                 f"ie_shed={internal_shed:.17g} "
-                f"cross_ppm={ppm_difference(internal_production + internal_shed, production + shed):.9f}"
+                f"ie_balance_ppm={ppm_difference(expected, internal_volume_total):.9f} "
+                f"ie_balance_ok={internal_balance_ok} "
+                f"cross_ppm={ppm_difference(internal_volume_total, julia_volume_total):.9f} "
+                f"cross_ok={cross_ok}"
             )
         print(
             f"{sector}_volume_period_{period}: expected={expected:.17g} "
             f"jl_production={production:.17g} jl_shed={shed:.17g} "
-            f"balance_ppm={ppm_difference(expected, production + shed):.9f} "
+            f"balance_ppm={ppm_difference(expected, julia_volume_total):.9f} "
+            f"jl_balance_ok={julia_balance_ok} "
             f"{internal_text}"
         )
 
@@ -460,6 +529,7 @@ def main() -> int:
         and julia_ok
         and logs_ok
         and component_sums_ok
+        and sector_costs_ok
         and capacities_ok
         and volumes_ok
         and bracket_ok
@@ -473,7 +543,7 @@ def main() -> int:
         + ("PASS" if passed else "DIFF")
         + f" objective_ok={objective_ok} julia_ok={julia_ok} logs_ok={logs_ok} "
         + f"component_sums_ok={component_sums_ok} capacities_ok={capacities_ok} "
-        + f"volumes_ok={volumes_ok}"
+        + f"sector_costs_ok={sector_costs_ok} volumes_ok={volumes_ok}"
         + f" bracket_ok={bracket_ok}"
     )
     return 0 if passed else 1
