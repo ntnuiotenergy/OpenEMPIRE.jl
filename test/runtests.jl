@@ -14,6 +14,7 @@ include("test_excel.jl")
 include("test_csv.jl")
 include("test_scenario_csv.jl")
 include("test_out_of_sample.jl")
+include("test_oos_aggregation.jl")
 include("test_runner_performance.jl")
 include("test_runner_manifest.jl")
 include("test_runner_staging.jl")
@@ -75,6 +76,12 @@ end
     test_fix_only_investment_capacities()
     test_fixed_investment_key_validation()
     test_oos_omits_investment_only_constraints()
+end
+
+@testset "OOS aggregation" begin
+    test_oos_physical_time_weights()
+    test_summarize_and_aggregate_oos_results()
+    test_oos_aggregation_rejects_changed_investments()
 end
 
 @testset "Runner performance" begin
