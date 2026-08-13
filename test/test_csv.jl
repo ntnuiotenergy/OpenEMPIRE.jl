@@ -151,7 +151,7 @@ function test_read_full_model_int_dataset()
     @test length(OpenEMPIRE.nodes(sets)) == 52
     @test length(OpenEMPIRE.generators(sets)) == 33
     @test length(OpenEMPIRE.arcs(sets)) == 436
-    @test OpenEMPIRE.offshore_energy_hubs(sets) == ["EnergyhubEU"]
+    @test OpenEMPIRE.offshore_energy_hubs(sets) == Set(["EnergyhubEU"])
     @test params.offshoreConvCapitalCost !== nothing
     @test params.offshoreConvOMCost !== nothing
 
