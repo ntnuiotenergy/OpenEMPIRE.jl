@@ -154,31 +154,100 @@ chosen variables cover more nodes. If more than one sampling mode is on,
 `copula_clusters_use`. The file is saved with the sampling key under
 `results/julia_runs/<run>/Input/ScenarioData/`.
 
-### Generating out-of-sample scenario trees
+### Generating one out-of-sample scenario tree
 
-Use `scripts/create_out_of_sample_tree.jl` to generate one or more scenario trees
-without building or solving a model:
+Generate one self-contained tree without modifying the source dataset:
 
 ```bash
 julia --project=. scripts/create_out_of_sample_tree.jl test \
   --config=config/testrun.yaml \
+  --seed=101 \
+  --output=OutOfSample/test/oos_tree1
+```
+
+The generator works on a temporary dataset copy and publishes the completed
+tree only after all required files have been produced. It refuses to overwrite
+an existing tree. `metadata.yaml` records the seed, relevant configuration,
+source paths, config checksum, and checksums and sizes for every scenario file.
+The corresponding library function is
+`OpenEMPIRE.generate_oos_scenario_tree(config_file, data_folder, tree_dir; seed=...)`.
+
+### Preparing a multi-tree out-of-sample experiment
+
+Prepare a deterministic sequence of trees without starting solver jobs:
+
+```bash
+julia --project=. scripts/prepare_oos_experiment.jl test \
+  --config=config/testrun.yaml \
   --num-trees=3 \
-  --seed=1
+  --seed-start=101 \
+  --output=OutOfSample/test/experiment_seed101_3trees
 ```
 
-This writes generated OOS scenario inputs under:
+This produces `oos_tree1`, `oos_tree2`, and `oos_tree3` with seeds 101–103.
+The atomic `experiment.yaml` manifest records the immutable inputs and each
+tree's preparation status. Repeating the command resumes the preparation:
+valid completed trees are checksum-verified and skipped, while missing trees
+are generated. A changed experiment specification or an invalid existing tree
+is rejected rather than overwritten. Multi-tree preparation requires
+`use_fixed_sample: false`; otherwise different seeds would not produce
+independent trees.
 
-```text
-OutOfSample/<dataset>/oos_tree1/ScenarioData/
-OutOfSample/<dataset>/oos_tree2/ScenarioData/
-OutOfSample/<dataset>/oos_tree3/ScenarioData/
+This step only prepares inputs. It does not submit EMPIRE runs or aggregate
+results. The corresponding library function is
+`OpenEMPIRE.prepare_oos_experiment(config_file, data_folder, experiment_dir;
+num_trees=..., seed_start=...)`.
+
+### Preparing an out-of-sample execution queue
+
+After the investment run and scenario trees are complete, prepare runner
+commands without starting any jobs:
+
+```bash
+julia --project=. scripts/prepare_oos_execution_queue.jl test \
+  --experiment=OutOfSample/test/experiment_seed101_3trees \
+  --fixed-investment-dir=results/julia_runs/<investment-run> \
+  --config=config/testrun.yaml \
+  --solver=HiGHS
 ```
 
-Each tree folder also gets a `metadata.yaml` file with the dataset, seed, config,
-and scenario settings used to generate it. Internally, the script reuses
-`OpenEMPIRE.generate_scenarios`, so the generated files are first written to
-`data/<dataset>/ScenarioData` and then copied into the corresponding
-`OutOfSample/<dataset>/oos_treeN/ScenarioData` folder.
+The command validates the experiment manifest and every tree checksum, checks
+that the dataset and scenario-shaping configuration match, and verifies all
+eight fixed-capacity result tables. It then writes `execution.yaml` under the
+experiment directory. Each job contains an argument vector and copyable command
+for the current `run_julia_empire.jl` interface, together with fields for
+scheduler job ID, status, logs, and result location.
+
+No command in the queue is executed. Repeating the preparation command preserves
+existing `pending`, `submitted`, `running`, `complete`, or `failed` job state if
+the experiment, runner, fixed investments, and commands are unchanged. Changed
+inputs are rejected rather than silently replacing an active queue.
+
+Inspect and update the queue without executing its commands:
+
+```bash
+# Show all states and the next pending command.
+julia --project=. scripts/manage_oos_execution_queue.jl show \
+  --queue=OutOfSample/test/experiment_seed101_3trees/execution.yaml
+
+# Record a scheduler submission performed separately.
+julia --project=. scripts/manage_oos_execution_queue.jl mark \
+  --queue=OutOfSample/test/experiment_seed101_3trees/execution.yaml \
+  --job=1 --status=submitted --job-id=<scheduler-job-id>
+
+# Inspect matching run manifests and verify completed results.
+julia --project=. scripts/manage_oos_execution_queue.jl reconcile \
+  --queue=OutOfSample/test/experiment_seed101_3trees/execution.yaml
+```
+
+The controller never submits or starts jobs. It records audited state
+transitions and discovers run directories under each job's result root.
+Reconciliation checks that a run used the expected dataset, config,
+fixed-investment source, tree metadata, and seed. It marks a result `complete`
+only when the run manifest, fixed-capacity flag, scenario checksum flag,
+termination status, and summary satisfy the queue's acceptance criteria.
+Otherwise the job becomes `failed` with the reasons recorded. A failed job can
+be returned to `pending` with the `mark` command for a deliberate retry.
 
 ### Running one out-of-sample scenario tree
 
