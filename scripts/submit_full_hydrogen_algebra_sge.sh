@@ -30,7 +30,7 @@ function available_nodes() {
 		}' | sort -g | awk '{print $2}'
 }
 
-if [[ -z "$JOB_ID" ]]; then
+if [[ -z "${JOB_ID:-}" ]]; then
 	[[ -z "$SIDE" ]] || {
 		echo "ERROR: SIDE is reserved for the submitted jobs."
 		exit 1
