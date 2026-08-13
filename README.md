@@ -180,6 +180,43 @@ and scenario settings used to generate it. Internally, the script reuses
 `data/<dataset>/ScenarioData` and then copied into the corresponding
 `OutOfSample/<dataset>/oos_treeN/ScenarioData` folder.
 
+### Running one out-of-sample scenario tree
+
+Use the standard Julia runner with a completed investment run and one external
+scenario-tree directory:
+
+```bash
+julia --project=. scripts/run_julia_empire.jl test \
+  --config=config/testrun.yaml \
+  --out-of-sample=true \
+  --fixed-investment-dir=results/julia_runs/<investment-run> \
+  --scenario-data-root=OutOfSample/test/oos_tree1
+```
+
+The scenario-tree directory must contain `ScenarioData/sloadRaw.csv`,
+`maxRegHydroGenRaw.csv`, and `genCapAvailStochRaw.csv`. The investment directory
+may be a run directory or its `Output`/`output` directory. The runner validates
+both sources, copies the scenario inputs and eight strategic-capacity tables
+under the new run's `Input/` directory, and modifies only the staged config to
+read the supplied scenario tree. The shared dataset, original config, scenario
+tree, and investment result are not modified.
+When the tree contains `metadata.yaml`, the runner verifies its file checksums,
+stages the metadata, and records the tree seed, full provenance, and base
+investment run in `run_manifest.yaml`.
+
+The source investment run must also provide provenance. New Julia run manifests
+record a normalized investment context and a checksum over the eight capacity
+tables. Older runs can be used only when a preserved config plus `summary.txt`
+prove `optimize=true` and `OPTIMAL`; these are explicitly labelled
+`reconstructed_legacy_run`. The runner stages this evidence as
+`fixed_investment_provenance.yaml` and `source_config.yaml`.
+
+Forecast horizon, investment-period length, North Sea mode, emission-cap mode,
+discount rate, WACC, and load-change mode must match the investment run.
+Scenario count and operational season/time settings may differ intentionally
+for OOS, including chronological full-year evaluation. Incompatibility fails
+before model construction.
+
 ### North Sea / offshore transmission cap
 
 The Python reference model has an optional North Sea transmission cap, and the

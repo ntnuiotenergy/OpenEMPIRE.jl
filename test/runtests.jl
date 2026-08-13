@@ -66,7 +66,11 @@ end
 end
 
 @testset "Out-of-sample" begin
+    test_fixed_investment_provenance_and_compatibility()
     test_fix_investments_from_results()
+    test_fix_only_investment_capacities()
+    test_fixed_investment_key_validation()
+    test_oos_omits_investment_only_constraints()
 end
 
 @testset "Runner performance" begin
@@ -83,6 +87,9 @@ end
 
 @testset "Runner spec" begin
     test_resolve_julia_run_spec()
+    test_resolve_single_tree_oos_run_spec()
+    test_reject_incomplete_oos_runner_options()
+    test_runner_solver_result_extraction()
 end
 
 @testset "Validate" begin
