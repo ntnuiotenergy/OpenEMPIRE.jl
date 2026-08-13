@@ -41,6 +41,44 @@ class HydrogenResultVerifierTests(unittest.TestCase):
         self.assertIn("    return instance\n", patched)
         self.assertNotIn("del results, instance, model", patched)
 
+    def test_capacity_comparison_aggregates_corridors_and_ignores_sparse_zeros(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            internal = root / "internal"
+            julia = root / "julia"
+            internal.mkdir()
+            julia.mkdir()
+            write_table(
+                internal / "capacity.tab",
+                "\t",
+                ("FromNode", "ToNode", "Period", "capacity"),
+                ("A", "B", 1, 2),
+            )
+            with (internal / "capacity.tab").open("a", encoding="utf-8") as handle:
+                handle.write("B\tA\t1\t3\n")
+                handle.write("A\tC\t1\t0\n")
+            write_table(
+                julia / "capacity.csv",
+                ",",
+                ("FromNode", "ToNode", "Period", "capacity"),
+                ("A", "B", 1, 5),
+            )
+            spec = VERIFIER.CapacitySpec(
+                "capacity",
+                "capacity.tab",
+                "capacity.csv",
+                ("FromNode", "ToNode", "Period"),
+                "capacity",
+                True,
+            )
+            with mock.patch.object(VERIFIER, "CAPACITY_SPECS", (spec,)):
+                ok, lines = VERIFIER.compare_capacities(
+                    internal, julia, atol=1e-3, rtol=1e-6, top=10
+                )
+            self.assertTrue(ok)
+            self.assertIn("keys(ie=2,jl=1,missing=0,extra=0)", lines[0])
+            self.assertIn("ie_only=1", lines[1])
+
     def test_gurobi_certification_and_suboptimal_failure_are_parsed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

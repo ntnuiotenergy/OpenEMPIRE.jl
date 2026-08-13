@@ -121,6 +121,7 @@ CAPACITY_SPECS = (
         "repurposedPipelineBuilt.csv",
         ("FromNode", "ToNode", "Period"),
         "repurposedPipelineBuilt",
+        True,
     ),
     CapacitySpec(
         "hydrogen_storage_installed",
@@ -591,9 +592,16 @@ def read_capacity_table(
             key = tuple(row[column].strip() for column in key_columns)
             if undirected_pair:
                 key = (*sorted(key[:2]), *key[2:])
+            value = float(row[value_column])
             if key in result:
-                raise ValueError(f"Duplicate stable key in {path}: {key}")
-            result[key] = float(row[value_column])
+                if not undirected_pair:
+                    raise ValueError(f"Duplicate stable key in {path}: {key}")
+                # Directional investment variables can be interchangeable even
+                # though the physical corridor capacity is not. Compare their
+                # sum under one canonical corridor key.
+                result[key] += value
+            else:
+                result[key] = value
     return result
 
 
@@ -640,13 +648,23 @@ def compare_capacities(
         )
         internal_keys = set(internal)
         julia_keys = set(julia)
-        missing = internal_keys - julia_keys
-        extra = julia_keys - internal_keys
+        internal_only = internal_keys - julia_keys
+        julia_only = julia_keys - internal_keys
+        missing = {
+            key
+            for key in internal_only
+            if abs(internal[key]) > atol + rtol * abs(internal[key])
+        }
+        extra = {
+            key
+            for key in julia_only
+            if abs(julia[key]) > atol + rtol * abs(julia[key])
+        }
         differences = []
         all_deltas = []
-        for key in internal_keys & julia_keys:
-            left = internal[key]
-            right = julia[key]
+        for key in internal_keys | julia_keys:
+            left = internal.get(key, 0.0)
+            right = julia.get(key, 0.0)
             signed = right - left
             absolute = abs(signed)
             tolerance = atol + rtol * max(abs(left), abs(right))
@@ -667,6 +685,13 @@ def compare_capacities(
             f"keys(ie={len(internal)},jl={len(julia)},missing={len(missing)},extra={len(extra)}) "
             f"mismatches={len(differences)} max_abs={maximum:.12g}"
         )
+        zero_only_internal = len(internal_only - missing)
+        zero_only_julia = len(julia_only - extra)
+        if zero_only_internal or zero_only_julia:
+            lines.append(
+                "  absent zero-equivalent keys (do not affect pass/fail): "
+                f"ie_only={zero_only_internal} jl_only={zero_only_julia}"
+            )
         lines.append(
             "  all-key delta diagnostics (do not affect pass/fail): "
             f"signed_sum={math.fsum(delta for delta, _, _ in all_deltas):.12g} "
