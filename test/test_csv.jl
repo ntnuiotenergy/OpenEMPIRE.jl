@@ -151,6 +151,9 @@ function test_read_full_model_int_dataset()
     @test length(OpenEMPIRE.nodes(sets)) == 52
     @test length(OpenEMPIRE.generators(sets)) == 33
     @test length(OpenEMPIRE.arcs(sets)) == 436
+    @test OpenEMPIRE.offshore_energy_hubs(sets) == ["EnergyhubEU"]
+    @test params.offshoreConvCapitalCost !== nothing
+    @test params.offshoreConvOMCost !== nothing
 
     # The workbook carries no fuel cost for these five; the converter supplies the
     # europe_v51 values so the dataset is usable with the gas module off.
@@ -220,6 +223,7 @@ function test_write_solution_csv_tables()
         Storage = ["battery"],
         Technology = ["Solar"],
         Node = ["A", "B"],
+        OffshoreEnergyHub = ["B"],
         DirectionalLink = [("A", "B"), ("B", "A")],
         TransmissionType = ["HVDC"],
         TransmissionTypeOfDirectionalLink = [("A", "B", "HVDC"), ("B", "A", "HVDC")],
@@ -273,6 +277,8 @@ function test_write_solution_csv_tables()
     @constraint(emp, emp[:transmissionOperational]["A", "B", second_time] == 14.0)
     @constraint(emp, emp[:transmissionOperational]["B", "A", first_time] == 15.0)
     @constraint(emp, emp[:transmissionOperational]["B", "A", second_time] == 16.0)
+    @constraint(emp, emp[:offshoreConvInvCap]["B", sp] == 17.0)
+    @constraint(emp, emp[:offshoreConvInstalledCap]["B", sp] == 18.0)
     @objective(emp, Min, emp[:genInvCap]["A", "Solar", sp])
     optimize!(emp)
 
@@ -288,6 +294,8 @@ function test_write_solution_csv_tables()
             "investment_costs.csv",
             "loadShed.csv",
             "marginal_costs.csv",
+            "offshoreConvInstalledCap.csv",
+            "offshoreConvInvCap.csv",
             "results_objective.csv",
             "results_output_EuropePlot.csv",
             "results_output_EuropeSummary.csv",
@@ -324,6 +332,21 @@ function test_write_solution_csv_tables()
         trans_inv = collect(CSV.File(joinpath(output_dir, "transmissionInvCap.csv")))
         @test propertynames(first(trans_inv)) == [:FromNode, :ToNode, :Period, :transmissionInvCap]
         @test trans_inv[1].transmissionInvCap ≈ 11.0
+
+        offshore_conv_inv = collect(CSV.File(joinpath(output_dir, "offshoreConvInvCap.csv")))
+        @test propertynames(first(offshore_conv_inv)) ==
+              [:Node, :Period, :offshoreConvInvCap]
+        @test length(offshore_conv_inv) == 1
+        @test offshore_conv_inv[1].Node == "B"
+        @test offshore_conv_inv[1].Period == 1
+        @test offshore_conv_inv[1].offshoreConvInvCap ≈ 17.0
+        offshore_conv_cap = collect(CSV.File(joinpath(output_dir, "offshoreConvInstalledCap.csv")))
+        @test propertynames(first(offshore_conv_cap)) ==
+              [:Node, :Period, :offshoreConvInstalledCap]
+        @test length(offshore_conv_cap) == 1
+        @test offshore_conv_cap[1].Node == "B"
+        @test offshore_conv_cap[1].Period == 1
+        @test offshore_conv_cap[1].offshoreConvInstalledCap ≈ 18.0
 
         gen_operational = collect(CSV.File(joinpath(output_dir, "genOperational.csv")))
         @test propertynames(first(gen_operational)) ==

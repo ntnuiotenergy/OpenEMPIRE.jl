@@ -1601,6 +1601,71 @@ function test_offshore_transmission_cap_is_on_by_default()
     @test !haskey(JuMP.object_dictionary(emp_off), :wind_farm_transmission_cap)
 end
 
+function test_offshore_energy_hub_converter()
+    sets = OpenEMPIRE.EmpireSets(
+        Node = ["A", "Hub", "B"],
+        OffshoreEnergyHub = ["Hub"],
+        DirectionalLink = [
+            ("A", "Hub"),
+            ("Hub", "A"),
+            ("Hub", "B"),
+            ("B", "Hub"),
+        ],
+        TransmissionType = ["HVDC"],
+        TransmissionTypeOfDirectionalLink = [
+            ("A", "Hub", "HVDC"),
+            ("Hub", "A", "HVDC"),
+            ("Hub", "B", "HVDC"),
+            ("B", "Hub", "HVDC"),
+        ],
+    )
+    periods = OpenEMPIRE.create_timestruct(1, 5, 1, 2, 0, 0, 1)
+    sp = first(strat_periods(periods))
+    t = first(periods)
+    params = OpenEMPIRE.EmpireParams()
+
+    emp = JuMP.Model()
+    OpenEMPIRE.create_variables(emp, sets, periods)
+    OpenEMPIRE.create_transmission_constraints(emp, sets, params, periods)
+
+    @test _sparse_axis_length(emp[:offshore_hub_capacity_in]) == 2
+    @test _sparse_axis_length(emp[:offshore_hub_capacity_out]) == 2
+    @test _sparse_axis_length(emp[:offshore_conv_track_cap]) == 1
+
+    installed = emp[:offshoreConvInstalledCap]["Hub", sp]
+    built = emp[:offshoreConvInvCap]["Hub", sp]
+    inbound = emp[:offshore_hub_capacity_in]["Hub", sp, t]
+    outbound = emp[:offshore_hub_capacity_out]["Hub", sp, t]
+    @test JuMP.normalized_coefficient(inbound, emp[:transmissionOperational]["A", "Hub", t]) == 1.0
+    @test JuMP.normalized_coefficient(inbound, emp[:transmissionOperational]["B", "Hub", t]) == 1.0
+    @test JuMP.normalized_coefficient(inbound, installed) == -1.0
+    @test JuMP.normalized_coefficient(outbound, emp[:transmissionOperational]["Hub", "A", t]) == 1.0
+    @test JuMP.normalized_coefficient(outbound, emp[:transmissionOperational]["Hub", "B", t]) == 1.0
+    @test JuMP.normalized_coefficient(outbound, installed) == -1.0
+
+    track = emp[:offshore_conv_track_cap]["Hub", sp]
+    @test JuMP.normalized_coefficient(track, built) == 1.0
+    @test JuMP.normalized_coefficient(track, installed) == -1.0
+
+    cost_params = OpenEMPIRE.EmpireParams(
+        WACC = 0.05,
+        discountRate = 0.05,
+        offshoreConvCapitalCost = StrategicProfile([250_800.0]),
+        offshoreConvOMCost = StrategicProfile([12_540.0]),
+    )
+    OpenEMPIRE.preprocess_invest_cost(
+        cost_params,
+        OpenEMPIRE.EmpireSets(),
+        periods,
+    )
+    annual_cost = 250_800.0 / OpenEMPIRE.annuity_factor(0.05, 40) + 12_540.0
+    expected = OpenEMPIRE.present_value(annual_cost, 0.05, 5; at_start = true)
+    @test cost_params.offshoreConvInvCost[sp] ≈ expected
+
+    expression = OpenEMPIRE.offshore_conv_investment_expr(emp, sets, cost_params, sp)
+    @test JuMP.coefficient(expression, built) ≈ expected
+end
+
 function test_offshore_wind_farm_without_generators_is_rejected()
     # The cap's right-hand side sums the wind farm's own generators, so an entry with
     # none would force its corridors to zero capacity and silently disconnect the node.

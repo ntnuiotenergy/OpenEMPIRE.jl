@@ -58,6 +58,7 @@ end
     test_storage_constraints_match_python_formulation()
     test_create_model_adds_storage_max_constraints()
     test_offshore_transmission_cap_is_on_by_default()
+    test_offshore_energy_hub_converter()
     test_offshore_wind_farm_without_generators_is_rejected()
     test_emission_constraints_match_python_formulation()
     test_objective_matches_component_sum()
