@@ -80,11 +80,6 @@ written only when operational duals are available. The run manifest records the
 module gate, both scenario counts, exact gas-input hashes, and conversion
 manifest hash.
 
-For a hands-on equation-level comparison, see
-[`docs/natural_gas_parity.md`](docs/natural_gas_parity.md). It gives commands
-that write separate Julia and Pyomo result CSVs and compare 26 gas,
-electricity, storage, transport, and objective metrics.
-
 ### Hydrogen and CO2 evidence module
 
 The in-development Hydrogen port is also opt-in:
