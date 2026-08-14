@@ -106,6 +106,12 @@
   ],
   "files": [
     {
+      "path": "General/AvailableBioEnergy.csv",
+      "bytes": 123,
+      "rows": 7,
+      "sha256": "1dc17b9e8ee6befdcbf92b61440315fd5fb9cb465140438d324a00e82dd8f0b6"
+    },
+    {
       "path": "General/CO2cap.csv",
       "bytes": 143,
       "rows": 7,
@@ -124,10 +130,22 @@
       "sha256": "37997709e4d15d8a5f41279944e51c88e555c3df4507c4b11364e3d4a3f8dcd0"
     },
     {
+      "path": "Generator/CCSCostTSFixed.csv",
+      "bytes": 19,
+      "rows": 1,
+      "sha256": "d50180d76e753ecb85303cf87e9802e52e6a56d983b2f7da3e1625e0796f530e"
+    },
+    {
       "path": "Generator/CCSCostTSVariable.csv",
-      "bytes": 175,
+      "bytes": 77,
       "rows": 7,
-      "sha256": "46e759448937b7cbea4fee512ba1fd4423f577b84739de1a2c89998f4ddf779f"
+      "sha256": "c83400ee7ac36d4c1c3b4d633fbde89c2bb8dbdcd5b1ff0f2ddef2cce192ee75"
+    },
+    {
+      "path": "Generator/MaxBiomethaneAvailability.csv",
+      "bytes": 6468,
+      "rows": 245,
+      "sha256": "8b3f40405d1d8a3720a38d76d2356c9d8cfee3745d9aa8b9a23d1257205a9813"
     },
     {
       "path": "Generator/genCO2TypeFactor.csv",
@@ -287,9 +305,9 @@
     },
     {
       "path": "README.md",
-      "bytes": 708,
+      "bytes": 1104,
       "rows": null,
-      "sha256": "d9cfb3b522a02da2e0782e533ca212e7a6a9b979e02bbe3f6a99aec38ae42daa"
+      "sha256": "75b3aac581556d9abae66687f1ac31bfba169383d431e53c31219e93a921bd9f"
     },
     {
       "path": "ScenarioData/electricload.csv",
@@ -301,13 +319,13 @@
       "path": "ScenarioData/hydroror.csv",
       "bytes": 27886467,
       "rows": 43824,
-      "sha256": "67bbd04ff76c7eb9518c6109fa4f5618a70b818a7189f413432c65d347a939db"
+      "sha256": "bce9d5589070ba00bb8b0a35ee2276d24b4fccb99a107d2df69f08f34e06a7ac"
     },
     {
       "path": "ScenarioData/hydroseasonal.csv",
       "bytes": 8660314,
       "rows": 43824,
-      "sha256": "0e85b83c94d7535af73a56732786dd8317f36d1a9179999dad39ed0b9d4ffeab"
+      "sha256": "e3a906801c0e212a8d43857cd6f73b2659ea22137fce518608ed608d0cd7d33a"
     },
     {
       "path": "ScenarioData/sampling_key.csv",
@@ -400,10 +418,16 @@
       "sha256": "ecebb834a93b20fa89c8de5650ee6ea64a768571d81d8dccad53ca27a05d7065"
     },
     {
-      "path": "Sets/OffshoreNode.csv",
-      "bytes": 218,
-      "rows": 17,
-      "sha256": "ee5718532a3f44364e287e4e3b2bdf543c719dc7a1cf68f11072261649f9f847"
+      "path": "Sets/OffshoreEnergyHub.csv",
+      "bytes": 30,
+      "rows": 1,
+      "sha256": "37fd1e66a2556a4358d5cbf94bda16fe1cb6f60b74106c10777b20bbde4a56f7"
+    },
+    {
+      "path": "Sets/OffshoreWindFarmNode.csv",
+      "bytes": 196,
+      "rows": 14,
+      "sha256": "200645c7a4bf6ee30a3d7be1b30858f8b536ccc4ecf444200483d9b512ffe33b"
     },
     {
       "path": "Sets/OnshoreNode.csv",
@@ -556,6 +580,18 @@
       "sha256": "663bd7054961860065a67e04bb454dd9091ab5e18e35aca323fbd99f402e252a"
     },
     {
+      "path": "Transmission/OffshoreConverterCapitalCost.csv",
+      "bytes": 99,
+      "rows": 7,
+      "sha256": "52177aa8fcd6b82d8814b473e9215a12f61df38ced6b4e1ba3af4a0cac31d03b"
+    },
+    {
+      "path": "Transmission/OffshoreConverterOMCost.csv",
+      "bytes": 131,
+      "rows": 7,
+      "sha256": "500bfba30aa9df0f794a32863ba1acdef2ec0a5dff4a62931f5feea74ae18bda"
+    },
+    {
       "path": "Transmission/lineEfficiency.csv",
       "bytes": 6648,
       "rows": 278,
@@ -587,9 +623,9 @@
     },
     {
       "path": "Transmission/transmissionMaxInstalledCapRaw.csv",
-      "bytes": 46017,
-      "rows": 1519,
-      "sha256": "867f81de30f679e00b651d189aaa5e24d2e48f9af42750a80c3f4b6c97915ef4"
+      "bytes": 46136,
+      "rows": 1526,
+      "sha256": "416a4355e9bb8302c4c104bd75cac4498ddf15536ef638f9c5d297671286ed1d"
     },
     {
       "path": "Transmission/transmissionTypeCapitalCost.csv",

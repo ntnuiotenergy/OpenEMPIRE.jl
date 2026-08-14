@@ -18,6 +18,30 @@ function _config_bool(config, key::AbstractString, default::Bool)
 end
 
 """
+    _offshore_transmission_cap_setting(config)
+
+Resolve the `offshore_transmission_cap` run-config key, which defaults to `true`.
+
+The cap used to be gated by `north_sea`, defaulting to `false`. That flag is gone:
+InternalEMPIRE has no north-sea module, only a separate treatment of offshore wind,
+and an offshore wind farm should not be allowed to build more transmission capacity
+than it has generation. A leftover `north_sea` key is therefore *ignored*, and warned
+about rather than silently accepted -- the port previously ran production jobs with
+`north_sea: true` set against a build that never read it.
+"""
+function _offshore_transmission_cap_setting(config)
+    if haskey(config, "north_sea")
+        @warn(
+            "Ignoring the obsolete `north_sea` config key. The offshore transmission cap " *
+            "is now always applied unless `offshore_transmission_cap: false` is set. " *
+            "Remove `north_sea` from the config.",
+            north_sea = config["north_sea"],
+        )
+    end
+    return _config_bool(config, "offshore_transmission_cap", true)
+end
+
+"""
     _prepare_model_inputs(config_file, data_folder; input_format, scenario_rng, progress)
 
 Run the data-preparation stages shared by `create_model` and `generate_scenarios`
@@ -64,6 +88,7 @@ function _prepare_model_inputs(
         end
     end
     scenarios = config["number_of_scenarios"]
+    operational_hours_per_year = Int(get(config, "operational_hours_per_year", 8760))
 
     periods = OpenEMPIRE.create_timestruct(
         strat_pers,
@@ -73,6 +98,8 @@ function _prepare_model_inputs(
         peak_count,
         hours_peak,
         scenarios,
+        ;
+        operational_hours_per_year,
     )
 
 
@@ -137,12 +164,21 @@ function generate_scenarios(
     return periods, sets, params
 end
 
+"""
+    create_model(config_file, data_folder; include_investment_constraints = true, ...)
+
+Build an EMPIRE model from configuration and input data. Set
+`include_investment_constraints = false` for out-of-sample evaluation after
+strategic capacities from a completed investment run will be fixed on the
+model.
+"""
 function create_model(
     config_file,
     data_folder;
     optimizer = nothing,
     optimizer_attributes = (),
     include_string_names = true,
+    include_investment_constraints::Bool = true,
     input_format = :auto,
     scenario_rng = Random.default_rng(),
     progress = nothing,
@@ -180,7 +216,8 @@ function create_model(
         sets,
         params,
         periods;
-        north_sea = _config_bool(config, "north_sea", false),
+        offshore_transmission_cap = _offshore_transmission_cap_setting(config),
+        include_investment_constraints,
         progress,
     )
     _report_progress(progress, "Build 12/12: creating objective")

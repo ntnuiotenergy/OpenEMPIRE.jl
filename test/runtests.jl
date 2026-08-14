@@ -13,7 +13,10 @@ using YAML
 include("test_excel.jl")
 include("test_csv.jl")
 include("test_scenario_csv.jl")
+include("test_annuity.jl")
 include("test_out_of_sample.jl")
+include("test_oos_full_year.jl")
+include("test_oos_aggregation.jl")
 include("test_runner_performance.jl")
 include("test_runner_manifest.jl")
 include("test_runner_staging.jl")
@@ -31,6 +34,9 @@ end
     test_read_csv_dataset()
     test_read_bundled_csv_datasets()
     test_read_full_model_int_dataset()
+    test_internalempire_bioenergy_constraints()
+    test_internalempire_missing_hydro_default()
+    test_ccs_fixed_cost_is_data_driven()
     test_native_timestruct_operational_weights()
     test_write_solution_csv_tables()
     test_europe_summary_uses_per_scenario_totals()
@@ -57,16 +63,42 @@ end
     test_create_model_accepts_optimizer_type()
     test_storage_constraints_match_python_formulation()
     test_create_model_adds_storage_max_constraints()
-    test_north_sea_transmission_cap_is_config_gated()
-    test_north_sea_cap_pins_generatorless_offshore_node_to_zero()
+    test_offshore_transmission_cap_is_on_by_default()
+    test_offshore_energy_hub_converter()
+    test_offshore_wind_farm_without_generators_is_rejected()
     test_emission_constraints_match_python_formulation()
     test_objective_matches_component_sum()
     test_native_dual_weight_normalization()
     test_create_model_respects_emission_cap_config()
+    test_norwegian_elspot_columns_map_to_their_nodes()
+    test_norwegian_availability_is_populated()
 end
 
 @testset "Out-of-sample" begin
+    test_generate_single_oos_scenario_tree()
+    test_prepare_oos_experiment()
+    test_prepare_oos_execution_queue()
+    test_manage_oos_execution_queue()
+    test_fixed_investment_provenance_and_compatibility()
     test_fix_investments_from_results()
+    test_fix_only_investment_capacities()
+    test_fixed_investment_key_validation()
+    test_oos_omits_investment_only_constraints()
+end
+
+@testset "OOS full-year" begin
+    test_internalempire_full_year_foundation()
+    test_full_year_oos_generation()
+    test_chronological_oos_fixture_semantics()
+    test_chronological_source_validation()
+end
+
+@testset "OOS aggregation" begin
+    test_oos_physical_time_weights()
+    test_oos_chronological_full_year_time_weights()
+    test_internalempire_full_year_aggregation()
+    test_summarize_and_aggregate_oos_results()
+    test_oos_aggregation_rejects_changed_investments()
 end
 
 @testset "Runner performance" begin
@@ -82,7 +114,16 @@ end
 end
 
 @testset "Runner spec" begin
+    test_gurobi_numeric_attribute_parsing()
     test_resolve_julia_run_spec()
+    test_resolve_single_tree_oos_run_spec()
+    test_reject_incomplete_oos_runner_options()
+    test_reject_mismatched_oos_tree_config()
+    test_runner_solver_result_extraction()
+end
+
+@testset "Annuity" begin
+    test_annuity_factor()
 end
 
 @testset "Validate" begin
@@ -95,6 +136,7 @@ end
 
 @testset "TimeStruct" begin
     test_timestruct()
+    test_chronological_timestruct()
     test_variables()
     test_variable_large()
     test_constraints()

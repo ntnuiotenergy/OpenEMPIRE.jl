@@ -557,57 +557,368 @@ chosen variables cover more nodes. If more than one sampling mode is on,
 `copula_clusters_use`. The file is saved with the sampling key under
 `results/julia_runs/<run>/Input/ScenarioData/`.
 
-### Generating out-of-sample scenario trees
+## Out-of-sample evaluation
 
-Use `scripts/create_out_of_sample_tree.jl` to generate one or more scenario trees
-without building or solving a model:
+An out-of-sample (OOS) run tests investments that were optimised on one set of
+weather and load scenarios against *different* realisations. The investments are
+held fixed; only operation is re-solved.
+
+There are two flavours:
+
+| | what it is | when to use |
+| --- | --- | --- |
+| **random trees** | N independently sampled scenario trees, same shape as the investment run | testing robustness across many draws |
+| **chronological full year** | one historical year, 8,760 consecutive hours, split into 24 solvable chunks | reproducing InternalEMPIRE's full-year evaluation |
+
+The steps below are the whole workflow. Each one has a subsection further down
+with the full option list.
+
+### 1. Run the investment model
+
+An ordinary run. Its results directory supplies the fixed investments every OOS
+run is evaluated against, so keep it:
+
+```bash
+julia --project=. scripts/run_julia_empire.jl \
+  --dataset=europe_v51 --config=config/run_2045_3sce.yaml \
+  --format=csv --solver=Gurobi
+```
+
+### 2. Prepare the scenario trees
+
+**Random trees:**
+
+```bash
+julia --project=. scripts/prepare_oos_experiment.jl europe_v51 \
+  --config=config/run_2045_3sce.yaml --num-trees=3 --seed=1
+```
+
+**Chronological full year** — 24 trees covering one non-leap year:
+
+```bash
+julia --project=. scripts/prepare_full_year_oos_experiment.jl europe_v51 \
+  --config=config/run_2045_3sce.yaml \
+  --sample-years=2015 \
+  --output=OutOfSample/europe_v51/full_year_2015
+```
+
+This only prepares inputs — nothing is built or solved. It writes
+`full_year_config.yaml`, `experiment.yaml`, and trees `oos_tree1`–`oos_tree24`.
+
+> **Use the generated `full_year_config.yaml` from here on**, not the original
+> config. The generated one carries the chronological season settings; the
+> original still describes representative periods.
+
+### 3. Build the execution queue
+
+Point the queue at the investment run from Step 1:
+
+```bash
+julia --project=. scripts/prepare_oos_execution_queue.jl \
+  --experiment=OutOfSample/europe_v51/full_year_2015 \
+  --config=OutOfSample/europe_v51/full_year_2015/full_year_config.yaml \
+  --fixed-investment-dir=results/julia_runs/<investment-run> \
+  --solver=Gurobi
+```
+
+### 4. Solve each tree
+
+Each tree is an independent solve. Run them from the queue, or one at a time:
+
+```bash
+julia --project=. scripts/run_julia_empire.jl \
+  --dataset=europe_v51 \
+  --config=OutOfSample/europe_v51/full_year_2015/full_year_config.yaml \
+  --out-of-sample=true \
+  --fixed-investment-dir=results/julia_runs/<investment-run>
+```
+
+A full year is 24 solves, so this is normally a cluster job rather than a laptop
+one. `prepare_oos_execution_queue.jl` never executes anything itself: it writes
+`execution.yaml` with a ready-made command per tree. Track them with
+
+```bash
+julia --project=. scripts/manage_oos_execution_queue.jl \
+  --queue=OutOfSample/europe_v51/full_year_2015/execution.yaml \
+  --job=1 --status=complete
+```
+
+### 5. Aggregate
+
+```bash
+julia --project=. scripts/aggregate_out_of_sample_results.jl \
+  results/julia_oos_runs/<experiment> \
+  --output=results/julia_oos_aggregations/<experiment>
+```
+
+Aggregation refuses incomplete or infeasible runs, and verifies that every tree
+used byte-identical fixed investments. For the full-year case it drops the dummy
+peak hour and concatenates the 24 chunks into chronological hours 1–8,760.
+
+### What must match, and what may differ
+
+Between the investment run and the OOS runs:
+
+| must match | may differ |
+| --- | --- |
+| forecast horizon | number of scenarios |
+| investment-period length (`leap_years_investment`) | season count and length |
+| offshore transmission cap mode | peak-season settings |
+| emission-cap mode (cap vs price) | sampling seed and weather draw |
+| discount rate and WACC | |
+| load-change mode | |
+
+A mismatch fails before model construction rather than producing a quietly wrong
+answer.
+
+For the full-year case the raw tables must additionally contain exactly one
+complete, gap-free non-leap year. Duplicate or missing timestamps are rejected,
+and source row order is never reordered.
+
+### Generating one out-of-sample scenario tree
+
+Generate one self-contained tree without modifying the source dataset:
 
 ```bash
 julia --project=. scripts/create_out_of_sample_tree.jl test \
   --config=config/testrun.yaml \
-  --num-trees=3 \
-  --seed=1
+  --seed=101 \
+  --output=OutOfSample/test/oos_tree1
 ```
 
-This writes generated OOS scenario inputs under:
+The generator works on a temporary dataset copy and publishes the completed
+tree only after all required files have been produced. It refuses to overwrite
+an existing tree. `metadata.yaml` records the seed, relevant configuration,
+source paths, config checksum, and checksums and sizes for every scenario file.
+The corresponding library function is
+`OpenEMPIRE.generate_oos_scenario_tree(config_file, data_folder, tree_dir; seed=...)`.
+
+### Preparing a multi-tree out-of-sample experiment
+
+Prepare a deterministic sequence of trees without starting solver jobs:
+
+```bash
+julia --project=. scripts/prepare_oos_experiment.jl test \
+  --config=config/testrun.yaml \
+  --num-trees=3 \
+  --seed-start=101 \
+  --output=OutOfSample/test/experiment_seed101_3trees
+```
+
+This produces `oos_tree1`, `oos_tree2`, and `oos_tree3` with seeds 101–103.
+The atomic `experiment.yaml` manifest records the immutable inputs and each
+tree's preparation status. Repeating the command resumes the preparation:
+valid completed trees are checksum-verified and skipped, while missing trees
+are generated. A changed experiment specification or an invalid existing tree
+is rejected rather than overwritten. Multi-tree preparation requires
+`use_fixed_sample: false`; otherwise different seeds would not produce
+independent trees.
+
+This step only prepares inputs. It does not submit EMPIRE runs or aggregate
+results. The corresponding library function is
+`OpenEMPIRE.prepare_oos_experiment(config_file, data_folder, experiment_dir;
+num_trees=..., seed_start=...)`.
+
+### Preparing an out-of-sample execution queue
+
+After the investment run and scenario trees are complete, prepare runner
+commands without starting any jobs:
+
+```bash
+julia --project=. scripts/prepare_oos_execution_queue.jl test \
+  --experiment=OutOfSample/test/experiment_seed101_3trees \
+  --fixed-investment-dir=results/julia_runs/<investment-run> \
+  --config=config/testrun.yaml \
+  --solver=HiGHS
+```
+
+The command validates the experiment manifest and every tree checksum, checks
+that the dataset and scenario-shaping configuration match, and verifies all
+eight fixed-capacity result tables. It then writes `execution.yaml` under the
+experiment directory. Each job contains an argument vector and copyable command
+for the current `run_julia_empire.jl` interface, together with fields for
+scheduler job ID, status, logs, and result location.
+
+No command in the queue is executed. Repeating the preparation command preserves
+existing `pending`, `submitted`, `running`, `complete`, or `failed` job state if
+the experiment, runner, fixed investments, and commands are unchanged. Changed
+inputs are rejected rather than silently replacing an active queue.
+
+Inspect and update the queue without executing its commands:
+
+```bash
+# Show all states and the next pending command.
+julia --project=. scripts/manage_oos_execution_queue.jl show \
+  --queue=OutOfSample/test/experiment_seed101_3trees/execution.yaml
+
+# Record a scheduler submission performed separately.
+julia --project=. scripts/manage_oos_execution_queue.jl mark \
+  --queue=OutOfSample/test/experiment_seed101_3trees/execution.yaml \
+  --job=1 --status=submitted --job-id=<scheduler-job-id>
+
+# Inspect matching run manifests and verify completed results.
+julia --project=. scripts/manage_oos_execution_queue.jl reconcile \
+  --queue=OutOfSample/test/experiment_seed101_3trees/execution.yaml
+```
+
+The controller never submits or starts jobs. It records audited state
+transitions and discovers run directories under each job's result root.
+Reconciliation checks that a run used the expected dataset, config,
+fixed-investment source, tree metadata, and seed. It marks a result `complete`
+only when the run manifest, fixed-capacity flag, scenario checksum flag,
+termination status, and summary satisfy the queue's acceptance criteria.
+Otherwise the job becomes `failed` with the reasons recorded. A failed job can
+be returned to `pending` with the `mark` command for a deliberate retry.
+
+### Running one out-of-sample scenario tree
+
+Use the standard Julia runner with a completed investment run and one external
+scenario-tree directory:
+
+```bash
+julia --project=. scripts/run_julia_empire.jl test \
+  --config=config/testrun.yaml \
+  --out-of-sample=true \
+  --fixed-investment-dir=results/julia_runs/<investment-run> \
+  --scenario-data-root=OutOfSample/test/oos_tree1
+```
+
+The scenario-tree directory must contain `ScenarioData/sloadRaw.csv`,
+`maxRegHydroGenRaw.csv`, and `genCapAvailStochRaw.csv`. The investment directory
+may be a run directory or its `Output`/`output` directory. The runner validates
+both sources, copies the scenario inputs and eight strategic-capacity tables
+under the new run's `Input/` directory, and modifies only the staged config to
+read the supplied scenario tree. The shared dataset, original config, scenario
+tree, and investment result are not modified.
+When the tree contains `metadata.yaml`, the runner verifies its file checksums,
+stages the metadata, and records the tree seed, full provenance, and base
+investment run in `run_manifest.yaml`.
+
+The source investment run must also provide provenance. New Julia run manifests
+record a normalized investment context and a checksum over the eight capacity
+tables. Older runs can be used only when a preserved config plus `summary.txt`
+prove `optimize=true` and `OPTIMAL`; these are explicitly labelled
+`reconstructed_legacy_run`. The runner stages this evidence as
+`fixed_investment_provenance.yaml` and `source_config.yaml`.
+
+### Preparing chronological full-year OOS
+
+Prepare one 24-tree OOS experiment for a complete non-leap historical year:
+
+```bash
+julia --project=. scripts/prepare_full_year_oos_experiment.jl europe_v51 \
+  --config=config/run_2045_3sce.yaml \
+  --sample-years=2015 \
+  --format=csv \
+  --output=OutOfSample/europe_v51/full_year_2015
+```
+
+The command only prepares inputs; it does not build or solve EMPIRE. It writes
+`full_year_config.yaml`, `experiment.yaml`, and checksummed trees
+`oos_tree1`–`oos_tree24`. Supply the generated config—not the original
+representative-period config—to `prepare_oos_execution_queue.jl`.
+
+This matches InternalEMPIRE's full-year evaluation: the selected 8,760 input
+rows are split, in source row order, into 24 independently solved 365-hour
+chunks. Each chunk has one `winter` operational scenario and the required dummy
+peak hour. Aggregation ignores the dummy-peak output and concatenates the 24
+validated chunks as chronological hours 1–8,760. Every required raw table must
+contain exactly one complete, gap-free non-leap year; duplicate or missing
+timestamps are rejected without reordering the source rows.
+
+Forecast horizon, investment-period length, North Sea mode, emission-cap mode,
+discount rate, WACC, and load-change mode must match the investment run.
+Scenario count and operational season/time settings may differ intentionally
+for OOS, including chronological full-year evaluation. Incompatibility fails
+before model construction.
+
+### Aggregating out-of-sample results
+
+Aggregate one or more completed OOS run directories without rebuilding or
+solving a model:
+
+```bash
+julia --project=. scripts/aggregate_out_of_sample_results.jl \
+  results/julia_oos_runs/<experiment> \
+  --output=results/julia_oos_aggregations/<experiment>
+```
+
+The command discovers OOS `run_manifest.yaml` files beneath the supplied
+paths. Every selected run must be complete and feasible, must confirm fixed
+investments and scenario checksums, and must have byte-identical staged
+configurations and fixed-investment tables. It also verifies that all eight
+capacity outputs still match their staged fixed inputs.
+
+The aggregation writes:
 
 ```text
-OutOfSample/<dataset>/oos_tree1/ScenarioData/
-OutOfSample/<dataset>/oos_tree2/ScenarioData/
-OutOfSample/<dataset>/oos_tree3/ScenarioData/
+oos_tree_summary.csv
+oos_ens_by_period_scenario.csv
+oos_ens_by_period_scenario_season.csv
+aggregation_manifest.yaml
+combined/genOperational.csv
+combined/transmissionOperational.csv
+combined/storCharge.csv
+combined/storDischarge.csv
+combined/loadShed.csv
 ```
 
-Each tree folder also gets a `metadata.yaml` file with the dataset, seed, config,
-and scenario settings used to generate it. Internally, the script reuses
-`OpenEMPIRE.generate_scenarios`, so the generated files are first written to
-`data/<dataset>/ScenarioData` and then copied into the corresponding
-`OutOfSample/<dataset>/oos_treeN/ScenarioData` folder.
+Combined operational files are streamed rather than loaded into memory and
+add `Tree`, `Seed`, and `Run` identifiers. Use `--files=loadShed` to select a
+smaller set or `--files=none` to produce only summaries. Existing non-empty
+aggregation directories are rejected unless `--overwrite=true` is explicit.
 
-### North Sea / offshore transmission cap
+Physical energy not served (ENS) is calculated from each load-shedding row as
+`loadShed_MW * multiple_strat * probability * duration`. The scenario table
+reports both conditional annual ENS (without scenario probability) and its
+probability-weighted contribution. ENS is never discounted. Objective
+components remain financial and discounted: fixed generator, storage, and
+transmission investment costs are reported separately from the varying
+non-investment objective so constant investment offsets do not dominate
+cross-tree comparisons. The manifest records source and output checksums,
+units, formula, threshold, and tree provenance.
 
-The Python reference model has an optional North Sea transmission cap, and the
-Julia port implements it. When `north_sea: true` is set in the run config *and*
-the dataset provides `Sets/OffshoreNode.csv`, the `wind_farm_transmission_cap`
-constraint family is created. It caps each offshore-adjacent transmission
-corridor by the installed generation capacity at the offshore endpoint, keeping
-the Python implementation's ordered-arc row structure (both directions of a
-corridor are emitted, pointing at the same canonical corridor capacity).
+### Offshore nodes
 
-When `north_sea: false`, the offshore set may still exist in the data but no cap
-constraints are created. This is deliberate: the config flag, not the data
-layout, decides whether the optional formulation is active.
+Offshore nodes come in two kinds, and they are modelled differently. This mirrors
+InternalEMPIRE, which keeps two separate lists rather than one offshore set.
 
-**`OffshoreNode` must list only nodes whose generation should limit their
-corridors.** The cap's right-hand side is a sum over the offshore endpoint's
-generators, so an entry with *no* generators yields an empty sum and the
-constraint becomes `transmissionInstalledCap <= 0`, disconnecting that node.
-This matches the Python behaviour exactly — Python computes the same empty sum —
-but it makes the set's contents load-bearing. `europe_v51` lists exactly the 14
-offshore wind farms. Datasets that derive the set as "all nodes minus onshore
-nodes" can sweep in energy hubs or platforms that carry no generators; those
-belong in a separate formulation (the Python internal model gives energy hubs
-their own converter capacity constraints), not in this one. A warning is logged
-for any offshore node that ends up with an empty right-hand side.
+**Offshore wind farms** (`Sets/OffshoreWindFarmNode.csv`) generate power. An
+offshore wind farm may not build more transmission capacity than it has
+generation — there is no point paying for a 5 GW export cable out of a 2 GW wind
+farm. The `wind_farm_transmission_cap` family enforces this, capping each
+adjacent corridor by the installed generation at the offshore endpoint. It keeps
+the Python implementation's ordered-arc row structure: both directions of a
+corridor are emitted, pointing at the same canonical corridor capacity.
+
+**Offshore energy hubs** (`Sets/OffshoreEnergyHub.csv`) generate nothing. They
+are junctions that collect power from several wind farms and route it onward, and
+are limited by converter capacity instead. The set is read and validated, but the
+converter formulation is not ported yet, so hubs currently carry no capacity
+limit of their own.
+
+The two sets must be disjoint, and every wind farm must have at least one
+generator. Both are enforced by `validate!`, because the failure is otherwise
+silent and severe: the cap's right-hand side sums the node's own generators, so a
+generator-less entry yields an empty sum, the constraint becomes
+`transmissionInstalledCap <= 0`, and the node is disconnected from the grid
+entirely. That is exactly what a dataset produces when it derives the offshore set
+as "all nodes minus onshore nodes" and sweeps up hubs and platforms.
+
+The cap is **on by default**. Set `offshore_transmission_cap: false` in the run
+config to switch it off for an experiment. (The old `north_sea` key is obsolete:
+it is ignored, with a warning. InternalEMPIRE has no north-sea module — the flag
+existed there only to mark datasets that predate the
+`Windoffshoregrounded`/`Windoffshorefloating` split, and is always on now.)
+
+Datasets written before the split may still ship `Sets/OffshoreNode.csv`; it is
+read as the wind-farm set with a deprecation warning.
+
+The cap is created **after** the investment-only constraints, so it is omitted
+from fixed-capacity out-of-sample evaluation. With capacities fixed both sides of
+the inequality are constant, making the constraint redundant; the Python reference
+cannot even build it in that mode, because the installed capacities become `Param`s
+and the expression collapses to a Boolean.
 
 ### Comparable multi-seed Julia/Python parity runs
 

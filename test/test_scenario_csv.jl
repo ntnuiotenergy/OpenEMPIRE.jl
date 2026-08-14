@@ -1270,6 +1270,23 @@ function test_create_model_with_raw_csv_scenarios()
         @test length(params.sload) == 3
         @test haskey(params.genCapAvail, ("Germany", "Solar"))
         @test isfile(joinpath(dataset, "ScenarioData", "sloadRaw.csv"))
+        @test haskey(JuMP.object_dictionary(emp), :installed_cap_gen)
+
+        oos_model, _, _, _ = OpenEMPIRE.create_model(
+            joinpath(pkgdir(OpenEMPIRE), "data", "test_excel", "testrun.yaml"),
+            dataset;
+            include_investment_constraints = false,
+            input_format = :csv,
+            scenario_rng = MersenneTwister(1),
+        )
+        @test haskey(JuMP.object_dictionary(oos_model), :flow_balance)
+        @test haskey(JuMP.object_dictionary(oos_model), :gen_max_prod)
+        @test !haskey(JuMP.object_dictionary(oos_model), :installed_cap_gen)
+        @test !haskey(
+            JuMP.object_dictionary(oos_model),
+            :storage_installed_cap_en,
+        )
+        @test !haskey(JuMP.object_dictionary(oos_model), :trans_track_cap)
     end
 end
 
@@ -1549,16 +1566,22 @@ function test_create_model_adds_storage_max_constraints()
         @test _sparse_axis_length(emp[:storage_max_inv_en]) == expected
         @test _sparse_axis_length(emp[:storage_max_inst_pow]) == expected
         @test _sparse_axis_length(emp[:storage_max_inst_en]) == expected
-        @test JuMP.num_constraints(emp; count_variable_in_set_constraints = false) == 81190
+        # 81190 core rows plus the 4 offshore wind-farm cap rows (Denmark is the test
+        # dataset's only offshore wind farm: 2 arc directions x 2 strategic periods).
+        # The cap is on by default now, so the Python side needs `north_sea: true` to
+        # reach the same total; the cap is non-binding here, so the objective is
+        # unchanged either way.
+        @test JuMP.num_constraints(emp; count_variable_in_set_constraints = false) == 81194
+        @test _sparse_axis_length(emp[:wind_farm_transmission_cap]) == 4
     end
 end
 
-function test_north_sea_transmission_cap_is_config_gated()
+function test_offshore_transmission_cap_is_on_by_default()
     sets = OpenEMPIRE.EmpireSets(
         Generator = ["Windoffshore"],
         Technology = ["Wind"],
         Node = ["Offshore", "Onshore"],
-        OffshoreNode = ["Offshore"],
+        OffshoreWindFarmNode = ["Offshore"],
         DirectionalLink = [("Offshore", "Onshore"), ("Onshore", "Offshore")],
         TransmissionType = ["HVDC"],
         TransmissionTypeOfDirectionalLink = [
@@ -1572,14 +1595,10 @@ function test_north_sea_transmission_cap_is_config_gated()
     sp = first(strat_periods(periods))
     params = OpenEMPIRE.EmpireParams()
 
-    emp_off = JuMP.Model()
-    OpenEMPIRE.create_variables(emp_off, sets, periods)
-    OpenEMPIRE.create_transmission_constraints(emp_off, sets, params, periods; north_sea = false)
-    @test !haskey(JuMP.object_dictionary(emp_off), :wind_farm_transmission_cap)
-
+    # Default: a wind farm may not build more transmission than it has generation.
     emp_on = JuMP.Model()
     OpenEMPIRE.create_variables(emp_on, sets, periods)
-    OpenEMPIRE.create_transmission_constraints(emp_on, sets, params, periods; north_sea = true)
+    OpenEMPIRE.create_transmission_constraints(emp_on, sets, params, periods)
     @test _sparse_axis_length(emp_on[:wind_farm_transmission_cap]) == 2
 
     cap = emp_on[:transmissionInstalledCap]["Offshore", "Onshore", sp]
@@ -1589,44 +1608,110 @@ function test_north_sea_transmission_cap_is_config_gated()
         @test JuMP.normalized_coefficient(constraint, cap) == 1.0
         @test JuMP.normalized_coefficient(constraint, gen) == -1.0
     end
+
+    # Still switchable off for experiments.
+    emp_off = JuMP.Model()
+    OpenEMPIRE.create_variables(emp_off, sets, periods)
+    OpenEMPIRE.create_transmission_constraints(
+        emp_off, sets, params, periods; offshore_transmission_cap = false,
+    )
+    @test !haskey(JuMP.object_dictionary(emp_off), :wind_farm_transmission_cap)
 end
 
-function test_north_sea_cap_pins_generatorless_offshore_node_to_zero()
-    # An offshore node with no generators of its own gives the cap an empty
-    # right-hand side, so the corridor is forced to zero capacity. Python does
-    # exactly the same, so this documents the behaviour rather than guarding
-    # against it -- what the port adds is a warning, because the failure is
-    # otherwise silent and disconnects the node.
+function test_offshore_energy_hub_converter()
     sets = OpenEMPIRE.EmpireSets(
-        Generator = ["Windoffshore"],
-        Technology = ["Wind"],
-        Node = ["Hub", "Onshore"],
-        OffshoreNode = ["Hub"],
-        DirectionalLink = [("Hub", "Onshore"), ("Onshore", "Hub")],
+        Node = ["A", "Hub", "B"],
+        OffshoreEnergyHub = ["Hub"],
+        DirectionalLink = [
+            ("A", "Hub"),
+            ("Hub", "A"),
+            ("Hub", "B"),
+            ("B", "Hub"),
+        ],
         TransmissionType = ["HVDC"],
         TransmissionTypeOfDirectionalLink = [
-            ("Hub", "Onshore", "HVDC"),
-            ("Onshore", "Hub", "HVDC"),
+            ("A", "Hub", "HVDC"),
+            ("Hub", "A", "HVDC"),
+            ("Hub", "B", "HVDC"),
+            ("B", "Hub", "HVDC"),
         ],
-        GeneratorsOfTechnology = [("Wind", "Windoffshore")],
-        GeneratorsOfNode = Tuple{String, String}[],
     )
     periods = OpenEMPIRE.create_timestruct(1, 5, 1, 2, 0, 0, 1)
     sp = first(strat_periods(periods))
+    t = first(periods)
     params = OpenEMPIRE.EmpireParams()
 
     emp = JuMP.Model()
     OpenEMPIRE.create_variables(emp, sets, periods)
-    @test_logs (:warn,) match_mode = :any OpenEMPIRE.create_transmission_constraints(
-        emp, sets, params, periods; north_sea = true,
-    )
+    OpenEMPIRE.create_transmission_constraints(emp, sets, params, periods)
 
-    cap = emp[:transmissionInstalledCap]["Hub", "Onshore", sp]
-    for arc in (("Hub", "Onshore"), ("Onshore", "Hub"))
-        constraint = emp[:wind_farm_transmission_cap][arc, sp]
-        @test JuMP.normalized_coefficient(constraint, cap) == 1.0
-        @test JuMP.normalized_rhs(constraint) == 0.0
-    end
+    @test _sparse_axis_length(emp[:offshore_hub_capacity_in]) == 2
+    @test _sparse_axis_length(emp[:offshore_hub_capacity_out]) == 2
+    @test _sparse_axis_length(emp[:offshore_conv_track_cap]) == 1
+
+    installed = emp[:offshoreConvInstalledCap]["Hub", sp]
+    built = emp[:offshoreConvInvCap]["Hub", sp]
+    inbound = emp[:offshore_hub_capacity_in]["Hub", sp, t]
+    outbound = emp[:offshore_hub_capacity_out]["Hub", sp, t]
+    @test JuMP.normalized_coefficient(inbound, emp[:transmissionOperational]["A", "Hub", t]) == 1.0
+    @test JuMP.normalized_coefficient(inbound, emp[:transmissionOperational]["B", "Hub", t]) == 1.0
+    @test JuMP.normalized_coefficient(inbound, installed) == -1.0
+    @test JuMP.normalized_coefficient(outbound, emp[:transmissionOperational]["Hub", "A", t]) == 1.0
+    @test JuMP.normalized_coefficient(outbound, emp[:transmissionOperational]["Hub", "B", t]) == 1.0
+    @test JuMP.normalized_coefficient(outbound, installed) == -1.0
+
+    track = emp[:offshore_conv_track_cap]["Hub", sp]
+    @test JuMP.normalized_coefficient(track, built) == 1.0
+    @test JuMP.normalized_coefficient(track, installed) == -1.0
+
+    cost_params = OpenEMPIRE.EmpireParams(
+        WACC = 0.05,
+        discountRate = 0.05,
+        offshoreConvCapitalCost = StrategicProfile([250_800.0]),
+        offshoreConvOMCost = StrategicProfile([12_540.0]),
+    )
+    OpenEMPIRE.preprocess_invest_cost(
+        cost_params,
+        OpenEMPIRE.EmpireSets(),
+        periods,
+    )
+    annual_cost = 250_800.0 / OpenEMPIRE.annuity_factor(0.05, 40) + 12_540.0
+    expected = OpenEMPIRE.present_value(annual_cost, 0.05, 5; at_start = true)
+    @test cost_params.offshoreConvInvCost[sp] ≈ expected
+
+    expression = OpenEMPIRE.offshore_conv_investment_expr(emp, sets, cost_params, sp)
+    @test JuMP.coefficient(expression, built) ≈ expected
+end
+
+function test_offshore_wind_farm_without_generators_is_rejected()
+    # The cap's right-hand side sums the wind farm's own generators, so an entry with
+    # none would force its corridors to zero capacity and silently disconnect the node.
+    # That is what "all nodes minus onshore nodes" produces when it sweeps up energy
+    # hubs, so the set validation rejects it rather than solving a disconnected model.
+    make(; hub_nodes = String[], farm_generators = Tuple{String, String}[]) =
+        OpenEMPIRE.EmpireSets(
+            Generator = ["Windoffshore"],
+            Technology = ["Wind"],
+            Node = ["Hub", "Onshore"],
+            OffshoreWindFarmNode = ["Hub"],
+            OffshoreEnergyHub = hub_nodes,
+            DirectionalLink = [("Hub", "Onshore"), ("Onshore", "Hub")],
+            TransmissionType = ["HVDC"],
+            TransmissionTypeOfDirectionalLink = [
+                ("Hub", "Onshore", "HVDC"),
+                ("Onshore", "Hub", "HVDC"),
+            ],
+            GeneratorsOfTechnology = [("Wind", "Windoffshore")],
+            GeneratorsOfNode = farm_generators,
+        )
+
+    @test_throws ArgumentError make()
+    # A node cannot be both a wind farm and a hub.
+    @test_throws ArgumentError make(
+        hub_nodes = ["Hub"], farm_generators = [("Hub", "Windoffshore")],
+    )
+    # With generators of its own it is a legitimate wind farm.
+    @test make(farm_generators = [("Hub", "Windoffshore")]) isa OpenEMPIRE.EmpireSets
 end
 
 function test_emission_constraints_match_python_formulation()
@@ -1797,4 +1882,130 @@ function test_create_model_respects_emission_cap_config()
         expected = length(strat_periods(periods)) * base_config["number_of_scenarios"]
         @test _sparse_axis_length(emp_true[:emission_cap]) == expected
     end
+end
+
+# Writes a raw scenario file with one column per node, all sharing `rows`' timestamps.
+function _write_multinode_raw_scenario_file(path, rows, nodes; scale = 1.0)
+    header = "time," * join(nodes, ",")
+    lines = String[]
+    for row in rows
+        timestamp, value = split(row, ",")
+        v = parse(Float64, value) * scale
+        push!(lines, timestamp * repeat(",$(v)", length(nodes)))
+    end
+    _write_csv(path, header * "\n" * join(lines, "\n") * "\n")
+end
+
+"""
+`NO1`..`NO5` must resolve to their own nodes rather than being discarded.
+
+InternalEMPIRE added them to `dict_countries` in 9310e632, so the per-elspot-area
+Norwegian series is now read on both sides. The port previously reproduced the old
+behaviour on purpose; these tests pin the corrected mapping and guard the aggregate
+`"NO"` and offshore semantics that must not change with it.
+"""
+function test_norwegian_elspot_columns_map_to_their_nodes()
+    no_nodes = ["NO$(i)" for i in 1:5]
+    node_set = Set{String}(vcat(no_nodes, ["Germany", "SorligeNordsjoI"]))
+    offshore_set = Set{String}(["SorligeNordsjoI"])
+
+    # Each elspot column maps to its own node, for every weather-driven onshore class.
+    for generator in ("Solar", "Windonshore", "Hydrorun-of-the-river")
+        for node in no_nodes
+            mapped = OpenEMPIRE._node_names_for_generator(node, generator, node_set, offshore_set)
+            @test mapped == [node]
+            @test !isempty(mapped)          # explicitly: no longer silently skipped
+        end
+    end
+
+    # The aggregate "NO" column still fans out to every elspot area present.
+    @test OpenEMPIRE._node_names_for_generator("NO", "Solar", node_set, offshore_set) == no_nodes
+
+    # Ordinary country mapping is untouched.
+    @test OpenEMPIRE._node_names_for_generator("DE", "Solar", node_set, offshore_set) == ["Germany"]
+
+    # Offshore semantics are preserved. Floating offshore wind stays confined to
+    # offshore farms, so an onshore elspot column yields nothing for it, while
+    # grounded offshore wind still reaches country nodes.
+    for node in no_nodes
+        @test isempty(
+            OpenEMPIRE._node_names_for_generator(node, "Windoffshorefloating", node_set, offshore_set),
+        )
+        @test OpenEMPIRE._node_names_for_generator(
+            node, "Windoffshoregrounded", node_set, offshore_set,
+        ) == [node]
+    end
+    @test OpenEMPIRE._node_names_for_generator(
+        "SorligeNordsjoI", "Windoffshorefloating", node_set, offshore_set,
+    ) == ["SorligeNordsjoI"]
+
+    return nothing
+end
+
+"""
+End-to-end check that Norwegian solar, onshore wind and run-of-river availability is
+actually populated once the columns are read.
+"""
+function test_norwegian_availability_is_populated()
+    no_nodes = ["NO$(i)" for i in 1:5]
+    mktempdir() do root
+        scenario_dir = joinpath(root, "ScenarioData")
+        mkpath(scenario_dir)
+        rows = _scenario_time_rows()
+        _write_multinode_raw_scenario_file(joinpath(scenario_dir, "electricload.csv"), rows, no_nodes)
+        _write_multinode_raw_scenario_file(joinpath(scenario_dir, "hydroseasonal.csv"), rows, no_nodes; scale = 10.0)
+        _write_multinode_raw_scenario_file(joinpath(scenario_dir, "solar.csv"), rows, no_nodes; scale = 0.01)
+        _write_multinode_raw_scenario_file(joinpath(scenario_dir, "windonshore.csv"), rows, no_nodes; scale = 0.02)
+        _write_multinode_raw_scenario_file(joinpath(scenario_dir, "windoffshore.csv"), rows, no_nodes; scale = 0.03)
+        _write_multinode_raw_scenario_file(joinpath(scenario_dir, "hydroror.csv"), rows, no_nodes; scale = 0.04)
+        _write_csv(
+            joinpath(scenario_dir, "sampling_key.csv"),
+            """
+Period,Scenario,Season,Year,Month,Hour
+1,1,winter,2020,1,1
+1,1,spring,2020,4,0
+1,1,summer,2020,7,0
+1,1,fall,2020,10,0
+1,1,peak,2020,0,0
+""",
+        )
+
+        sets = _scenario_test_sets(no_nodes)
+        params = OpenEMPIRE.EmpireParams(
+            genCapAvailType = Dict(
+                "Solar" => 0.0,
+                "Windonshore" => 0.0,
+                "Windoffshore" => 0.0,
+                "Hydrorun-of-the-river" => 0.0,
+            ),
+        )
+        cfg = Dict(
+            "time_format" => "%d/%m/%Y %H:%M",
+            "length_of_regular_season" => 2,
+            "number_of_scenarios" => 1,
+            "use_fixed_sample" => true,
+        )
+        periods = OpenEMPIRE.create_timestruct(1, 5, 4, 2, 2, 24, 1)
+
+        OpenEMPIRE.generate_scenario_csv!(root, periods, params, sets, cfg; rng = MersenneTwister(1))
+
+        strategic_period = first(strat_periods(periods))
+        winter = first(repr_periods(strategic_period))
+        sc_winter = first(opscenarios(winter))
+
+        # Every Norwegian node has availability for each weather-driven class, and it
+        # is the value from that node's own column -- not zero, which is what the
+        # dropped-column behaviour produced.
+        for node in no_nodes
+            for (generator, expected) in (
+                ("Solar", 0.02), ("Windonshore", 0.04), ("Hydrorun-of-the-river", 0.08),
+            )
+                key = (node, generator)
+                @test haskey(params.genCapAvail, key)
+                @test params.genCapAvail[key][sc_winter[1]] ≈ expected
+                @test params.genCapAvail[key][sc_winter[1]] > 0.0
+            end
+        end
+    end
+    return nothing
 end
