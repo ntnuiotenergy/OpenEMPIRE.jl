@@ -711,8 +711,11 @@ function _internalempire_investment_cost(
     wacc,
     discount_rate,
 )
+    # Exponent is `-lifetime`, matching InternalEMPIRE b3186227; see `annuity_factor`
+    # in utils.jl. The reciprocal is written out here rather than reusing that helper
+    # to keep this cost expression in the same shape as the Pyomo one it mirrors.
     annualized =
-        wacc / (1 - (1 + wacc)^(1 - lifetime)) * capital_cost + fixed_om
+        wacc / (1 - (1 + wacc)^(-lifetime)) * capital_cost + fixed_om
     remaining_years = sum(
         duration_strat(period) for period in strategic_periods
         if period >= strategic_period;
