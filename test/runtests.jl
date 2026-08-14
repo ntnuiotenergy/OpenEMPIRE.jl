@@ -14,6 +14,7 @@ using YAML
 include("test_excel.jl")
 include("test_csv.jl")
 include("test_scenario_csv.jl")
+include("test_annuity.jl")
 include("test_natural_gas.jl")
 include("test_hydrogen.jl")
 include("test_out_of_sample.jl")
@@ -95,6 +96,8 @@ end
     test_objective_matches_component_sum()
     test_native_dual_weight_normalization()
     test_create_model_respects_emission_cap_config()
+    test_norwegian_elspot_columns_map_to_their_nodes()
+    test_norwegian_availability_is_populated()
 end
 
 @testset "Out-of-sample" begin
@@ -116,6 +119,10 @@ end
 @testset "Runner spec" begin
     test_resolve_julia_run_spec()
     test_gurobi_numeric_attribute_parsing()
+end
+
+@testset "Annuity" begin
+    test_annuity_factor()
 end
 
 @testset "Validate" begin
