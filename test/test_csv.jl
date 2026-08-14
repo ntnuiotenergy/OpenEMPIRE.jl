@@ -420,6 +420,20 @@ function test_write_solution_csv_tables()
         @test sort(readdir(output_dir)) == sort(expected_files)
         @test all(endswith(file, ".csv") for file in readdir(output_dir))
 
+        offshore_inv = collect(CSV.File(joinpath(output_dir, "offshoreConvInvCap.csv")))
+        @test propertynames(first(offshore_inv)) == [:Node, :Period, :offshoreConvInvCap]
+        @test length(offshore_inv) == 1
+        @test offshore_inv[1].Node == "B"
+        @test offshore_inv[1].Period == 1
+        @test offshore_inv[1].offshoreConvInvCap ≈ 17.0
+
+        offshore_cap = collect(CSV.File(joinpath(output_dir, "offshoreConvInstalledCap.csv")))
+        @test propertynames(first(offshore_cap)) == [:Node, :Period, :offshoreConvInstalledCap]
+        @test length(offshore_cap) == 1
+        @test offshore_cap[1].Node == "B"
+        @test offshore_cap[1].Period == 1
+        @test offshore_cap[1].offshoreConvInstalledCap ≈ 18.0
+
         gen_inv = collect(CSV.File(joinpath(output_dir, "genInvCap.csv")))
         @test propertynames(first(gen_inv)) == [:Node, :Generator, :Period, :genInvCap]
         @test length(gen_inv) == 1

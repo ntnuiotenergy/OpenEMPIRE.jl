@@ -373,6 +373,21 @@ function test_hydrogen_controlled_solution_parity()
     end
 end
 
+function test_hydrogen_full_result_verifier()
+    python = get(
+        ENV,
+        "OPENEMPIRE_PYTHON",
+        something(Sys.which("python3"), Sys.which("python"), ""),
+    )
+    isempty(python) && return @test_skip "Python is unavailable"
+    test_script = joinpath(
+        pkgdir(OpenEMPIRE),
+        "test",
+        "test_hydrogen_result_verifier.py",
+    )
+    @test success(run(ignorestatus(`$python $test_script`)))
+end
+
 function test_hydrogen_oos_capacity_validation()
     cases = (
         ("Node,Period,Value\nA,1,alphabetic\n", "nonnumeric value"),
