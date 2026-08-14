@@ -1,4 +1,40 @@
-function create_timestruct(npers, years_period, nseasons, hours_season, npeaks, hours_peak, nscens = 1)
+"""
+    create_timestruct(
+        npers,
+        years_period,
+        nseasons,
+        hours_season,
+        npeaks,
+        hours_peak,
+        nscens = 1;
+        operational_hours_per_year = 8760,
+    )
+
+Create EMPIRE's strategic and operational time structure.
+
+`operational_hours_per_year` is the physical duration represented by each
+strategic year. It defaults to 8760 for the existing representative-period
+formulation. A chronological fixture can set it to the fixture length; a
+full-year chronological run uses one regular season of length 8760 and keeps
+the default, which gives every modeled hour a multiplicity of one.
+"""
+function create_timestruct(
+    npers,
+    years_period,
+    nseasons,
+    hours_season,
+    npeaks,
+    hours_peak,
+    nscens = 1;
+    operational_hours_per_year = 8760,
+)
+    annual_hours = Int(operational_hours_per_year)
+    annual_hours > 0 || throw(ArgumentError("operational_hours_per_year must be positive"))
+    nseasons > 0 || throw(ArgumentError("nseasons must be positive"))
+    hours_season > 0 || throw(ArgumentError("hours_season must be positive"))
+    npeaks >= 0 || throw(ArgumentError("npeaks must be non-negative"))
+    hours_peak >= 0 || throw(ArgumentError("hours_peak must be non-negative"))
+    nscens > 0 || throw(ArgumentError("nscens must be positive"))
 
     # Create a representative period for each season and peak day
     # Use OperationalScenarios for multiple scenarios with equal probability
@@ -11,18 +47,25 @@ function create_timestruct(npers, years_period, nseasons, hours_season, npeaks, 
     end
 
     peak_hours = hours_peak * npeaks
+    peak_hours <= annual_hours || throw(ArgumentError(
+        "Modeled peak hours ($peak_hours) exceed operational_hours_per_year ($annual_hours)",
+    ))
 
     # Give each season an equal share of each year outside peak periods
-    seasons_share = [(8760 - peak_hours) / (8760 * nseasons) for _ in seasons]
+    seasons_share = [(annual_hours - peak_hours) / (annual_hours * nseasons) for _ in seasons]
 
     # Count each modeled peak hour once per year.
-    peaks_share = [hours_peak / 8760 for _ in peaks]
+    peaks_share = [hours_peak / annual_hours for _ in peaks]
 
     # Create representative periods for each year
-    repr_periods = RepresentativePeriods(8760, vcat(seasons_share, peaks_share), vcat(seasons, peaks))
+    repr_periods = RepresentativePeriods(
+        annual_hours,
+        vcat(seasons_share, peaks_share),
+        vcat(seasons, peaks),
+    )
 
     # Return a two level structure with yearly resolution
-    return TwoLevel(npers, years_period, repr_periods; op_per_strat = 8760)
+    return TwoLevel(npers, years_period, repr_periods; op_per_strat = annual_hours)
 end
 
 _report_progress(::Nothing, message) = nothing
