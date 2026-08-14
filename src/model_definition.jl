@@ -83,7 +83,7 @@ function create_variables(
     periods::TimeStruct.TimeStructure;
     natural_gas::Bool = false,
     hydrogen::Bool = false,
-    gas_transport_demand::Bool = hydrogen,
+    gas_transport_demand::Bool = natural_gas,
     progress = nothing,
 )
 
@@ -219,7 +219,7 @@ function create_constraints(
     # deliberately not reproduced here, so this flag does not affect the base model.
     include_investment_constraints::Bool = true,
     # InternalEMPIRE declares natural-gas transport demand in its Hydrogen block.
-    gas_transport_demand::Bool = hydrogen,
+    gas_transport_demand::Bool = natural_gas,
     progress = nothing,
 )
     @info "Creating constraints"
