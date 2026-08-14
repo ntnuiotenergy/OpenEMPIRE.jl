@@ -27,5 +27,8 @@ costperperiodPW=costperyearPW*1000*(1-(1+model.discountrate)**-(min(value((len(m
 
 
 ## Missing in Julia version
-- [ ] North Sea extensions
-- [ ] Implementation of emission limits
+
+Nothing tracked here at present. The North Sea offshore transmission cap and the
+emission limits (both the CO2 cap and the CO2 price) have since been implemented.
+
+The clarification points above are still open.

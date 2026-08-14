@@ -242,8 +242,7 @@ memory than a laptop (hundreds of GB), so they run there.
 ### Before you start — the ground rules
 
 - **Always connect through the login server:**
-  `<username>@solstorm-login.iot.ntnu.no`. Not `solstorm.iot.ntnu.no` — that is
-  the head server, and IT has asked that all access go via the login server.
+  `<username>@solstorm-login.iot.ntnu.no`, not `solstorm.iot.ntnu.no`.
 - **Never run computation on the login or head server.** That includes Julia
   precompilation and data preparation. Submit it as a job, or run it on a
   compute node inside `screen`.
@@ -284,13 +283,6 @@ never committed.
 
 ```bash
 ssh your_username@solstorm-login.iot.ntnu.no
-```
-
-If you use a password-manager SSH agent (such as 1Password), non-login shells
-may not pick it up automatically. Export the socket before running the scripts:
-
-```bash
-export SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
 ```
 
 ### Launch profiles — describing a run once
@@ -706,8 +698,5 @@ valid index tuples lets the model:
 
 ## Status and roadmap
 
-Items that are known to be missing or under investigation compared to the
-Python reference implementation are tracked in [TODO.md](TODO.md). The North Sea
-offshore transmission cap is implemented (see above). Notable remaining open
-points include the implementation of emission limits, as well as a documented
-discrepancy in the annuity / present value calculation for investment costs.
+Open points and known differences from the Python reference implementation are
+tracked in [TODO.md](TODO.md).
