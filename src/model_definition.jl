@@ -195,14 +195,15 @@ end
 
 # Create all constraints in the model
 function create_constraints(
-        emp::JuMP.Model,
-        sets,
-        par,
-        periods::TimeStructure;
-        offshore_transmission_cap::Bool = true,
-        natural_gas::Bool = false,
-        progress = nothing,
-    )
+    emp::JuMP.Model,
+    sets,
+    par,
+    periods::TimeStructure;
+    offshore_transmission_cap::Bool = true,
+    include_investment_constraints::Bool = true,
+    natural_gas::Bool = false,
+    progress = nothing,
+)
     @info "Creating constraints"
     _report_progress(progress, "Creating constraints")
 
@@ -231,9 +232,36 @@ function create_constraints(
             ) == load(par, n, t)
     )
 
-    create_generator_constraints(emp, sets, par, periods; progress)
-    create_storage_constraints(emp, sets, par, periods; progress)
-    create_transmission_constraints(emp, sets, par, periods; offshore_transmission_cap, progress)
+    if !include_investment_constraints
+        @info "Omitting investment-only constraints for fixed-capacity evaluation"
+        _report_progress(progress, "Omitting investment-only constraints")
+    end
+
+    create_generator_constraints(
+        emp,
+        sets,
+        par,
+        periods;
+        include_investment_constraints,
+        progress,
+    )
+    create_storage_constraints(
+        emp,
+        sets,
+        par,
+        periods;
+        include_investment_constraints,
+        progress,
+    )
+    create_transmission_constraints(
+        emp,
+        sets,
+        par,
+        periods;
+        offshore_transmission_cap,
+        include_investment_constraints,
+        progress,
+    )
     create_emission_constraints(emp, sets, par, periods; progress)
     natural_gas && create_natural_gas_constraints!(emp, sets, par, periods)
     return nothing
@@ -273,7 +301,14 @@ function duration_aggr(sp, spp, strat_periods)
     return sum(duration_strat(p) for p in strat_periods if p >= sp && p < spp; init = 0)
 end
 
-function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
+function create_generator_constraints(
+    emp::JuMP.Model,
+    sets,
+    par,
+    periods::TimeStructure;
+    include_investment_constraints::Bool = true,
+    progress = nothing,
+)
     @info "Creating generator constraints"
     _report_progress(progress, "Creating generator constraints")
     N = nodes(sets)
@@ -322,6 +357,8 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
     )
 
     create_bioenergy_constraints(emp, sets, par, periods; progress)
+
+    include_investment_constraints || return nothing
 
     # Tracking installed capacity from investments across strategic periods that are within
     # the technology lifetime
@@ -418,7 +455,14 @@ function create_bioenergy_constraints(
     return nothing
 end
 
-function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
+function create_storage_constraints(
+    emp::JuMP.Model,
+    sets,
+    par,
+    periods::TimeStructure;
+    include_investment_constraints::Bool = true,
+    progress = nothing,
+)
     @info "Creating storage constraints"
     _report_progress(progress, "Creating storage constraints")
     N = nodes(sets)
@@ -471,6 +515,8 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
         storage_op_cap_pow_dis[n in N, s in storages(sets, n), sp in SP, t in sp],
         storDischarge[n, s, t] <= storage_disc_to_char_ratio(par, s) * storCapPow[n, s, sp]
     )
+
+    include_investment_constraints || return nothing
 
     @info " - investment constraints"
     _report_progress(progress, "Creating storage installed-capacity tracking constraints")
@@ -533,7 +579,15 @@ function _offshore_endpoint(sets, m, n)
     return nothing
 end
 
-function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; offshore_transmission_cap::Bool = true, progress = nothing)
+function create_transmission_constraints(
+    emp::JuMP.Model,
+    sets,
+    par,
+    periods::TimeStructure;
+    offshore_transmission_cap::Bool = true,
+    include_investment_constraints::Bool = true,
+    progress = nothing,
+)
     @info "Creating transmission constraints"
     _report_progress(progress, "Creating transmission constraints")
     N = nodes(sets)
@@ -549,6 +603,8 @@ function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::Ti
         trans_cap[(m, n) in arcs(sets), sp in SP, t in sp],
         transOp[m, n, t] <= (is_bidir(m, n) ? transCap[m, n, sp] : transCap[n, m, sp])
     )
+
+    include_investment_constraints || return nothing
 
     # Tracking installed capacity from investments across strategic periods that are within
     # the technology lifetime
@@ -614,6 +670,14 @@ function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::Ti
         )
     end
 
+    # Deliberately after the investment-only early return, so it is omitted from
+    # fixed-capacity evaluation. Both sides of the inequality are constant once
+    # capacities are fixed, making the constraint redundant. Python does not merely
+    # tolerate this case -- it cannot build it: under OUT_OF_SAMPLE the installed
+    # capacities become Params, the expression collapses to a Boolean, and Pyomo
+    # raises InvalidConstraintError. So an out-of-sample run there is incompatible
+    # with north_sea entirely, and omitting the family here is the only behaviour
+    # that both matches the reference in effect and actually runs.
     if offshore_transmission_cap
         @info " - offshore wind-farm transmission capacity constraints"
         _report_progress(progress, "Creating offshore wind-farm transmission capacity constraints")

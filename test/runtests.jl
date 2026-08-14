@@ -17,6 +17,7 @@ include("test_scenario_csv.jl")
 include("test_annuity.jl")
 include("test_natural_gas.jl")
 include("test_out_of_sample.jl")
+include("test_oos_aggregation.jl")
 include("test_runner_performance.jl")
 include("test_runner_manifest.jl")
 include("test_runner_staging.jl")
@@ -91,7 +92,21 @@ end
 end
 
 @testset "Out-of-sample" begin
+    test_generate_single_oos_scenario_tree()
+    test_prepare_oos_experiment()
+    test_prepare_oos_execution_queue()
+    test_manage_oos_execution_queue()
+    test_fixed_investment_provenance_and_compatibility()
     test_fix_investments_from_results()
+    test_fix_only_investment_capacities()
+    test_fixed_investment_key_validation()
+    test_oos_omits_investment_only_constraints()
+end
+
+@testset "OOS aggregation" begin
+    test_oos_physical_time_weights()
+    test_summarize_and_aggregate_oos_results()
+    test_oos_aggregation_rejects_changed_investments()
 end
 
 @testset "Runner performance" begin
@@ -109,6 +124,9 @@ end
 @testset "Runner spec" begin
     test_resolve_julia_run_spec()
     test_gurobi_numeric_attribute_parsing()
+    test_resolve_single_tree_oos_run_spec()
+    test_reject_incomplete_oos_runner_options()
+    test_runner_solver_result_extraction()
 end
 
 @testset "Annuity" begin
