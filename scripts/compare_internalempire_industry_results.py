@@ -202,8 +202,11 @@ def julia_industry_investments(
             plant = row[f"{title}Plant"]
             period = int(row["Period"])
             life = lifetime[(plant,)]
+            # Exponent is -life, matching InternalEMPIRE b3186227 ("Fix WACC
+            # calculation to recover the capital cost over lifetime"), which corrected
+            # the steel, cement and ammonia plant annualizations this audit reproduces.
             annualized = (
-                wacc / (1 - (1 + wacc) ** (1 - life))
+                wacc / (1 - (1 + wacc) ** (-life))
                 * capital[(plant, str(period))]
                 + fixed[(plant, str(period))]
             )
