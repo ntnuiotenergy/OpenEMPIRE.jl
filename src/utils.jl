@@ -3,16 +3,16 @@
 # lists it, so a lookup must try both orders.
 _pair_value(dict, m, n) = haskey(dict, (m, n)) ? dict[(m, n)] : get(dict, (n, m), nothing)
 
-# Annuity (capital recovery) factor.
+# Annuity (capital recovery) factor: the present value of `life` annual payments of 1.
 #
-# Matches InternalEMPIRE, which uses the exponent `1 - life` rather than `-life`
-# (empire.py:1086 and the eleven other investment types). That spreads the capital over
-# `life - 1` payments instead of `life`, so the annual charge is slightly larger: +0.8%
-# at a 40-year lifetime, +8.6% at 10 years. Whether that is deliberate is an open
-# question with Stian (issues_for_stian.md); the port follows the reference until it is
-# settled, because the two cannot agree on an objective while they disagree here.
+# The exponent is `-life`, recovering the capital over the asset's full lifetime.
+# InternalEMPIRE previously used `1 - life`, spreading it over one payment fewer; that
+# was confirmed erroneous and corrected upstream in b3186227 ("Fix WACC calculation to
+# recover the capital cost over lifetime"), which changed all seventeen annualization
+# sites in empire.py. The port had mirrored the old convention deliberately and now
+# follows the corrected one.
 function annuity_factor(wacc, life)
-    return (1 - (1 + wacc)^(1 - life)) / wacc
+    return (1 - (1 + wacc)^(-life)) / wacc
 end
 
 function present_value(cost, discount_rate, years; at_start = true)
