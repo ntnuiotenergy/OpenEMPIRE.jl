@@ -135,13 +135,18 @@ function solve_julia_parity_fixture(
 
     model = JuMP.Model(HiGHS.Optimizer)
     JuMP.set_silent(model)
-    OpenEMPIRE.create_variables(model, sets, periods; natural_gas = true)
+    OpenEMPIRE.create_variables(
+        model, sets, periods; natural_gas = true, gas_transport_demand = true,
+    )
     OpenEMPIRE.create_constraints(
         model,
         sets,
         params,
         periods;
         natural_gas = true,
+        # This controlled fixture explicitly compares transport demand. Production
+        # gas-only runs leave it off to match InternalEMPIRE's Hydrogen-block gate.
+        gas_transport_demand = true,
     )
     strategic_period = only(collect(strat_periods(periods)))
     for node in ("A", "B")

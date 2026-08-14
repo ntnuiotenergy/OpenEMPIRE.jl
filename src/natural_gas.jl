@@ -88,7 +88,9 @@ end
 
 Declare and sparsely index the deterministic natural-gas operational variables.
 """
-function create_natural_gas_variables!(emp::JuMP.Model, sets, periods)
+function create_natural_gas_variables!(
+    emp::JuMP.Model, sets, periods; transport_demand::Bool = false,
+)
     has_natural_gas(sets) ||
         throw(ArgumentError("natural_gas=true requires non-empty natural-gas sets"))
 
@@ -149,9 +151,13 @@ function create_natural_gas_variables!(emp::JuMP.Model, sets, periods)
         unsafe_insertvar!(ngStorageCharge, node, operational_period)
         unsafe_insertvar!(ngStorageDischarge, node, operational_period)
     end
-    for node in onshore_nodes, operational_period in periods
-        unsafe_insertvar!(transportNaturalGasDemandMet, node, operational_period)
-        unsafe_insertvar!(transportNaturalGasDemandShed, node, operational_period)
+    # InternalEMPIRE declares these variables only in its Hydrogen block. Keeping
+    # them sparse and empty for gas-only runs avoids millions of free columns.
+    if transport_demand
+        for node in onshore_nodes, operational_period in periods
+            unsafe_insertvar!(transportNaturalGasDemandMet, node, operational_period)
+            unsafe_insertvar!(transportNaturalGasDemandShed, node, operational_period)
+        end
     end
     return nothing
 end
@@ -236,12 +242,16 @@ function _create_natural_gas_reserve_constraints!(
 end
 
 """
-    create_natural_gas_constraints!(model, sets, params, periods)
+    create_natural_gas_constraints!(model, sets, params, periods; transport_demand = false)
 
 Add InternalEMPIRE-compatible gas conversion, terminal, reserve, storage,
-pipeline, transport-demand, and nodal-balance constraints.
+pipeline, transport-demand, and nodal-balance constraints. InternalEMPIRE places
+natural-gas transport demand inside its Hydrogen block, so gas-only runs leave it
+disabled and Hydrogen runs opt in explicitly.
 """
-function create_natural_gas_constraints!(emp::JuMP.Model, sets, par, periods)
+function create_natural_gas_constraints!(
+    emp::JuMP.Model, sets, par, periods; transport_demand::Bool = false,
+)
     gas = par.NaturalGas
     period_context = _natural_gas_period_context(emp, periods, gas.gasScenarioCount)
     gas_nodes = natural_gas_nodes(sets)
@@ -338,7 +348,7 @@ function create_natural_gas_constraints!(emp::JuMP.Model, sets, par, periods)
                 collect(strat_periods(periods))[period_context[operational_period].strategic],
             ] : 0.0) <= natural_gas_pipeline_capacity(par, from, to),
     )
-    @constraint(
+    transport_demand && @constraint(
         emp,
         meet_transport_natural_gas_demand[
             node in onshore_nodes,
@@ -387,7 +397,7 @@ function create_natural_gas_constraints!(emp::JuMP.Model, sets, par, periods)
         ) +
         charge[node, operational_period] +
         (
-            node in natural_gas_onshore_nodes(sets) ?
+            transport_demand && node in natural_gas_onshore_nodes(sets) ?
             transport_met[node, operational_period] : 0.0
         ),
     )

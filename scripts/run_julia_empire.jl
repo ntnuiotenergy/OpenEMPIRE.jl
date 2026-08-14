@@ -125,11 +125,11 @@ function _optimizer_attributes(value, config, options)
         for (config_key, gurobi_name) in config_attribute_names
             _set_optimizer_attribute!(attributes, gurobi_name, get(config, config_key, nothing))
         end
-    float_config_attribute_names = (
-        "solver_feasibilitytol" => "FeasibilityTol",
-        "solver_barconvtol" => "BarConvTol",
-    )
-    for (config_key, gurobi_name) in float_config_attribute_names
+        float_config_attribute_names = (
+            "solver_feasibilitytol" => "FeasibilityTol",
+            "solver_barconvtol" => "BarConvTol",
+        )
+        for (config_key, gurobi_name) in float_config_attribute_names
             _set_optimizer_attribute!(
                 attributes,
                 gurobi_name,
@@ -207,6 +207,28 @@ function _progress_logger()
         step[] += 1
         elapsed = round(time() - run_start; digits = 1)
         _log_line("[progress $(step[]) | +$(elapsed)s | $(now())] $message")
+    end
+end
+
+function _write_raw_solution(model::JuMP.Model, path::AbstractString)
+    JuMP.has_values(model) ||
+        throw(ArgumentError("Cannot write a raw solution before the model has values."))
+    mkpath(dirname(path))
+    open(path, "w") do io
+        println(io, "variable,value")
+        for variable in JuMP.all_variables(model)
+            escaped_name = replace(JuMP.name(variable), '"' => "\"\"")
+            println(io, '"', escaped_name, "\",", JuMP.value(variable))
+        end
+    end
+    return path
+end
+
+function _solver_model_attribute(model::JuMP.Model, name::AbstractString)
+    try
+        return JuMP.MOI.get(JuMP.backend(model), Gurobi.ModelAttribute(String(name)))
+    catch
+        return nothing
     end
 end
 
@@ -460,21 +482,55 @@ function _solve_model!(
     manifest["timings"]["solve_seconds"] = solve_seconds
     progress("Solver optimization finished in $(round(solve_seconds; digits = 2)) seconds")
     termination = JuMP.termination_status(emp)
-    objective = JuMP.objective_value(emp)
-    progress("Computing objective component diagnostics")
-    objective_components = OpenEMPIRE.objective_component_values(
-        emp,
-        sets,
-        params,
-        periods,
-        Discounter(OpenEMPIRE.discount_rate(params), 1, periods),
-    )
+    primal_status = JuMP.primal_status(emp)
+    dual_status = JuMP.dual_status(emp)
+    has_values = JuMP.has_values(emp)
+    objective = has_values ? JuMP.objective_value(emp) : nothing
+    objective_bound = try
+        JuMP.objective_bound(emp)
+    catch
+        nothing
+    end
+    relative_gap = try
+        JuMP.relative_gap(emp)
+    catch
+        nothing
+    end
+    objective_components = if has_values
+        progress("Computing objective component diagnostics")
+        OpenEMPIRE.objective_component_values(
+            emp,
+            sets,
+            params,
+            periods,
+            Discounter(OpenEMPIRE.discount_rate(params), 1, periods),
+        )
+    else
+        nothing
+    end
+    solver_diagnostics = Dict{String, Any}()
+    if spec.solver_name == "Gurobi"
+        for attribute in ("BarIterCount", "ConstrVio", "DualVio", "ComplVio")
+            attribute_value = _solver_model_attribute(emp, attribute)
+            attribute_value === nothing ||
+                (solver_diagnostics[attribute] = attribute_value)
+        end
+    end
     println("Solve seconds: $(round(solve_seconds; digits = 2))")
     println("Termination status: $termination")
+    println("Primal status: $primal_status")
+    println("Dual status: $dual_status")
     println("Objective value: $objective")
-    println("Objective components:")
-    for (name, value) in pairs(objective_components)
-        println("  $name: $value")
+    println("Objective bound: $objective_bound")
+    println("Relative gap: $relative_gap")
+    for (name, value) in sort!(collect(solver_diagnostics); by = first)
+        println("Gurobi $name: $value")
+    end
+    if objective_components !== nothing
+        println("Objective components:")
+        for (name, value) in pairs(objective_components)
+            println("  $name: $value")
+        end
     end
     flush(stdout)
     if JuMP.is_solved_and_feasible(emp)
@@ -500,11 +556,28 @@ function _solve_model!(
         println("Solution CSVs written to: $output_dir")
         flush(stdout)
         progress("Solution CSV tables written to $output_dir")
+        if _config_bool(spec.run_config, "write_raw_solution", false)
+            raw_solution_path = joinpath(spec.result_dir, "raw_solution.csv")
+            progress("Writing complete raw variable solution")
+            _write_raw_solution(emp, raw_solution_path)
+            println("Raw variable solution written to: $raw_solution_path")
+            flush(stdout)
+        end
     else
         println("Solution CSVs skipped because the solved model is not feasible.")
         flush(stdout)
     end
-    return (; termination, objective, objective_components, solve_seconds)
+    return (;
+        termination,
+        primal_status,
+        dual_status,
+        objective,
+        objective_bound,
+        relative_gap,
+        objective_components,
+        solver_diagnostics,
+        solve_seconds,
+    )
 end
 
 function _write_perf_report(
@@ -616,14 +689,29 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
     solution = if spec.optimize
         _solve_model!(spec, manifest, perf_phases, emp, sets, params, periods, progress)
     else
-        (termination = nothing, objective = nothing, objective_components = nothing, solve_seconds = 0.0)
+        (
+            termination = nothing,
+            primal_status = nothing,
+            dual_status = nothing,
+            objective = nothing,
+            objective_bound = nothing,
+            relative_gap = nothing,
+            objective_components = nothing,
+            solver_diagnostics = Dict{String, Any}(),
+            solve_seconds = 0.0,
+        )
     end
     termination = solution.termination
     objective = solution.objective
     objective_components = solution.objective_components
     manifest["solution"] = Dict{String, Any}(
         "termination_status" => termination === nothing ? "not_optimized" : string(termination),
+        "primal_status" => solution.primal_status === nothing ? "not_optimized" : string(solution.primal_status),
+        "dual_status" => solution.dual_status === nothing ? "not_optimized" : string(solution.dual_status),
         "objective_value" => objective === nothing ? "not_optimized" : objective,
+        "objective_bound" => solution.objective_bound === nothing ? "unavailable" : solution.objective_bound,
+        "relative_gap" => solution.relative_gap === nothing ? "unavailable" : solution.relative_gap,
+        "solver_diagnostics" => solution.solver_diagnostics,
         "objective_components" => objective_components === nothing ? nothing :
             Dict{String, Any}(string(name) => value for (name, value) in pairs(objective_components)),
     )
@@ -640,6 +728,10 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
     else
         ["objective_component_$name=$value" for (name, value) in pairs(objective_components)]
     end
+    solver_diagnostic_lines = [
+        "solver_diagnostic_$name=$value" for
+        (name, value) in sort!(collect(solution.solver_diagnostics); by = first)
+    ]
     progress("Writing run summary")
     summary_path = _write_summary(
         joinpath(spec.result_dir, "summary.txt"),
@@ -661,9 +753,13 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
             "build_seconds=$build_seconds",
             "solve_seconds=$(solution.solve_seconds)",
             "termination_status=$(termination === nothing ? "not_optimized" : string(termination))",
+            "primal_status=$(solution.primal_status === nothing ? "not_optimized" : string(solution.primal_status))",
+            "dual_status=$(solution.dual_status === nothing ? "not_optimized" : string(solution.dual_status))",
             "objective_value=$(objective === nothing ? "not_optimized" : string(objective))",
+            "objective_bound=$(solution.objective_bound === nothing ? "unavailable" : string(solution.objective_bound))",
+            "relative_gap=$(solution.relative_gap === nothing ? "unavailable" : string(solution.relative_gap))",
             "end_time=$(now())",
-        ], component_lines),
+        ], solver_diagnostic_lines, component_lines),
     )
     println("Summary written to: $summary_path")
     manifest["status"] = "complete"

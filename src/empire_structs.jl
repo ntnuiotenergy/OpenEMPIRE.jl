@@ -126,6 +126,7 @@ Base.@kwdef mutable struct EmpireParams
     genInitCap::Dict{Tuple{String, String}, TimeProfile}         = Dict{Tuple{String, String}, TimeProfile}()
     genMaxBuiltCap::Dict{Tuple{String, String}, TimeProfile}     = Dict{Tuple{String, String}, TimeProfile}()
     genMaxInstalledCapRaw::Dict{Tuple{String, String}, Float64}  = Dict{Tuple{String, String}, Float64}()
+    genMaxInstalledCapByPeriod::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
     genMaxInstalledCap::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
     genMaxBiomethaneAvailability::Dict{String, TimeProfile}      = Dict{String, TimeProfile}()
     genRampUpCap::Dict{String, Float64}                          = Dict{String, Float64}()
@@ -829,6 +830,7 @@ function _check_hydrogen_params!(
     periods === nothing && return
     period_ids = Set(1:length(strat_periods(periods)))
     expected_plant_periods = Set((plant, period) for plant in reformer_plants for period in period_ids)
+    expected_storage_periods = Set((storage, period) for storage in storage_set for period in period_ids)
     expected_terminal_periods = Set(
         (node, terminal, period) for (node, terminal) in terminal_pairs for period in period_ids
     )
@@ -849,6 +851,8 @@ function _check_hydrogen_params!(
         ("reformerElectricityUse", expected_plant_periods, Set(keys(hydrogen.reformerElectricityUse))),
         ("reformerEmissionFactor", expected_plant_periods, Set(keys(hydrogen.reformerEmissionFactor))),
         ("reformerCO2CaptureFactor", expected_plant_periods, Set(keys(hydrogen.reformerCO2CaptureFactor))),
+        ("storageCapitalCost", expected_storage_periods, Set(keys(hydrogen.storageCapitalCost))),
+        ("storageFixedOMCost", expected_storage_periods, Set(keys(hydrogen.storageFixedOMCost))),
         ("terminalInitialCapacity", expected_terminal_periods, Set(keys(hydrogen.terminalInitialCapacity))),
         ("terminalCapitalCost", expected_terminal_periods, Set(keys(hydrogen.terminalCapitalCost))),
         ("terminalFixedOMCost", expected_terminal_periods, Set(keys(hydrogen.terminalFixedOMCost))),
@@ -962,6 +966,7 @@ function validate(
             ("genScaleInitCap", par.genScaleInitCap),
             ("genInitCap", par.genInitCap),
             ("genMaxBuiltCap", par.genMaxBuiltCap),
+            ("genMaxInstalledCapByPeriod", par.genMaxInstalledCapByPeriod),
             ("genMaxInstalledCap", par.genMaxInstalledCap),
             ("genMaxBiomethaneAvailability", par.genMaxBiomethaneAvailability),
             ("transmissionInitCap", par.transmissionInitCap),
@@ -1090,6 +1095,7 @@ function validate(
         for (name, d) in (
                 ("genMaxBuiltCap", par.genMaxBuiltCap),
                 ("genMaxInstalledCapRaw", par.genMaxInstalledCapRaw),
+                ("genMaxInstalledCapByPeriod", par.genMaxInstalledCapByPeriod),
                 ("genMaxInstalledCap", par.genMaxInstalledCap),
             )
             _check_tuple_keys_in_sets!(errs, name, d, nset, "node", Set(techs(sets)), "technology")

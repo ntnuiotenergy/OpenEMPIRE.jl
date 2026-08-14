@@ -188,9 +188,15 @@ function preprocess_max_installed_cap(params::EmpireParams, sets, periods)
         for sp in strat_periods(periods)
             max_cap = get(params.genMaxInstalledCapRaw, (n, gt), DEFAULT_GEN_MAX_INST_CAP_RAW)
             init_cap = sum(gencap_init(params, n, g, sp) for g in generators_tech(sets, n, gt); init = 0)
-            if init_cap > max_cap
-                @warn "Initial capacity $init_cap for technology $gt at node $n exceeds maximum installed capacity $max_cap. Setting maximum installed capacity to initial capacity."
+            period_cap = haskey(params.genMaxInstalledCapByPeriod, (n, gt)) ?
+                         params.genMaxInstalledCapByPeriod[(n, gt)][sp] : 0.0
+            if max_cap <= init_cap
+                if init_cap > max_cap
+                    @warn "Initial capacity $init_cap for technology $gt at node $n exceeds maximum installed capacity $max_cap. Setting maximum installed capacity to initial capacity."
+                end
                 max_cap = init_cap
+            elseif init_cap < period_cap < max_cap
+                max_cap = period_cap
             end
             push!(vals, max_cap)
         end

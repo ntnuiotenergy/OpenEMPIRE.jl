@@ -1199,6 +1199,10 @@ function read_params_csv(
     )
     par.genMaxInstalledCapRaw =
         _read_float_by_pair_csv(_required_csv(dir, generator, "genMaxInstalledCapRaw.csv"))
+    let path = _optional_csv(dir, generator, "MaxInstalledCapacityByPeriod.csv")
+        path === nothing ||
+            (par.genMaxInstalledCapByPeriod = _read_strategic_profiles_pair_csv(path))
+    end
     let path = _optional_csv(dir, generator, "MaxBiomethaneAvailability.csv")
         path === nothing ||
             (par.genMaxBiomethaneAvailability = _read_strategic_profiles_csv(path))

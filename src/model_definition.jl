@@ -83,6 +83,7 @@ function create_variables(
     periods::TimeStruct.TimeStructure;
     natural_gas::Bool = false,
     hydrogen::Bool = false,
+    gas_transport_demand::Bool = hydrogen,
     progress = nothing,
 )
 
@@ -173,7 +174,9 @@ function create_variables(
     for n in N, t in T
         unsafe_insertvar!(loadShed, n, t)
     end
-    natural_gas && create_natural_gas_variables!(emp, sets, periods)
+    natural_gas && create_natural_gas_variables!(
+        emp, sets, periods; transport_demand = gas_transport_demand,
+    )
     hydrogen && create_hydrogen_variables!(emp, sets, periods)
     return
 end
@@ -215,6 +218,8 @@ function create_constraints(
     # transmission builders lives in the unmerged out-of-sample stack and is
     # deliberately not reproduced here, so this flag does not affect the base model.
     include_investment_constraints::Bool = true,
+    # InternalEMPIRE declares natural-gas transport demand in its Hydrogen block.
+    gas_transport_demand::Bool = hydrogen,
     progress = nothing,
 )
     @info "Creating constraints"
@@ -263,7 +268,9 @@ function create_constraints(
         progress,
     )
     create_emission_constraints(emp, sets, par, periods; hydrogen, progress)
-    natural_gas && create_natural_gas_constraints!(emp, sets, par, periods)
+    natural_gas && create_natural_gas_constraints!(
+        emp, sets, par, periods; transport_demand = gas_transport_demand,
+    )
     hydrogen && create_hydrogen_constraints!(
         emp,
         sets,

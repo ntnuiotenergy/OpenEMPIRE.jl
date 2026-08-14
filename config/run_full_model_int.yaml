@@ -16,7 +16,6 @@
 # dataset, converter and validator are delivered first so the module can be
 # reviewed against fixed, hash-verified inputs.
 
-
 use_temporary_directory: True                          # Specifies whether to use a temporary directory for operations
 temporary_directory: './'                              # Path to the temporary directory used for certain operations
 forecast_horizon_year: 2055                            # 2020 + 7 periods x 5 years

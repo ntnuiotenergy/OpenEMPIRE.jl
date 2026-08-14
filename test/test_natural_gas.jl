@@ -191,6 +191,7 @@ function _natural_gas_solved_fixture(
         sets,
         periods;
         natural_gas = natural_gas_gate,
+        gas_transport_demand = natural_gas_gate,
     )
     OpenEMPIRE.create_constraints(
         model,
@@ -198,6 +199,9 @@ function _natural_gas_solved_fixture(
         params,
         periods;
         natural_gas = natural_gas_gate,
+        # These fixtures exercise transport demand directly; production gas-only
+        # runs leave it off to match InternalEMPIRE's Hydrogen-block placement.
+        gas_transport_demand = natural_gas_gate,
     )
     strategic_period = only(collect(strat_periods(periods)))
     for node in ("A", "B")
@@ -631,13 +635,16 @@ function test_natural_gas_multi_period_scenario_weighting()
     )
 
     model = JuMP.Model()
-    OpenEMPIRE.create_variables(model, sets, periods; natural_gas = true)
+    OpenEMPIRE.create_variables(
+        model, sets, periods; natural_gas = true, gas_transport_demand = true,
+    )
     OpenEMPIRE.create_constraints(
         model,
         sets,
         params,
         periods;
         natural_gas = true,
+        gas_transport_demand = true,
     )
     discounter = OpenEMPIRE.Discounter(0.05, 1, periods)
     OpenEMPIRE.create_objective(model, sets, params, periods, discounter; natural_gas = true)

@@ -85,6 +85,7 @@ CORE_TABLES: dict[str, list[tuple[str, list[int], str, str]]] = {
         ("InitialCapacity", [0, 1, 2, 3], "Generator", "genInitCap"),
         ("MaxBuiltCapacity", [0, 1, 2, 3], "Generator", "genMaxBuiltCap"),
         ("MaxInstalledCapacity", [0, 1, 2], "Generator", "genMaxInstalledCapRaw"),
+        ("MaxInstalledCapacityByPeriod", [0, 1, 2, 3], "Generator", "MaxInstalledCapacityByPeriod"),
         ("MaxBiomethaneAvailability", [0, 1, 2], "Generator", "MaxBiomethaneAvailability"),
         ("RampRate", [0, 1], "Generator", "genRampUpCap"),
         ("GeneratorTypeAvailability", [0, 1], "Generator", "genCapAvailTypeRaw"),
@@ -178,7 +179,6 @@ EXTRA_CORE_TABLES: dict[str, list[tuple[str, list[int], str, str]]] = {
         ("NaturalGasDirectionalLines", [0, 1], "Sets", "NaturalGasDirectionalLines"),
     ],
     "Generator.xlsx": [
-        ("MaxInstalledCapacityByPeriod", [0, 1, 2, 3], "Generator", "MaxInstalledCapacityByPeriod"),
         ("CO2Captured", [0, 1], "Generator", "CO2Captured"),
     ],
     "Transmission.xlsx": [
@@ -555,6 +555,37 @@ FUEL_COST_FALLBACK_DATASET = "europe_v51"
 # objective uses of CCS transport-and-storage cost in empire.py. Remove this
 # bug-for-bug compatibility switch when the reference starts charging those inputs.
 INTERNALEMPIRE_OMITS_CCS_TRANSPORT_AND_STORAGE_COST = True
+
+# InternalEMPIRE declares lineEfficiency with a Pyomo default of 0.97. Materialize
+# omitted directional cells so regenerated CSV datasets preserve that behavior.
+INTERNALEMPIRE_LINE_EFFICIENCY_DEFAULT = "0.97"
+
+
+def materialize_line_efficiency_default(out: Path) -> None:
+    path = out / "Transmission" / "lineEfficiency.csv"
+    frame = pd.read_csv(path, dtype=str)
+    from_col, to_col, value_col = frame.columns
+    provided = {
+        (row[from_col], row[to_col]): row[value_col]
+        for _, row in frame.iterrows()
+    }
+    links = pd.read_csv(out / "Sets" / "DirectionalLink.csv", dtype=str)
+    records = []
+    added = 0
+    for _, row in links.iterrows():
+        key = (row.iloc[0], row.iloc[1])
+        value = provided.get(key)
+        if value is None:
+            value = INTERNALEMPIRE_LINE_EFFICIENCY_DEFAULT
+            added += 1
+        records.append({from_col: key[0], to_col: key[1], value_col: value})
+    write_csv(pd.DataFrame.from_records(records), path)
+    logger.info(
+        "Transmission/lineEfficiency.csv: materialized %d directional cells "
+        "(Pyomo default %s)",
+        added,
+        INTERNALEMPIRE_LINE_EFFICIENCY_DEFAULT,
+    )
 
 
 def fill_missing_gas_fuel_costs(out: Path, periods: int) -> None:
@@ -1119,8 +1150,8 @@ def write_readme(source: Path, extra_out: Path, dataset: str, periods: int) -> N
         "  `<Sheet>_extra.csv` holds the columns of a core sheet that the model does not",
         "  read (sources, commentary, intermediate calculations), prefixed by the sheet's",
         "  key columns. The other files are sheets of the core workbooks that only the",
-        "  internal modules read (`MaxInstalledCapacityByPeriod`, `Latitude`/`Longitude`,",
-        "  and the natural-gas and industry sets).",
+        "  internal modules read (`Latitude`/`Longitude` and the natural-gas and industry",
+        "  sets).",
         "- `CO2/`, `NaturalGas/`, `Hydrogen/`, `Industry/`, `Transport/`, `HeatModule/` —",
         "  module tables, extracted with the exact sheet/column selections in",
         "  `InternalEMPIRE/reader.py`.",
@@ -1199,6 +1230,7 @@ def main() -> None:
     convert_core_sets(source, out, extra_out, args.periods)
     convert_core_tables(source, out, extra_out, args.periods)
     materialize_pyomo_period_defaults(out, args.periods)
+    materialize_line_efficiency_default(out)
     fill_missing_gas_fuel_costs(out, args.periods)
     mirror_internalempire_ccs_cost_omission(out)
     copy_scenario_data(source, out, extra_out)

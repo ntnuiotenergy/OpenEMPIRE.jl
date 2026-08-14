@@ -42,6 +42,7 @@ function _write_toy_csv_dataset(root)
     _write_csv(joinpath(dataset, "Generator", "genInitCap.csv"), "Node,Generator,Period,Value\nA,gas,1,1\nA,wind,1,2\n")
     _write_csv(joinpath(dataset, "Generator", "genMaxBuiltCap.csv"), "Node,Technology,Period,Value\nA,thermal,1,1000\nA,renewable,1,1000\n")
     _write_csv(joinpath(dataset, "Generator", "genMaxInstalledCapRaw.csv"), "Node,Technology,Value\nA,thermal,1000\nA,renewable,1000\n")
+    _write_csv(joinpath(dataset, "Generator", "MaxInstalledCapacityByPeriod.csv"), "Node,Technology,Period,Value\nA,renewable,1,50\n")
     _write_csv(joinpath(dataset, "Generator", "genRampUpCap.csv"), "Generator,Value\ngas,1\nwind,1\n")
     _write_csv(joinpath(dataset, "Generator", "genCapAvailTypeRaw.csv"), "Generator,Value\ngas,1\nwind,1\n")
     _write_csv(joinpath(dataset, "Generator", "genCO2TypeFactor.csv"), "Generator,Value\ngas,0.2\nwind,0\n")
@@ -102,6 +103,8 @@ function test_read_csv_dataset()
         @test params.genRefInitCap[("A", "wind")] == 2.0
         @test params.genCapAvailType["wind"] == 1.0
         @test params.genCO2Content["gas"] == 0.2
+        period_profile = params.genMaxInstalledCapByPeriod[("A", "renewable")]
+        @test only(period_profile.vals).val == 50.0
         @test params.transmissionLength[("A", "B")] == 10.0
         @test params.storageChargeEff["battery"] == 0.9
         @test params.maxHydroNode["A"] == 0.0
@@ -113,6 +116,32 @@ function test_read_csv_dataset()
         sets3, _ = OpenEMPIRE.read_data(csv_dataset)
         @test OpenEMPIRE.generators(sets3) == ["gas", "wind"]
     end
+end
+
+function test_internalempire_generator_max_installed_cap_by_period()
+    periods = OpenEMPIRE.create_timestruct(
+        2, 5, 1, 1, 0, 0, 1; operational_hours_per_year = 1,
+    )
+    sets = OpenEMPIRE.EmpireSets(
+        Node = ["A"],
+        Generator = ["wind"],
+        Technology = ["renewable"],
+        GeneratorsOfTechnology = [("renewable", "wind")],
+        GeneratorsOfNode = [("A", "wind")],
+    )
+    params = OpenEMPIRE.EmpireParams(
+        genInitCap = Dict(("A", "wind") => StrategicProfile([10.0, 10.0])),
+        genMaxInstalledCapRaw = Dict(("A", "renewable") => 100.0),
+        genMaxInstalledCapByPeriod = Dict(
+            ("A", "renewable") => StrategicProfile([80.0, 0.0]),
+        ),
+    )
+
+    OpenEMPIRE.preprocess_max_installed_cap(params, sets, periods)
+
+    strategic_periods = collect(strat_periods(periods))
+    @test params.genMaxInstalledCap[("A", "renewable")][strategic_periods[1]] == 80.0
+    @test params.genMaxInstalledCap[("A", "renewable")][strategic_periods[2]] == 100.0
 end
 
 function test_read_bundled_csv_datasets()
@@ -289,6 +318,33 @@ function test_internalempire_missing_hydro_default()
         OpenEMPIRE.EmpireParams(),
         sets,
         Dict("internalempire_missing_hydro_raw_default_mw" => -1.0),
+    )
+end
+
+function test_internalempire_missing_line_efficiency_default()
+    sets = OpenEMPIRE.EmpireSets(
+        Node = ["A", "B", "C"],
+        DirectionalLink = [("A", "B"), ("B", "A"), ("B", "C")],
+    )
+    params = OpenEMPIRE.EmpireParams(
+        lineEfficiency = Dict(("A", "B") => 0.95),
+    )
+    config = Dict("internalempire_missing_line_efficiency_default" => 0.97)
+
+    OpenEMPIRE._fill_internalempire_missing_line_efficiency!(params, sets, config)
+
+    @test params.lineEfficiency[("A", "B")] == 0.95
+    @test params.lineEfficiency[("B", "A")] == 0.97
+    @test params.lineEfficiency[("B", "C")] == 0.97
+
+    unchanged = OpenEMPIRE.EmpireParams()
+    OpenEMPIRE._fill_internalempire_missing_line_efficiency!(unchanged, sets, Dict())
+    @test isempty(unchanged.lineEfficiency)
+
+    @test_throws ArgumentError OpenEMPIRE._fill_internalempire_missing_line_efficiency!(
+        OpenEMPIRE.EmpireParams(),
+        sets,
+        Dict("internalempire_missing_line_efficiency_default" => 1.01),
     )
 end
 
