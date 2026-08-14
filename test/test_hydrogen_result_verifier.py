@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +19,12 @@ assert SPEC is not None and SPEC.loader is not None
 VERIFIER = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = VERIFIER
 SPEC.loader.exec_module(VERIFIER)
+RUNNER_PATH = ROOT / "scripts" / "run_internalempire_hydrogen.py"
+RUNNER_SPEC = importlib.util.spec_from_file_location("hydrogen_internal_runner", RUNNER_PATH)
+assert RUNNER_SPEC is not None and RUNNER_SPEC.loader is not None
+RUNNER = importlib.util.module_from_spec(RUNNER_SPEC)
+sys.modules[RUNNER_SPEC.name] = RUNNER
+RUNNER_SPEC.loader.exec_module(RUNNER)
 
 
 def write_table(path: Path, delimiter: str, header: tuple[str, ...], row: tuple[object, ...]) -> None:
@@ -28,6 +35,12 @@ def write_table(path: Path, delimiter: str, header: tuple[str, ...], row: tuple[
 
 
 class HydrogenResultVerifierTests(unittest.TestCase):
+    def test_reference_wrapper_retains_solved_instance_for_certificate(self) -> None:
+        source = "def run_empire():\n    del results, instance, model\n"
+        patched = RUNNER.retain_instance_for_certificate(source)
+        self.assertIn("    return instance\n", patched)
+        self.assertNotIn("del results, instance, model", patched)
+
     def test_gurobi_certification_and_suboptimal_failure_are_parsed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -153,6 +166,74 @@ class HydrogenResultVerifierTests(unittest.TestCase):
             transmission = VERIFIER.transmission_report_components(transmission_report)
             self.assertEqual(transmission["transmission_investment"], 10.0)
             self.assertEqual(transmission["co2_pipeline_investment"], 40.0)
+
+    def test_missing_component_certificate_remains_a_failure_without_stopping_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            internal = root / "internal"
+            julia_run = root / "julia"
+            output = julia_run / "output"
+            internal.mkdir()
+            output.mkdir(parents=True)
+
+            (internal / "results_objective.csv").write_text(
+                "Objective function value:1000\n", encoding="utf-8"
+            )
+            summary_lines = [
+                "objective_value=1000",
+                "termination_status=OPTIMAL",
+                *(f"objective_component_{name}=1" for name in VERIFIER.OBJECTIVE_COMPONENTS),
+            ]
+            (julia_run / "summary.txt").write_text(
+                "\n".join(summary_lines) + "\n", encoding="utf-8"
+            )
+            log = root / "solver.log"
+            log.write_text(
+                "Optimize a model with 100 rows, 200 columns and 300 nonzeros\n"
+                "Presolved: 10 rows, 20 columns, 30 nonzeros\n"
+                "   5   1.00000000e+03  9.99990000e+02  1.00e-04  2.00e-04  3.00e-05  12s\n"
+                "Barrier solved model in 5 iterations and 12.00 seconds\n"
+                "Optimal objective 1.000000000e+03\n",
+                encoding="utf-8",
+            )
+            args = [
+                "verify",
+                "--internal-results", str(internal),
+                "--internal-components", str(root / "missing.csv"),
+                "--julia-run", str(julia_run),
+                "--internal-log", str(log),
+                "--julia-log", str(log),
+            ]
+            reports = {
+                "generator_investment": 1.0,
+                "storage_investment": 1.0,
+                "transmission_investment": 1.0,
+                "offshore_converter_investment": 1.0,
+                "generator_operation": 1.0,
+            }
+            transmission = {
+                "transmission_investment": 1.0,
+                "hydrogen_pipeline_investment": 1.0,
+                "repurposed_pipeline_investment": 1.0,
+                "co2_pipeline_investment": 1.0,
+            }
+            hydrogen = {
+                "electrolyzer_investment": 1.0,
+                "reformer_investment": 1.0,
+                "hydrogen_pipeline_investment": 1.0,
+                "hydrogen_storage_investment": 1.0,
+                "hydrogen_import_investment": 1.0,
+                "reported_hydrogen_investment": 5.0,
+            }
+            with (
+                mock.patch.object(sys, "argv", args),
+                mock.patch.object(VERIFIER, "investment_components", return_value=reports),
+                mock.patch.object(VERIFIER, "generator_operation_component", return_value=1.0),
+                mock.patch.object(VERIFIER, "transmission_report_components", return_value=transmission),
+                mock.patch.object(VERIFIER, "hydrogen_investment_report", return_value=hydrogen),
+                mock.patch.object(VERIFIER, "compare_capacities", return_value=(True, ["capacities: OK"])),
+            ):
+                self.assertEqual(VERIFIER.main(), 1)
 
 
 if __name__ == "__main__":

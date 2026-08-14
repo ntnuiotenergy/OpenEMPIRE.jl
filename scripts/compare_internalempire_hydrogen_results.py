@@ -803,30 +803,40 @@ def main() -> int:
     )
 
     print("\nObjective components (InternalEMPIRE certificate vs Julia summary.txt):")
-    internal_costs = internal_components(internal_component_path)
     julia_costs = julia_components(summary)
-    component_differences = []
-    for name in OBJECTIVE_COMPONENTS:
-        left = internal_costs[name]
-        right = julia_costs[name]
-        component_differences.append(right - left)
+    internal_costs = None
+    if internal_component_path.is_file():
+        internal_costs = internal_components(internal_component_path)
+        component_differences = []
+        for name in OBJECTIVE_COMPONENTS:
+            left = internal_costs[name]
+            right = julia_costs[name]
+            component_differences.append(right - left)
+            print(
+                f"{name}: ie={left:.17g} jl={right:.17g} "
+                f"signed_jl_minus_ie={right - left:.17g} "
+                f"abs={abs(left - right):.17g} ppm={ppm_difference(left, right):.9f}"
+            )
         print(
-            f"{name}: ie={left:.17g} jl={right:.17g} "
-            f"signed_jl_minus_ie={right - left:.17g} "
-            f"abs={abs(left - right):.17g} ppm={ppm_difference(left, right):.9f}"
+            f"component_signed_sum={math.fsum(component_differences):.17g} "
+            f"objective_signed_difference={julia_total - internal_total:.17g} "
+            f"internal_component_sum_error={math.fsum(internal_costs.values()) - internal_total:.17g} "
+            f"julia_component_sum_error={math.fsum(julia_costs.values()) - julia_total:.17g}"
         )
-    print(
-        f"component_signed_sum={math.fsum(component_differences):.17g} "
-        f"objective_signed_difference={julia_total - internal_total:.17g} "
-        f"internal_component_sum_error={math.fsum(internal_costs.values()) - internal_total:.17g} "
-        f"julia_component_sum_error={math.fsum(julia_costs.values()) - julia_total:.17g}"
-    )
-
-    component_sum_tolerance = max(1.0, max(abs(internal_total), abs(julia_total)) * 1e-12)
-    component_sums_ok = (
-        abs(math.fsum(internal_costs.values()) - internal_total) <= component_sum_tolerance
-        and abs(math.fsum(julia_costs.values()) - julia_total) <= component_sum_tolerance
-    )
+        component_sum_tolerance = max(
+            1.0, max(abs(internal_total), abs(julia_total)) * 1e-12
+        )
+        component_sums_ok = (
+            abs(math.fsum(internal_costs.values()) - internal_total)
+            <= component_sum_tolerance
+            and abs(math.fsum(julia_costs.values()) - julia_total)
+            <= component_sum_tolerance
+        )
+    else:
+        component_sums_ok = False
+        print(f"internal_component_certificate=MISSING path={internal_component_path}")
+        for name in OBJECTIVE_COMPONENTS:
+            print(f"{name}: ie=MISSING jl={julia_costs[name]:.17g}")
 
     print("\nInternalEMPIRE cost-report reconciliation:")
     base_reports = investment_components(internal_root)
@@ -847,11 +857,18 @@ def main() -> int:
         "generator_operation",
     ):
         report_value = base_reports[name]
-        print(
-            f"{name}: certificate={internal_costs[name]:.17g} "
-            f"report={report_value:.17g} "
-            f"signed_report_minus_certificate={report_value - internal_costs[name]:.17g}"
-        )
+        if internal_costs is None:
+            print(
+                f"{name}: certificate=MISSING report={report_value:.17g} "
+                f"julia={julia_costs[name]:.17g} "
+                f"signed_julia_minus_report={julia_costs[name] - report_value:.17g}"
+            )
+        else:
+            print(
+                f"{name}: certificate={internal_costs[name]:.17g} "
+                f"report={report_value:.17g} "
+                f"signed_report_minus_certificate={report_value - internal_costs[name]:.17g}"
+            )
     print(
         "extended_transmission_report: "
         + " ".join(f"{name}={value:.17g}" for name, value in transmission_reports.items())
@@ -867,12 +884,21 @@ def main() -> int:
             transmission_reports["co2_pipeline_investment"],
         )
     )
-    print(
-        f"hydrogen_investment_certificate={internal_costs['hydrogen_investment']:.17g} "
-        f"report_covered_hydrogen_investment={covered_hydrogen_investment:.17g} "
-        f"unreported_co2_storage_investment="
-        f"{internal_costs['hydrogen_investment'] - covered_hydrogen_investment:.17g}"
-    )
+    if internal_costs is None:
+        print(
+            "hydrogen_investment_certificate=MISSING "
+            f"report_covered_hydrogen_investment={covered_hydrogen_investment:.17g} "
+            f"julia_hydrogen_investment={julia_costs['hydrogen_investment']:.17g} "
+            f"signed_julia_minus_report_covered="
+            f"{julia_costs['hydrogen_investment'] - covered_hydrogen_investment:.17g}"
+        )
+    else:
+        print(
+            f"hydrogen_investment_certificate={internal_costs['hydrogen_investment']:.17g} "
+            f"report_covered_hydrogen_investment={covered_hydrogen_investment:.17g} "
+            f"unreported_co2_storage_investment="
+            f"{internal_costs['hydrogen_investment'] - covered_hydrogen_investment:.17g}"
+        )
 
     print("\nInstalled capacities by stable key (operational dispatch excluded):")
     capacities_ok, capacity_lines = compare_capacities(
