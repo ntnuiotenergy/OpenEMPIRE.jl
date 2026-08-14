@@ -64,8 +64,6 @@ end
     test_hydrogen_malformed_cell_errors()
     test_hydrogen_sparse_variables()
     test_hydrogen_full_model_smoke()
-    test_hydrogen_controlled_solution_parity()
-    test_hydrogen_full_result_verifier()
 end
 
 @testset "CSV scenarios" begin

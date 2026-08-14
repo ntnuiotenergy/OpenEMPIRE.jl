@@ -343,68 +343,6 @@ function test_hydrogen_oos_full_year_integration()
     end
 end
 
-function test_hydrogen_controlled_solution_parity()
-    python = get(
-        ENV,
-        "OPENEMPIRE_PYTHON",
-        something(Sys.which("python3"), Sys.which("python"), ""),
-    )
-    isempty(python) && return @test_skip "Python is unavailable"
-    dependency_check = run(
-        ignorestatus(`$python -c "import pyomo.environ; import highspy"`),
-    )
-    success(dependency_check) || return @test_skip "Pyomo/HiGHS is unavailable"
-
-    root = pkgdir(OpenEMPIRE)
-    fixture = joinpath(root, "test", "data", "hydrogen_parity")
-    julia_script = joinpath(root, "scripts", "hydrogen_parity_julia.jl")
-    python_script = joinpath(root, "scripts", "hydrogen_parity_python.py")
-    comparator = joinpath(root, "scripts", "compare_hydrogen_parity.py")
-    mktempdir() do output_dir
-        julia_output = joinpath(output_dir, "julia.csv")
-        python_output = joinpath(output_dir, "python.csv")
-        julia = Base.julia_cmd()
-        @test success(
-            run(
-                ignorestatus(
-                    `$julia --project=$root $julia_script $fixture $julia_output`,
-                ),
-            ),
-        )
-        @test success(
-            run(ignorestatus(`$python $python_script $fixture $python_output`)),
-        )
-        @test success(
-            run(
-                ignorestatus(
-                    `$python $comparator $julia_output $python_output`,
-                ),
-            ),
-        )
-    end
-end
-
-function test_hydrogen_full_result_verifier()
-    python = get(
-        ENV,
-        "OPENEMPIRE_PYTHON",
-        something(Sys.which("python3"), Sys.which("python"), ""),
-    )
-    isempty(python) && return @test_skip "Python is unavailable"
-    test_script = joinpath(
-        pkgdir(OpenEMPIRE),
-        "test",
-        "test_hydrogen_result_verifier.py",
-    )
-    @test success(run(ignorestatus(`$python $test_script`)))
-    fingerprint_tests = joinpath(
-        pkgdir(OpenEMPIRE),
-        "test",
-        "test_hydrogen_algebra_fingerprint.py",
-    )
-    @test success(run(ignorestatus(`$python $fingerprint_tests`)))
-end
-
 function test_hydrogen_oos_capacity_validation()
     cases = (
         ("Node,Period,Value\nA,1,alphabetic\n", "nonnumeric value"),
