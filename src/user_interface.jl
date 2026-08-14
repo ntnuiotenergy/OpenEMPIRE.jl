@@ -196,12 +196,21 @@ function generate_scenarios(
     return periods, sets, params
 end
 
+"""
+    create_model(config_file, data_folder; include_investment_constraints = true, ...)
+
+Build an EMPIRE model from configuration and input data. Set
+`include_investment_constraints = false` for out-of-sample evaluation after
+strategic capacities from a completed investment run will be fixed on the
+model.
+"""
 function create_model(
     config_file,
     data_folder;
     optimizer = nothing,
     optimizer_attributes = (),
     include_string_names = true,
+    include_investment_constraints::Bool = true,
     input_format = :auto,
     scenario_rng = Random.default_rng(),
     progress = nothing,
@@ -271,6 +280,7 @@ function create_model(
         periods;
         natural_gas = gas_enabled,
         offshore_transmission_cap = _offshore_transmission_cap_setting(config),
+        include_investment_constraints,
         hydrogen = hydrogen_enabled,
         gas_transport_demand = hydrogen_enabled,
         progress,

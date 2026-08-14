@@ -210,14 +210,9 @@ function create_constraints(
     par,
     periods::TimeStructure;
     offshore_transmission_cap::Bool = true,
+    include_investment_constraints::Bool = true,
     natural_gas::Bool = false,
     hydrogen::Bool = false,
-    # Forwarded to the Hydrogen module only. Hydrogen pins ten capacity families in
-    # its controlled parity fixture, and its own investment constraints would make
-    # those pins infeasible. The equivalent gating for the generator, storage and
-    # transmission builders lives in the unmerged out-of-sample stack and is
-    # deliberately not reproduced here, so this flag does not affect the base model.
-    include_investment_constraints::Bool = true,
     # InternalEMPIRE declares natural-gas transport demand in its Hydrogen block.
     gas_transport_demand::Bool = natural_gas,
     progress = nothing,
@@ -256,8 +251,27 @@ function create_constraints(
             load(par, n, t)
     )
 
-    create_generator_constraints(emp, sets, par, periods; include_investment_constraints, progress)
-    create_storage_constraints(emp, sets, par, periods; include_investment_constraints, progress)
+    if !include_investment_constraints
+        @info "Omitting investment-only constraints for fixed-capacity evaluation"
+        _report_progress(progress, "Omitting investment-only constraints")
+    end
+
+    create_generator_constraints(
+        emp,
+        sets,
+        par,
+        periods;
+        include_investment_constraints,
+        progress,
+    )
+    create_storage_constraints(
+        emp,
+        sets,
+        par,
+        periods;
+        include_investment_constraints,
+        progress,
+    )
     create_transmission_constraints(
         emp,
         sets,
@@ -684,6 +698,14 @@ function create_transmission_constraints(
         )
     end
 
+    # Deliberately after the investment-only early return, so it is omitted from
+    # fixed-capacity evaluation. Both sides of the inequality are constant once
+    # capacities are fixed, making the constraint redundant. Python does not merely
+    # tolerate this case -- it cannot build it: under OUT_OF_SAMPLE the installed
+    # capacities become Params, the expression collapses to a Boolean, and Pyomo
+    # raises InvalidConstraintError. So an out-of-sample run there is incompatible
+    # with north_sea entirely, and omitting the family here is the only behaviour
+    # that both matches the reference in effect and actually runs.
     if offshore_transmission_cap
         @info " - offshore wind-farm transmission capacity constraints"
         _report_progress(progress, "Creating offshore wind-farm transmission capacity constraints")
