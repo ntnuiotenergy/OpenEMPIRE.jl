@@ -82,6 +82,7 @@ function create_variables(
     sets,
     periods::TimeStruct.TimeStructure;
     natural_gas::Bool = false,
+    hydrogen::Bool = false,
     progress = nothing,
 )
 
@@ -173,6 +174,7 @@ function create_variables(
         unsafe_insertvar!(loadShed, n, t)
     end
     natural_gas && create_natural_gas_variables!(emp, sets, periods)
+    hydrogen && create_hydrogen_variables!(emp, sets, periods)
     return
 end
 
@@ -183,6 +185,7 @@ function create_objective(
     periods::TimeStructure,
     discounter::Discounter;
     natural_gas::Bool = false,
+    hydrogen::Bool = false,
     progress = nothing,
 )
     @info "Creating objective function"
@@ -193,16 +196,27 @@ function create_objective(
     return @objective(emp, Min, sum(values(components)))
 end
 
+# `include_investment_constraints` gates the investment-linking constraints. The
+# controlled parity fixtures pin every investment variable to zero and set installed
+# capacity exogenously; the linking constraints make that infeasible. Defaults to
+# true, so ordinary model building is unchanged.
 # Create all constraints in the model
 function create_constraints(
-        emp::JuMP.Model,
-        sets,
-        par,
-        periods::TimeStructure;
-        offshore_transmission_cap::Bool = true,
-        natural_gas::Bool = false,
-        progress = nothing,
-    )
+    emp::JuMP.Model,
+    sets,
+    par,
+    periods::TimeStructure;
+    offshore_transmission_cap::Bool = true,
+    natural_gas::Bool = false,
+    hydrogen::Bool = false,
+    # Forwarded to the Hydrogen module only. Hydrogen pins ten capacity families in
+    # its controlled parity fixture, and its own investment constraints would make
+    # those pins infeasible. The equivalent gating for the generator, storage and
+    # transmission builders lives in the unmerged out-of-sample stack and is
+    # deliberately not reproduced here, so this flag does not affect the base model.
+    include_investment_constraints::Bool = true,
+    progress = nothing,
+)
     @info "Creating constraints"
     _report_progress(progress, "Creating constraints")
 
@@ -215,6 +229,10 @@ function create_constraints(
     storDischarge = emp[:storDischarge]
     trOp = emp[:transmissionOperational]
     shed = emp[:loadShed]
+    if hydrogen
+        _sector_period_context(emp, periods, par.NaturalGas.gasScenarioCount)
+        _hydrogen_electricity_context!(emp, sets, par)
+    end
 
     @info "Flow balance constraints: $((length(N)) * length(T))"
     _report_progress(progress, "Creating flow-balance constraints ($(length(N) * length(T)) constraints)")
@@ -228,14 +246,31 @@ function create_constraints(
                 natural_gas ?
                 natural_gas_pipeline_electricity_demand(emp, sets, par, n, t) :
                 0.0
-            ) == load(par, n, t)
+            ) -
+            (hydrogen ? hydrogen_electricity_demand(emp, sets, par, n, t) : 0.0) ==
+            load(par, n, t)
     )
 
-    create_generator_constraints(emp, sets, par, periods; progress)
-    create_storage_constraints(emp, sets, par, periods; progress)
-    create_transmission_constraints(emp, sets, par, periods; offshore_transmission_cap, progress)
-    create_emission_constraints(emp, sets, par, periods; progress)
+    create_generator_constraints(emp, sets, par, periods; include_investment_constraints, progress)
+    create_storage_constraints(emp, sets, par, periods; include_investment_constraints, progress)
+    create_transmission_constraints(
+        emp,
+        sets,
+        par,
+        periods;
+        offshore_transmission_cap,
+        include_investment_constraints,
+        progress,
+    )
+    create_emission_constraints(emp, sets, par, periods; hydrogen, progress)
     natural_gas && create_natural_gas_constraints!(emp, sets, par, periods)
+    hydrogen && create_hydrogen_constraints!(
+        emp,
+        sets,
+        par,
+        periods;
+        include_investment_constraints,
+    )
     return nothing
 
 end
@@ -273,7 +308,14 @@ function duration_aggr(sp, spp, strat_periods)
     return sum(duration_strat(p) for p in strat_periods if p >= sp && p < spp; init = 0)
 end
 
-function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
+function create_generator_constraints(
+    emp::JuMP.Model,
+    sets,
+    par,
+    periods::TimeStructure;
+    include_investment_constraints::Bool = true,
+    progress = nothing,
+)
     @info "Creating generator constraints"
     _report_progress(progress, "Creating generator constraints")
     N = nodes(sets)
@@ -322,6 +364,8 @@ function create_generator_constraints(emp::JuMP.Model, sets, par, periods::TimeS
     )
 
     create_bioenergy_constraints(emp, sets, par, periods; progress)
+
+    include_investment_constraints || return nothing
 
     # Tracking installed capacity from investments across strategic periods that are within
     # the technology lifetime
@@ -418,7 +462,14 @@ function create_bioenergy_constraints(
     return nothing
 end
 
-function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
+function create_storage_constraints(
+    emp::JuMP.Model,
+    sets,
+    par,
+    periods::TimeStructure;
+    include_investment_constraints::Bool = true,
+    progress = nothing,
+)
     @info "Creating storage constraints"
     _report_progress(progress, "Creating storage constraints")
     N = nodes(sets)
@@ -471,6 +522,8 @@ function create_storage_constraints(emp::JuMP.Model, sets, par, periods::TimeStr
         storage_op_cap_pow_dis[n in N, s in storages(sets, n), sp in SP, t in sp],
         storDischarge[n, s, t] <= storage_disc_to_char_ratio(par, s) * storCapPow[n, s, sp]
     )
+
+    include_investment_constraints || return nothing
 
     @info " - investment constraints"
     _report_progress(progress, "Creating storage installed-capacity tracking constraints")
@@ -533,7 +586,15 @@ function _offshore_endpoint(sets, m, n)
     return nothing
 end
 
-function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; offshore_transmission_cap::Bool = true, progress = nothing)
+function create_transmission_constraints(
+    emp::JuMP.Model,
+    sets,
+    par,
+    periods::TimeStructure;
+    offshore_transmission_cap::Bool = true,
+    include_investment_constraints::Bool = true,
+    progress = nothing,
+)
     @info "Creating transmission constraints"
     _report_progress(progress, "Creating transmission constraints")
     N = nodes(sets)
@@ -549,6 +610,8 @@ function create_transmission_constraints(emp::JuMP.Model, sets, par, periods::Ti
         trans_cap[(m, n) in arcs(sets), sp in SP, t in sp],
         transOp[m, n, t] <= (is_bidir(m, n) ? transCap[m, n, sp] : transCap[n, m, sp])
     )
+
+    include_investment_constraints || return nothing
 
     # Tracking installed capacity from investments across strategic periods that are within
     # the technology lifetime
@@ -641,7 +704,14 @@ function _opscenario_count(sp)
     return length(opscenarios(first_rp))
 end
 
-function create_emission_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
+function create_emission_constraints(
+    emp::JuMP.Model,
+    sets,
+    par,
+    periods::TimeStructure;
+    hydrogen::Bool = false,
+    progress = nothing,
+)
     par.CO2cap === nothing && return nothing
 
     @info "Creating emission constraints"
@@ -651,6 +721,7 @@ function create_emission_constraints(emp::JuMP.Model, sets, par, periods::TimeSt
 
     N = nodes(sets)
     genOp = emp[:genOperational]
+    strategic_index = Dict(period => index for (index, period) in enumerate(SP))
 
     @variable(emp, nodeEmission[N, sp in SP, sc in 1:_opscenario_count(sp)])
 
@@ -669,7 +740,19 @@ function create_emission_constraints(emp::JuMP.Model, sets, par, periods::TimeSt
                 if scenario_index == sc
                 for t in scenario;
                 init = 0.0
-            )
+            ) +
+            (hydrogen && n in hydrogen_sets(sets).ReformerLocation ?
+                sum(
+                    multiple_strat(sp, t) *
+                    par.Hydrogen.reformerEmissionFactor[(plant, strategic_index[sp])] *
+                    emp[:reformerHydrogenTon][n, plant, t]
+                    for plant in hydrogen_sets(sets).ReformerPlant
+                    for rp in repr_periods(sp)
+                    for (scenario_index, scenario) in enumerate(opscenarios(rp))
+                    if scenario_index == sc
+                    for t in scenario;
+                    init = 0.0,
+                ) : 0.0)
     )
 
     return @constraint(
@@ -690,6 +773,14 @@ function objective_component_expressions(emp::JuMP.Model, sets, par, periods::Ti
     shed = emp[:loadShed]
     genOp = emp[:genOperational]
     gas_costs = natural_gas_objective_expressions(emp, sets, par, periods, discounter)
+    hydrogen_costs = has_hydrogen(sets) ?
+                     hydrogen_objective_expressions(emp, sets, par, periods, discounter) :
+                     (
+        investment = JuMP.AffExpr(0.0),
+        terminal_import = JuMP.AffExpr(0.0),
+        reformer_operation = JuMP.AffExpr(0.0),
+        transport_shedding = JuMP.AffExpr(0.0),
+    )
 
     # `total += coef * var` rebuilds the whole expression each iteration, making an
     # n-term sum O(n^2) in both time and allocation. `add_to_expression!` appends in
@@ -769,6 +860,10 @@ function objective_component_expressions(emp::JuMP.Model, sets, par, periods::Ti
         generator_operation = accumulate_operational(generator_operation_expr),
         natural_gas_terminal_import = gas_costs.terminal_import,
         natural_gas_transport_shedding = gas_costs.transport_shedding,
+        hydrogen_investment = hydrogen_costs.investment,
+        hydrogen_terminal_import = hydrogen_costs.terminal_import,
+        hydrogen_reformer_operation = hydrogen_costs.reformer_operation,
+        hydrogen_transport_shedding = hydrogen_costs.transport_shedding,
     )
 end
 

@@ -64,20 +64,28 @@ function read_data(
     input::AbstractString;
     format::Symbol = :auto,
     natural_gas::Bool = false,
+    hydrogen::Bool = false,
     weather_scenarios::Int = 1,
     gas_scenarios::Int = 1,
 )
+    hydrogen && !natural_gas && throw(ArgumentError(
+        "hydrogen=true requires natural_gas=true",
+    ))
+    hydrogen && gas_scenarios != 1 && throw(ArgumentError(
+        "Deterministic Hydrogen requires number_of_gas_scenarios=1",
+    ))
     actual_format = format === :auto ? _detect_input_format(input) : format
     if actual_format === :csv
         return read_data_csv(
             input;
             natural_gas,
+            hydrogen,
             weather_scenarios,
             gas_scenarios,
         )
     elseif actual_format === :xlsx
-        natural_gas && throw(ArgumentError(
-            "The natural-gas module requires the validated CSV dataset layout",
+        (natural_gas || hydrogen) && throw(ArgumentError(
+            "The natural-gas and Hydrogen modules require the validated CSV dataset layout",
         ))
         return read_data_xlsx(input)
     end
@@ -88,6 +96,7 @@ function read_data(
     dataset::CsvDataset;
     format::Symbol = :csv,
     natural_gas::Bool = false,
+    hydrogen::Bool = false,
     weather_scenarios::Int = 1,
     gas_scenarios::Int = 1,
 )
@@ -96,6 +105,7 @@ function read_data(
     return read_data_csv(
         dataset_path(dataset);
         natural_gas,
+        hydrogen,
         weather_scenarios,
         gas_scenarios,
     )
@@ -105,15 +115,176 @@ function read_data(
     dataset::XlsxDataset;
     format::Symbol = :xlsx,
     natural_gas::Bool = false,
+    hydrogen::Bool = false,
     weather_scenarios::Int = 1,
     gas_scenarios::Int = 1,
 )
     format in (:auto, :xlsx) ||
         throw(ArgumentError("XlsxDataset can only be read with format :auto or :xlsx, got: $format"))
-    natural_gas && throw(ArgumentError(
-        "The natural-gas module requires the validated CSV dataset layout",
+    (natural_gas || hydrogen) && throw(ArgumentError(
+        "The natural-gas and Hydrogen modules require the validated CSV dataset layout",
     ))
     return read_data_xlsx(dataset_path(dataset))
+end
+
+function _validated_sector_rows(
+    path::AbstractString,
+    expected_headers::Tuple,
+    sector::AbstractString,
+)
+    try
+        rows = collect(CSV.File(path; normalizenames = false, strict = true))
+        isempty(rows) && throw(ArgumentError("$sector CSV is empty: $path"))
+        headers = Tuple(String.(propertynames(first(rows))))
+        headers == expected_headers || throw(ArgumentError(
+            "$sector CSV $path has headers $(collect(headers)); expected " *
+            "$(collect(expected_headers))",
+        ))
+        return rows
+    catch err
+        err isa ArgumentError && rethrow()
+        throw(ArgumentError("Failed to parse $sector CSV $path: $(sprint(showerror, err))"))
+    end
+end
+
+function _sector_string(path, row::Int, column::AbstractString, value, sector::AbstractString)
+    _is_blank(value) && throw(ArgumentError(
+        "Malformed $sector CSV $path data row $row column $column: empty value",
+    ))
+    return _string_cell(value)
+end
+
+function _sector_float(path, row::Int, column::AbstractString, value, sector::AbstractString)
+    _is_blank(value) && throw(ArgumentError(
+        "Malformed $sector CSV $path data row $row column $column: empty value",
+    ))
+    parsed = try
+        value isa Real ? Float64(value) : parse(Float64, strip(string(value)))
+    catch
+        throw(ArgumentError(
+            "Malformed $sector CSV $path data row $row column $column: " *
+            "expected a number, got $(repr(value))",
+        ))
+    end
+    isfinite(parsed) || throw(ArgumentError(
+        "Malformed $sector CSV $path data row $row column $column: value must be finite",
+    ))
+    return parsed
+end
+
+function _sector_nonnegative(path, row, column, value, sector)
+    parsed = _sector_float(path, row, column, value, sector)
+    parsed >= 0 || throw(ArgumentError(
+        "Malformed $sector CSV $path data row $row column $column: " *
+        "value must be non-negative, got $parsed",
+    ))
+    return parsed
+end
+
+function _sector_period(path, row, column, value, sector)
+    parsed = _sector_float(path, row, column, value, sector)
+    isinteger(parsed) || throw(ArgumentError(
+        "Malformed $sector CSV $path data row $row column $column: expected an integer",
+    ))
+    period = try
+        Int(parsed)
+    catch
+        throw(ArgumentError(
+            "Malformed $sector CSV $path data row $row column $column: integer is out of range",
+        ))
+    end
+    period > 0 || throw(ArgumentError(
+        "Malformed $sector CSV $path data row $row column $column: value must be positive",
+    ))
+    return period
+end
+
+function _insert_unique_sector!(values, key, value, path, row, sector)
+    haskey(values, key) && throw(ArgumentError(
+        "Duplicate $sector key $key in $path at data row $row",
+    ))
+    values[key] = value
+    return values
+end
+
+function _read_sector_vector(path, header, sector)
+    rows = _validated_sector_rows(path, (String(header),), sector)
+    values = String[
+        _sector_string(path, index + 1, header, row[1], sector)
+        for (index, row) in enumerate(rows)
+    ]
+    allunique(values) || throw(ArgumentError("Duplicate $sector value in $path"))
+    return values
+end
+
+function _read_hydrogen_sets_csv(dir, generators, links, gas_sets)
+    component = "Hydrogen"
+    production_nodes = _read_sector_vector(
+        _required_csv(dir, component, "ProductionNodes.csv"), "ProductionNodes", component,
+    )
+    generator_path = _required_csv(dir, component, "HydrogenGenerators.csv")
+    hydrogen_generators = _read_sector_vector(generator_path, "HydrogenGenerator", component)
+    derived_generators = sort([g for g in generators if occursin("hydrogen", lowercase(g))])
+    sort(hydrogen_generators) == derived_generators || throw(ArgumentError(
+        "Hydrogen generator CSV $generator_path does not match the case-insensitive " *
+        "generator-name rule; file=$(sort(hydrogen_generators)), derived=$derived_generators",
+    ))
+    terminal_pairs_path = _required_csv(dir, component, "H2TerminalsOfNode.csv")
+    terminal_pair_rows = _validated_sector_rows(
+        terminal_pairs_path, ("H2TerminalNodes", "H2Terminals"), component,
+    )
+    terminal_pairs = Tuple{String, String}[]
+    for (index, row) in enumerate(terminal_pair_rows)
+        push!(terminal_pairs, (
+            _sector_string(terminal_pairs_path, index + 1, "H2TerminalNodes", row[1], component),
+            _sector_string(terminal_pairs_path, index + 1, "H2Terminals", row[2], component),
+        ))
+    end
+    allunique(terminal_pairs) || throw(ArgumentError("Duplicate Hydrogen key in $terminal_pairs_path"))
+    production_set = Set(production_nodes)
+    hydrogen_links = Arc[(from, to) for (from, to) in links
+                         if from in production_set && to in production_set]
+    hydrogen_corridors = Set(Arc[minmax(from, to) for (from, to) in hydrogen_links])
+    repurposable_links = Arc[
+        (from, to) for (from, to) in gas_sets.DirectionalLink
+        if minmax(from, to) in hydrogen_corridors
+    ]
+    onshore = gas_sets.OnshoreNode
+    co2_links = Arc[(from, to) for (from, to) in links if from in onshore && to in onshore]
+    storage_capacity_path = _required_csv(dir, component, "StorageMaxCapacity.csv")
+    storage_capacity = _read_sector_pair_values(
+        storage_capacity_path,
+        ("Node", "H2Storage", "Max_capacity_[ton]"),
+        component,
+    )
+    return HydrogenSets(
+        ProductionNode = production_nodes,
+        Generator = hydrogen_generators,
+        ReformerLocation = _read_sector_vector(
+            _required_csv(dir, component, "ReformerLocations.csv"), "ReformerLocations", component,
+        ),
+        ReformerPlant = _read_sector_vector(
+            _required_csv(dir, component, "ReformerPlants.csv"), "ReformerPlants", component,
+        ),
+        Storage = _read_sector_vector(
+            _required_csv(dir, component, "H2Storages.csv"), "H2Storages", component,
+        ),
+        StoragesOfNode = collect(keys(storage_capacity)),
+        TerminalNode = _read_sector_vector(
+            _required_csv(dir, component, "H2TerminalNodes.csv"), "H2TerminalNodes", component,
+        ),
+        Terminal = _read_sector_vector(
+            _required_csv(dir, component, "H2Terminals.csv"), "H2Terminals", component,
+        ),
+        TerminalsOfNode = terminal_pairs,
+        CO2SequestrationNode = _read_sector_vector(
+            _required_csv(dir, "CO2", "CO2SequestrationNodes.csv"),
+            "CO2SequestrationNodes", "CO2",
+        ),
+        DirectionalLink = hydrogen_links,
+        CO2DirectionalLink = co2_links,
+        RepurposableGasCorridor = repurposable_links,
+    )
 end
 
 function _is_csv_dataset(path::AbstractString)
@@ -446,7 +617,11 @@ end
 
 Read EMPIRE sets from a CSV dataset folder using the Python/CSV dataset layout.
 """
-function read_sets_csv(dir::AbstractString; natural_gas::Bool = false)
+function read_sets_csv(
+    dir::AbstractString;
+    natural_gas::Bool = false,
+    hydrogen::Bool = false,
+)
     @info "Reading CSV sets from $dir"
 
     sets_dir = "Sets"
@@ -469,6 +644,10 @@ function read_sets_csv(dir::AbstractString; natural_gas::Bool = false)
             wind_farm_path = legacy_path
         end
     end
+    base_links = _read_tuple2_csv(_required_csv(dir, sets_dir, "DirectionalLink.csv"))
+    hydrogen_sets = hydrogen ?
+                    _read_hydrogen_sets_csv(dir, generators, base_links, gas_sets) :
+                    HydrogenSets()
 
     return OpenEMPIRE.EmpireSets(
         Generator = generators,
@@ -481,7 +660,7 @@ function read_sets_csv(dir::AbstractString; natural_gas::Bool = false)
         Node = _read_vector_csv(_required_csv(dir, sets_dir, "Node.csv")),
         OffshoreWindFarmNode = isnothing(wind_farm_path) ? String[] : _read_vector_csv(wind_farm_path),
         OffshoreEnergyHub = isnothing(energy_hub_path) ? String[] : _read_vector_csv(energy_hub_path),
-        DirectionalLink = _read_tuple2_csv(_required_csv(dir, sets_dir, "DirectionalLink.csv")),
+        DirectionalLink = base_links,
         TransmissionType = _read_vector_csv(_required_csv(dir, sets_dir, "TransmissionType.csv")),
         TransmissionTypeOfDirectionalLink =
             _read_tuple3_csv(_required_csv(dir, sets_dir, "TransmissionTypeOfDirectionalLink.csv")),
@@ -489,6 +668,7 @@ function read_sets_csv(dir::AbstractString; natural_gas::Bool = false)
         GeneratorsOfNode = _read_tuple2_csv(_required_csv(dir, sets_dir, "GeneratorsOfNode.csv")),
         StoragesOfNode = _read_tuple2_csv(_required_csv(dir, sets_dir, "StoragesOfNode.csv")),
         NaturalGas = gas_sets,
+        Hydrogen = hydrogen_sets,
     )
 end
 
@@ -682,6 +862,306 @@ function _read_natural_gas_params_csv(
     return gas
 end
 
+function _read_sector_scalar(path, header, sector; positive::Bool = false)
+    rows = _validated_sector_rows(path, (String(header),), sector)
+    length(rows) == 1 || throw(ArgumentError(
+        "$sector scalar CSV $path must contain exactly one data row",
+    ))
+    value = _sector_nonnegative(path, 2, header, only(rows)[1], sector)
+    positive && value <= 0 && throw(ArgumentError(
+        "$sector scalar CSV $path column $header must be positive",
+    ))
+    return value
+end
+
+function _read_sector_period_values(path, headers, sector)
+    rows = _validated_sector_rows(path, headers, sector)
+    values = Dict{Int, Float64}()
+    for (index, row) in enumerate(rows)
+        row_number = index + 1
+        period = _sector_period(path, row_number, headers[1], row[1], sector)
+        value = _sector_nonnegative(path, row_number, headers[2], row[2], sector)
+        _insert_unique_sector!(values, period, value, path, row_number, sector)
+    end
+    return values
+end
+
+function _read_sector_plant_period_values(path, headers, sector; signed::Bool = false)
+    rows = _validated_sector_rows(path, headers, sector)
+    values = Dict{HydrogenPlantPeriod, Float64}()
+    for (index, row) in enumerate(rows)
+        row_number = index + 1
+        key = (
+            _sector_string(path, row_number, headers[1], row[1], sector),
+            _sector_period(path, row_number, headers[2], row[2], sector),
+        )
+        value = signed ?
+                _sector_float(path, row_number, headers[3], row[3], sector) :
+                _sector_nonnegative(path, row_number, headers[3], row[3], sector)
+        _insert_unique_sector!(values, key, value, path, row_number, sector)
+    end
+    return values
+end
+
+function _read_sector_node_period_values(path, headers, sector)
+    rows = _validated_sector_rows(path, headers, sector)
+    values = Dict{HydrogenNodePeriod, Float64}()
+    for (index, row) in enumerate(rows)
+        row_number = index + 1
+        key = (
+            _sector_string(path, row_number, headers[1], row[1], sector),
+            _sector_period(path, row_number, headers[2], row[2], sector),
+        )
+        value = _sector_nonnegative(path, row_number, headers[3], row[3], sector)
+        _insert_unique_sector!(values, key, value, path, row_number, sector)
+    end
+    return values
+end
+
+function _read_sector_pair_values(path, headers, sector)
+    rows = _validated_sector_rows(path, headers, sector)
+    values = Dict{Tuple{String, String}, Float64}()
+    for (index, row) in enumerate(rows)
+        row_number = index + 1
+        key = (
+            _sector_string(path, row_number, headers[1], row[1], sector),
+            _sector_string(path, row_number, headers[2], row[2], sector),
+        )
+        value = _sector_nonnegative(path, row_number, headers[3], row[3], sector)
+        _insert_unique_sector!(values, key, value, path, row_number, sector)
+    end
+    return values
+end
+
+function _read_sector_string_values(path, headers, sector; positive::Bool = false)
+    rows = _validated_sector_rows(path, headers, sector)
+    values = Dict{String, Float64}()
+    for (index, row) in enumerate(rows)
+        row_number = index + 1
+        key = _sector_string(path, row_number, headers[1], row[1], sector)
+        value = _sector_nonnegative(path, row_number, headers[2], row[2], sector)
+        positive && value <= 0 && throw(ArgumentError(
+            "Malformed $sector CSV $path data row $row_number column $(headers[2]): " *
+            "value must be positive",
+        ))
+        _insert_unique_sector!(values, key, value, path, row_number, sector)
+    end
+    return values
+end
+
+function _read_hydrogen_terminal_period_values(path, headers, sector; multiplier = 1.0)
+    rows = _validated_sector_rows(path, headers, sector)
+    values = Dict{HydrogenNodeTerminalPeriod, Float64}()
+    for (index, row) in enumerate(rows)
+        row_number = index + 1
+        key = (
+            _sector_string(path, row_number, headers[1], row[1], sector),
+            _sector_string(path, row_number, headers[2], row[2], sector),
+            _sector_period(path, row_number, headers[3], row[3], sector),
+        )
+        value = multiplier * _sector_nonnegative(
+            path, row_number, headers[4], row[4], sector,
+        )
+        _insert_unique_sector!(values, key, value, path, row_number, sector)
+    end
+    return values
+end
+
+function _read_hydrogen_constants(path)
+    sector = "Hydrogen"
+    headers = ("Parameter", "Value", "Unit", "Source")
+    rows = _validated_sector_rows(path, headers, sector)
+    values = Dict{String, Float64}()
+    for (index, row) in enumerate(rows)
+        row_number = index + 1
+        key = _sector_string(path, row_number, "Parameter", row[1], sector)
+        value = _sector_nonnegative(path, row_number, "Value", row[2], sector)
+        _sector_string(path, row_number, "Unit", row[3], sector)
+        _sector_string(path, row_number, "Source", row[4], sector)
+        _insert_unique_sector!(values, key, value, path, row_number, sector)
+    end
+    expected = Set((
+        "hydrogen_mwh_per_ton",
+        "storage_initial_fraction",
+        "storage_compression_mwh_per_ton",
+        "pipeline_compressor_static_mwh_per_ton",
+        "hydrogen_pipeline_lifetime_years",
+        "pipeline_leakage_fraction_per_km",
+        "reformer_ramp_fraction_per_hour",
+        "repurpose_cost_factor",
+        "repurpose_energy_flow_factor",
+        "terminal_eur_per_kg_to_eur_per_ton",
+        "hours_per_year",
+    ))
+    Set(keys(values)) == expected || throw(ArgumentError(
+        "Hydrogen constants inventory mismatch in $path; expected $(sort!(collect(expected))), " *
+        "got $(sort!(collect(keys(values))))",
+    ))
+    return values
+end
+
+function _read_hydrogen_params_csv(dir::AbstractString)
+    component = "Hydrogen"
+    h2path(filename) = _required_csv(dir, component, filename)
+    co2path(filename) = _required_csv(dir, "CO2", filename)
+    constants = _read_hydrogen_constants(h2path("Constants.csv"))
+    hydrogen = HydrogenParams(
+        electrolyzerCapitalCost = _read_sector_period_values(
+            h2path("ElectrolyzerPlantCapitalCost.csv"),
+            ("Period", "elyzerCapCost_(€/MWe)"), component,
+        ),
+        electrolyzerFixedOMCost = _read_sector_period_values(
+            h2path("ElectrolyzerFixedOMCost.csv"), ("Period", "eLyzerOMCost"), component,
+        ),
+        electrolyzerPowerUse = _read_sector_period_values(
+            h2path("ElectrolyzerPowerUse.csv"),
+            ("Period", "El_consumption_(MWh/ton)"), component,
+        ),
+        electrolyzerLifetime = _read_sector_scalar(
+            h2path("ElectrolyzerLifetime.csv"), "elyzerLifetime", component; positive = true,
+        ),
+        reformerCapitalCost = _read_sector_plant_period_values(
+            h2path("ReformerCapitalCost.csv"),
+            ("Plant_type", "Period", "Capital_cost_[EUR/MW_H2]"), component,
+        ),
+        reformerFixedOMCost = _read_sector_plant_period_values(
+            h2path("ReformerFixedOMCost.csv"),
+            ("Plant_type", "Period", "Fixed_O&M_cost_[EUR/MW_H2]"), component,
+        ),
+        reformerVariableOMCost = _read_sector_plant_period_values(
+            h2path("ReformerVariableOMCost.csv"),
+            ("Plant_type", "Period", "Variable_O&M_cost_[EUR/ton_H2]"), component,
+        ),
+        reformerEfficiency = _read_sector_plant_period_values(
+            h2path("ReformerEfficiency.csv"),
+            ("Plant_type", "Period", "LHV_Efficiency"), component,
+        ),
+        reformerElectricityUse = _read_sector_plant_period_values(
+            h2path("ReformerElectricityUse.csv"),
+            ("Plant_type", "Period", "Electricity_demand_[MWh_/_ton]"), component;
+            signed = true,
+        ),
+        reformerEmissionFactor = _read_sector_plant_period_values(
+            h2path("ReformerEmissionFactor.csv"),
+            ("Plant_type", "Period", "Ton_CO2_emissions_per_ton_H2"), component,
+        ),
+        reformerCO2CaptureFactor = _read_sector_plant_period_values(
+            h2path("ReformerCO2CaptureFactor.csv"),
+            ("Plant_type", "Period", "Ton_CO2_emissions_captured_per_ton_H2"), component,
+        ),
+        pipelineCapitalCost = _read_sector_period_values(
+            h2path("PipelineCapitalCost.csv"), ("Period", "Capital_cost"), component,
+        ),
+        pipelineOMCostPerKM = _read_sector_period_values(
+            h2path("PipelineOMCostPerKM.csv"), ("Period", "O&M_Cost"), component,
+        ),
+        pipelineCompressorPowerUsage = _read_sector_scalar(
+            h2path("PipelineCompressorPowerUsage.csv"), "Electricity_usage", component,
+        ),
+        storageCapitalCost = _read_sector_plant_period_values(
+            h2path("StorageCapitalCost.csv"),
+            ("H2Storage", "Period", "Capital_cost_(EUR/ton)"), component,
+        ),
+        storageFixedOMCost = _read_sector_plant_period_values(
+            h2path("StorageFixedOMCost.csv"),
+            ("H2Storage", "Period", "O&M_cost_per_kg_H2"), component,
+        ),
+        storageLifetime = _read_sector_string_values(
+            h2path("StorageLifetime.csv"), ("H2Storage", "Lifetime"), component; positive = true,
+        ),
+        storageMaxCapacity = _read_sector_pair_values(
+            h2path("StorageMaxCapacity.csv"),
+            ("Node", "H2Storage", "Max_capacity_[ton]"), component,
+        ),
+        terminalInitialCapacity = _read_hydrogen_terminal_period_values(
+            h2path("H2TerminalCapacity.csv"),
+            ("H2TerminalNodes", "H2Terminals", "Period", "Capacity_(ton/hr)"), component,
+        ),
+        terminalCapitalCost = _read_hydrogen_terminal_period_values(
+            h2path("H2TerminalCapitalCost.csv"),
+            ("H2TerminalNodes", "H2Terminals", "Period", "CapitalCost_(EUR/ton/h)"), component,
+        ),
+        terminalFixedOMCost = _read_hydrogen_terminal_period_values(
+            h2path("H2TerminalFixedOM.csv"),
+            ("H2TerminalNodes", "H2Terminals", "Period", "FixedOM_(EUR/ton/h)"), component,
+        ),
+        terminalPrice = _read_hydrogen_terminal_period_values(
+            h2path("H2TerminalPrice.csv"),
+            ("H2TerminalNodes", "H2Terminals", "Period", "Cost_(EUR/kg)"), component;
+            multiplier = constants["terminal_eur_per_kg_to_eur_per_ton"],
+        ),
+        terminalLifetime = _read_sector_string_values(
+            h2path("H2TerminalLifetime.csv"), ("H2Terminals", "importLifetime"), component;
+            positive = true,
+        ),
+        electricityTransportDemand = _read_sector_node_period_values(
+            _required_csv(dir, "Transport", "ElectricityDemand.csv"),
+            ("Node", "Period", "Electricity_demand_[MWh/yr]"), "Hydrogen transport",
+        ),
+        hydrogenTransportDemand = _read_sector_node_period_values(
+            _required_csv(dir, "Transport", "HydrogenDemand.csv"),
+            ("Node", "Period", "Hydrogen_demand_[MWh/yr]"), "Hydrogen transport",
+        ),
+        generatorCO2Captured = _read_sector_string_values(
+            _required_csv(dir, "Generator", "genCO2Captured.csv"),
+            ("GeneratorTechnology", "CO2Capctured_in_tCO2/GJ"), "Hydrogen CO2",
+        ),
+        co2StorageMaxCapacity = _read_sector_node_period_values(
+            co2path("StorageMaxCapacity.csv"),
+            ("Node", "Period", "Storage_max_injection_capacity_(ton/hour)"), "CO2",
+        ),
+        co2MaxSequestrationCapacity = _read_sector_string_values(
+            co2path("MaxSequestrationCapacity.csv"),
+            ("Node", "Max_sequestration_capacity_[tons]"), "CO2",
+        ),
+        co2StorageSiteCapitalCost = _read_sector_string_values(
+            co2path("StorageSiteCapitalCost.csv"),
+            ("Node", "Site_Development_Cost_euro/(t/hr)"), "CO2",
+        ),
+        co2StorageSiteFixedOMCost = _read_sector_string_values(
+            co2path("StorageSiteFixedOMCost.csv"),
+            ("Node", "Field_Fixed_OM_Cost_euro/(t/hr)"), "CO2",
+        ),
+        co2PipelineCapitalCost = _read_sector_scalar(
+            co2path("PipelineCapitalCost.csv"), "Capital_cost_(euro/(km_*_tons/hr)", "CO2",
+        ),
+        co2PipelineFixedOMCost = _read_sector_scalar(
+            co2path("PipelineFixedOM.csv"), "O&M_Cost_(euro/km)", "CO2",
+        ),
+        co2PipelineElectricityUsage = _read_sector_scalar(
+            co2path("PipelineElectricityUsage.csv"), "Power_usage_[MWh/ton]", "CO2",
+        ),
+        co2PipelineLifetime = _read_sector_scalar(
+            co2path("PipelineLifetime.csv"), "Lifetime_(years)", "CO2"; positive = true,
+        ),
+        hydrogenMWhPerTon = constants["hydrogen_mwh_per_ton"],
+        storageInitialFraction = constants["storage_initial_fraction"],
+        storageCompressionMWhPerTon = constants["storage_compression_mwh_per_ton"],
+        pipelineCompressorStaticMWhPerTon = constants["pipeline_compressor_static_mwh_per_ton"],
+        pipelineLifetime = constants["hydrogen_pipeline_lifetime_years"],
+        pipelineLeakageFractionPerKM = constants["pipeline_leakage_fraction_per_km"],
+        reformerRampFractionPerHour = constants["reformer_ramp_fraction_per_hour"],
+        repurposeCostFactor = constants["repurpose_cost_factor"],
+        repurposeEnergyFlowFactor = constants["repurpose_energy_flow_factor"],
+        terminalEURPerKgToEURPerTon = constants["terminal_eur_per_kg_to_eur_per_ton"],
+        hoursPerYear = constants["hours_per_year"],
+    )
+    lifetime_path = h2path("ReformerLifetime.csv")
+    lifetime_rows = _validated_sector_rows(
+        lifetime_path, ("elyzerLifetime", "SMRLifetime"), component,
+    )
+    for (index, row) in enumerate(lifetime_rows)
+        row_number = index + 1
+        plant = _sector_string(lifetime_path, row_number, "elyzerLifetime", row[1], component)
+        value = _sector_nonnegative(lifetime_path, row_number, "SMRLifetime", row[2], component)
+        value > 0 || throw(ArgumentError("Hydrogen reformer lifetime must be positive for $plant"))
+        _insert_unique_sector!(
+            hydrogen.reformerLifetime, plant, value, lifetime_path, row_number, component,
+        )
+    end
+    return hydrogen
+end
+
 """
     read_params_csv(dir)
 
@@ -691,6 +1171,7 @@ layout. Extra source/unit columns are ignored; files are parsed by position.
 function read_params_csv(
     dir::AbstractString;
     natural_gas::Bool = false,
+    hydrogen::Bool = false,
     weather_scenarios::Int = 1,
     gas_scenarios::Int = 1,
 )
@@ -799,6 +1280,7 @@ function read_params_csv(
             gas_scenarios,
         )
     end
+    hydrogen && (par.Hydrogen = _read_hydrogen_params_csv(dir))
 
     return par
 end
@@ -811,10 +1293,15 @@ Read sets and parameters from a CSV EMPIRE dataset folder.
 function read_data_csv(
     dir::AbstractString;
     natural_gas::Bool = false,
+    hydrogen::Bool = false,
     weather_scenarios::Int = 1,
     gas_scenarios::Int = 1,
 )
-    sets = read_sets_csv(dir; natural_gas)
-    par = read_params_csv(dir; natural_gas, weather_scenarios, gas_scenarios)
+    hydrogen && !natural_gas && throw(ArgumentError("hydrogen=true requires natural_gas=true"))
+    hydrogen && gas_scenarios != 1 && throw(ArgumentError(
+        "Deterministic Hydrogen requires number_of_gas_scenarios=1",
+    ))
+    sets = read_sets_csv(dir; natural_gas, hydrogen)
+    par = read_params_csv(dir; natural_gas, hydrogen, weather_scenarios, gas_scenarios)
     return (sets, par)
 end

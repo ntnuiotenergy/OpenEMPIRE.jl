@@ -1,0 +1,12 @@
+Parameter,Value,Unit,Source
+hydrogen_mwh_per_ton,33.3,MWh/tonne,empire.py hydrogen_MWhPerTon
+storage_initial_fraction,0.5,fraction,empire.py hydrogenStorageInitOperational
+storage_compression_mwh_per_ton,0.333,MWh/tonne,empire.py 0.01*33.3
+pipeline_compressor_static_mwh_per_ton,1.0,MWh/tonne,empire.py hard-coded
+hydrogen_pipeline_lifetime_years,40.0,years,empire.py Param default
+pipeline_leakage_fraction_per_km,5e-06,fraction/km,empire.py 0.005e-3
+reformer_ramp_fraction_per_hour,0.1,fraction/hour,empire.py hard-coded
+repurpose_cost_factor,0.25,fraction,approved port configuration
+repurpose_energy_flow_factor,0.8,fraction,approved port configuration
+terminal_eur_per_kg_to_eur_per_ton,1000.0,kg/tonne,empire.py hard-coded
+hours_per_year,8760.0,hour/year,empire.py hard-coded

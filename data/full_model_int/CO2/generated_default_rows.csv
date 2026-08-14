@@ -1,0 +1,25 @@
+Node,Period,Storage_max_injection_capacity_(ton/hour),Reason
+NO2,4,0.0,InternalEMPIRE Param default for absent source key
+NO2,5,0.0,InternalEMPIRE Param default for absent source key
+NO2,6,0.0,InternalEMPIRE Param default for absent source key
+NO2,7,0.0,InternalEMPIRE Param default for absent source key
+NO5,4,0.0,InternalEMPIRE Param default for absent source key
+NO5,5,0.0,InternalEMPIRE Param default for absent source key
+NO5,6,0.0,InternalEMPIRE Param default for absent source key
+NO5,7,0.0,InternalEMPIRE Param default for absent source key
+NO3,4,0.0,InternalEMPIRE Param default for absent source key
+NO3,5,0.0,InternalEMPIRE Param default for absent source key
+NO3,6,0.0,InternalEMPIRE Param default for absent source key
+NO3,7,0.0,InternalEMPIRE Param default for absent source key
+GreatBrit.,4,0.0,InternalEMPIRE Param default for absent source key
+GreatBrit.,5,0.0,InternalEMPIRE Param default for absent source key
+GreatBrit.,6,0.0,InternalEMPIRE Param default for absent source key
+GreatBrit.,7,0.0,InternalEMPIRE Param default for absent source key
+Netherlands,4,0.0,InternalEMPIRE Param default for absent source key
+Netherlands,5,0.0,InternalEMPIRE Param default for absent source key
+Netherlands,6,0.0,InternalEMPIRE Param default for absent source key
+Netherlands,7,0.0,InternalEMPIRE Param default for absent source key
+Denmark,4,0.0,InternalEMPIRE Param default for absent source key
+Denmark,5,0.0,InternalEMPIRE Param default for absent source key
+Denmark,6,0.0,InternalEMPIRE Param default for absent source key
+Denmark,7,0.0,InternalEMPIRE Param default for absent source key

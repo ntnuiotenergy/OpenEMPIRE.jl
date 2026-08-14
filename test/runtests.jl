@@ -15,6 +15,7 @@ include("test_excel.jl")
 include("test_csv.jl")
 include("test_scenario_csv.jl")
 include("test_natural_gas.jl")
+include("test_hydrogen.jl")
 include("test_out_of_sample.jl")
 include("test_runner_performance.jl")
 include("test_runner_manifest.jl")
@@ -39,6 +40,29 @@ end
     test_native_timestruct_operational_weights()
     test_write_solution_csv_tables()
     test_europe_summary_uses_per_scenario_totals()
+end
+
+@testset "Natural gas" begin
+    test_natural_gas_csv_loading_and_validation()
+    test_natural_gas_scenario_mapping_and_costs()
+    test_gas_marginal_cost_without_a_fuel_price()
+    test_full_model_int_gas_generators_are_priced()
+    test_natural_gas_validation_is_enforced()
+    test_multiple_gas_scenarios_rejected_until_verified()
+    test_natural_gas_multi_period_scenario_weighting()
+    test_weather_profiles_replicate_across_gas_scenarios()
+    test_natural_gas_model_and_results()
+    test_natural_gas_storage_transport_and_supply_edges()
+    test_natural_gas_three_by_three_scenarios()
+    test_natural_gas_controlled_solution_parity()
+end
+
+@testset "Hydrogen foundation" begin
+    test_hydrogen_csv_loading_and_validation()
+    test_hydrogen_malformed_cell_errors()
+    test_hydrogen_sparse_variables()
+    test_hydrogen_full_model_smoke()
+    test_hydrogen_controlled_solution_parity()
 end
 
 @testset "CSV scenarios" begin
@@ -71,21 +95,6 @@ end
     test_objective_matches_component_sum()
     test_native_dual_weight_normalization()
     test_create_model_respects_emission_cap_config()
-end
-
-@testset "Natural gas" begin
-    test_natural_gas_csv_loading_and_validation()
-    test_natural_gas_scenario_mapping_and_costs()
-    test_gas_marginal_cost_without_a_fuel_price()
-    test_full_model_int_gas_generators_are_priced()
-    test_natural_gas_validation_is_enforced()
-    test_multiple_gas_scenarios_rejected_until_verified()
-    test_natural_gas_multi_period_scenario_weighting()
-    test_weather_profiles_replicate_across_gas_scenarios()
-    test_natural_gas_model_and_results()
-    test_natural_gas_storage_transport_and_supply_edges()
-    test_natural_gas_three_by_three_scenarios()
-    test_natural_gas_controlled_solution_parity()
 end
 
 @testset "Out-of-sample" begin
