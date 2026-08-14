@@ -29,6 +29,7 @@ function _parse_args(args)
         "fixed-sample" => "auto",
         "out-of-sample" => "false",
         "fixed-investment-dir" => "",
+        "scenario-data-root" => "",
         "gurobi-method" => "",
         "gurobi-crossover" => "",
     )
@@ -143,6 +144,111 @@ function _config_with_fixed_sample(config_file)
     return config_file
 end
 
+function _config_for_out_of_sample(config_file)
+    config = YAML.load_file(config_file)
+    config["use_scenario_generation"] = false
+    config["use_fixed_sample"] = false
+
+    YAML.write_file(config_file, config)
+    return config_file
+end
+
+function _verify_scenario_tree_checksums(root::AbstractString, metadata)
+    files = get(metadata, "files", nothing)
+    files isa AbstractDict || return false
+
+    scenario_dir = _scenario_data_dir(root)
+    for filename in _OOS_TREE_FILENAMES
+        file_metadata = get(files, filename, nothing)
+        file_metadata isa AbstractDict || return false
+        expected = get(file_metadata, "sha256", nothing)
+        expected === nothing && return false
+        actual = _sha256_file(joinpath(scenario_dir, filename))
+        lowercase(string(expected)) == actual || throw(ArgumentError(
+            "OOS scenario checksum mismatch for $filename in $root",
+        ))
+    end
+    return true
+end
+
+function _load_scenario_tree_metadata(
+    metadata_path::AbstractString,
+    scenario_root::AbstractString,
+)
+    isempty(metadata_path) && return (
+        path = "",
+        data = Dict{String, Any}(),
+        checksums_verified = false,
+    )
+
+    metadata = YAML.load_file(metadata_path)
+    metadata isa AbstractDict || throw(ArgumentError(
+        "OOS scenario metadata must be a mapping: $metadata_path",
+    ))
+    return (
+        path = metadata_path,
+        data = metadata,
+        checksums_verified =
+            _verify_scenario_tree_checksums(scenario_root, metadata),
+    )
+end
+
+function _scenario_tree_metadata(root::AbstractString)
+    metadata_path = joinpath(root, "metadata.yaml")
+    return _load_scenario_tree_metadata(
+        isfile(metadata_path) ? metadata_path : "",
+        root,
+    )
+end
+
+function _scenario_tree_identity(root::AbstractString, metadata)
+    fallback = basename(normpath(root))
+    for key in ("staged_from_tree", "tree")
+        value = get(metadata, key, nothing)
+        if value isa AbstractString && !isempty(strip(value))
+            return String(strip(value))
+        end
+    end
+    return fallback
+end
+
+function _validate_out_of_sample_options(
+    options,
+    generate_only::Bool,
+    fixed_sample::String,
+)
+    out_of_sample = _boolean_option(options["out-of-sample"], "out-of-sample")
+    fixed_investment_dir = String(strip(options["fixed-investment-dir"]))
+    scenario_data_root = String(strip(options["scenario-data-root"]))
+
+    if !out_of_sample
+        isempty(fixed_investment_dir) || throw(ArgumentError(
+            "--fixed-investment-dir requires --out-of-sample=true",
+        ))
+        isempty(scenario_data_root) || throw(ArgumentError(
+            "--scenario-data-root requires --out-of-sample=true",
+        ))
+        return (; out_of_sample, fixed_investment_dir, scenario_data_root)
+    end
+
+    generate_only &&
+        throw(ArgumentError("Out-of-sample evaluation cannot use --generate-only"))
+    fixed_sample == "auto" || throw(ArgumentError(
+        "Out-of-sample evaluation cannot be combined with --fixed-sample",
+    ))
+    isempty(fixed_investment_dir) && throw(ArgumentError(
+        "--out-of-sample=true requires --fixed-investment-dir=...",
+    ))
+    isempty(scenario_data_root) && throw(ArgumentError(
+        "--out-of-sample=true requires --scenario-data-root=...",
+    ))
+
+    _scenario_data_dir(scenario_data_root)
+    _scenario_tree_metadata(scenario_data_root)
+    _fixed_investment_source_files(fixed_investment_dir)
+    return (; out_of_sample, fixed_investment_dir, scenario_data_root)
+end
+
 function _write_summary(path, lines)
     mkpath(dirname(path))
     open(path, "w") do io
@@ -177,7 +283,7 @@ folded into this once by [`_resolve_run_spec`](@ref) and the rest of the runner
 only reads spec fields. `data_folder`/`config_file` point at the staged copies
 under `result_dir/Input`; the `original_*` fields keep the source paths.
 """
-Base.@kwdef struct JuliaRunSpec{O, A <: Tuple, C}
+Base.@kwdef struct JuliaRunSpec{O, A <: Tuple, C, M}
     dataset::String
     original_data_folder::String
     data_folder::String
@@ -193,6 +299,12 @@ Base.@kwdef struct JuliaRunSpec{O, A <: Tuple, C}
     generate_only::Bool
     optimize::Bool
     out_of_sample::Bool
+    scenario_tree::String
+    scenario_tree_metadata::M
+    scenario_tree_metadata_file::String
+    scenario_tree_checksums_verified::Bool
+    original_scenario_data_root::String
+    original_fixed_investment_dir::String
     fixed_investment_dir::String
     result_dir::String
     manifest_path::String
@@ -217,21 +329,38 @@ function _resolve_run_spec(options)
     optimize = lowercase(options["optimize"]) in ("true", "1", "yes")
     generate_only = lowercase(options["generate-only"]) in ("true", "1", "yes")
     fixed_sample = lowercase(options["fixed-sample"])
-    out_of_sample = _boolean_option(options["out-of-sample"], "out-of-sample")
-    fixed_investment_dir = options["fixed-investment-dir"]
+    oos = _validate_out_of_sample_options(options, generate_only, fixed_sample)
 
     isdir(original_data_folder) || throw(ArgumentError("Dataset folder not found: $original_data_folder"))
     isfile(original_config_file) || throw(ArgumentError("Config file not found: $original_config_file"))
-    if out_of_sample && !generate_only && isempty(fixed_investment_dir)
-        throw(ArgumentError("--out-of-sample=true requires --fixed-investment-dir=..."))
-    end
 
     timestamp = Dates.format(now(), dateformat"yyyymmdd_HHMMSS")
     result_dir = joinpath(options["results"], "$(timestamp)_$(_run_label(dataset))")
     mkpath(result_dir)
-    data_folder, config_file = _stage_run_inputs(result_dir, original_data_folder, original_config_file)
+    (
+        data_folder,
+        config_file,
+        staged_fixed_investment_dir,
+        scenario_tree_metadata_file,
+    ) = _stage_run_inputs(
+        result_dir,
+        original_data_folder,
+        original_config_file;
+        scenario_data_root = oos.scenario_data_root,
+        fixed_investment_dir = oos.fixed_investment_dir,
+    )
+    scenario_metadata = if isempty(oos.scenario_data_root)
+        (data = Dict{String, Any}(), checksums_verified = false)
+    else
+        _load_scenario_tree_metadata(
+            scenario_tree_metadata_file,
+            data_folder,
+        )
+    end
 
-    if fixed_sample != "auto"
+    if oos.out_of_sample
+        config_file = _config_for_out_of_sample(config_file)
+    elseif fixed_sample != "auto"
         if _boolean_option(fixed_sample, "fixed-sample")
             sampling_key = joinpath(data_folder, "ScenarioData", "sampling_key.csv")
             isfile(sampling_key) ||
@@ -260,15 +389,41 @@ function _resolve_run_spec(options)
         fixed_sample,
         generate_only,
         optimize,
-        out_of_sample,
-        fixed_investment_dir,
+        out_of_sample = oos.out_of_sample,
+        scenario_tree = isempty(oos.scenario_data_root) ?
+                        "" :
+                        _scenario_tree_identity(
+            oos.scenario_data_root,
+            scenario_metadata.data,
+        ),
+        scenario_tree_metadata = scenario_metadata.data,
+        scenario_tree_metadata_file,
+        scenario_tree_checksums_verified = scenario_metadata.checksums_verified,
+        original_scenario_data_root = oos.scenario_data_root,
+        original_fixed_investment_dir = oos.fixed_investment_dir,
+        fixed_investment_dir = staged_fixed_investment_dir,
         result_dir,
         manifest_path = joinpath(result_dir, "run_manifest.yaml"),
         perf_enabled = _perf_enabled(),
     )
 end
 
+function _oos_scenario_seed(spec::JuliaRunSpec)
+    return get(spec.scenario_tree_metadata, "seed", nothing)
+end
+
 function _initial_manifest(spec::JuliaRunSpec)
+    fixed_metadata =
+        isempty(spec.fixed_investment_dir) ?
+        nothing :
+        OpenEMPIRE._oos_fixed_investment_metadata(spec.fixed_investment_dir)
+    fixed_compatibility =
+        fixed_metadata === nothing ?
+        nothing :
+        OpenEMPIRE.validate_oos_fixed_investment_compatibility(
+            fixed_metadata,
+            spec.run_config,
+        )
     return Dict{String, Any}(
         "runtime" => "julia",
         "status" => "started",
@@ -288,6 +443,18 @@ function _initial_manifest(spec::JuliaRunSpec)
             "mode" => "full_copy",
             "staged_data_folder" => spec.data_folder,
             "staged_config_file" => spec.config_file,
+            "scenario_data_source" =>
+                isempty(spec.original_scenario_data_root) ?
+                nothing :
+                spec.original_scenario_data_root,
+            "staged_scenario_metadata_file" =>
+                isempty(spec.scenario_tree_metadata_file) ?
+                nothing :
+                spec.scenario_tree_metadata_file,
+            "fixed_investment_source" =>
+                isempty(spec.original_fixed_investment_dir) ?
+                nothing :
+                spec.original_fixed_investment_dir,
         ),
         "config_file" => spec.config_file,
         "original_config_file" => spec.original_config_file,
@@ -300,11 +467,40 @@ function _initial_manifest(spec::JuliaRunSpec)
         ),
         "seed" => spec.seed,
         "fixed_sample" => spec.fixed_sample,
+        "investment_context" =>
+            OpenEMPIRE._oos_structural_config(spec.run_config),
+        "investment_result" => nothing,
         "sampling_key" => _sampling_key_info(spec.data_folder),
         "generate_only" => spec.generate_only,
         "optimize" => spec.optimize,
-        "out_of_sample" => spec.out_of_sample,
-        "fixed_investment_dir" => spec.fixed_investment_dir,
+        "out_of_sample" => Dict{String, Any}(
+            "enabled" => spec.out_of_sample,
+            "scenario_tree" => isempty(spec.scenario_tree) ? nothing : spec.scenario_tree,
+            "scenario_seed" => _oos_scenario_seed(spec),
+            "scenario_checksums_verified" =>
+                spec.scenario_tree_checksums_verified,
+            "scenario_metadata" =>
+                isempty(spec.scenario_tree_metadata) ?
+                nothing :
+                spec.scenario_tree_metadata,
+            "base_investment_run" =>
+                isempty(spec.original_fixed_investment_dir) ?
+                nothing :
+                spec.original_fixed_investment_dir,
+            "fixed_investment_metadata" => fixed_metadata,
+            "fixed_investment_compatibility" => fixed_compatibility,
+            "investments_fixed" => false,
+            "original_scenario_data_root" =>
+                isempty(spec.original_scenario_data_root) ?
+                nothing :
+                spec.original_scenario_data_root,
+            "original_fixed_investment_dir" =>
+                isempty(spec.original_fixed_investment_dir) ?
+                nothing :
+                spec.original_fixed_investment_dir,
+            "staged_fixed_investment_dir" =>
+                isempty(spec.fixed_investment_dir) ? nothing : spec.fixed_investment_dir,
+        ),
         "result_dir" => spec.result_dir,
         "timings" => Dict{String, Any}(),
         "model" => nothing,
@@ -324,15 +520,33 @@ function _print_run_header(spec::JuliaRunSpec)
     println("Solver attrs: $(_optimizer_attribute_summary(spec.optimizer_attributes))")
     println("Seed:         $(spec.seed)")
     println("Fixed sample: $(spec.fixed_sample)")
+    println("OOS:          $(spec.out_of_sample)")
+    if spec.out_of_sample
+        println("OOS tree:     $(spec.scenario_tree)")
+        println("OOS seed:     $(_oos_scenario_seed(spec))")
+        println("Investments:  $(spec.fixed_investment_dir)")
+    end
     println("Generate only: $(spec.generate_only)")
     println("Optimize:     $(spec.optimize)")
-    println("Out of sample: $(spec.out_of_sample)")
-    println("Fixed investments: $(spec.fixed_investment_dir)")
     println("Result dir:   $(spec.result_dir)")
     println("Start time:   $(now())")
     println("================================================")
     flush(stdout)
     return nothing
+end
+
+function _apply_out_of_sample!(spec::JuliaRunSpec, emp, sets, periods, progress)
+    spec.out_of_sample || return false
+
+    progress("Fixing investments from staged result tables")
+    OpenEMPIRE.fix_investments_from_results!(
+        emp,
+        sets,
+        periods,
+        spec.fixed_investment_dir;
+        fix_installed_capacities = true,
+    )
+    return true
 end
 
 function _archive_scenario_artifacts(spec::JuliaRunSpec)
@@ -393,6 +607,90 @@ function _run_generate_only(spec::JuliaRunSpec, manifest, run_start, progress)
     return spec.result_dir
 end
 
+function _extract_solver_result(objective_components::F, emp) where {F}
+    termination = JuMP.termination_status(emp)
+    primal_status = JuMP.primal_status(emp)
+    dual_status = JuMP.dual_status(emp)
+    result_count = JuMP.result_count(emp)
+    has_values = JuMP.has_values(emp)
+    solved_and_feasible = JuMP.is_solved_and_feasible(emp)
+    objective = nothing
+    components = nothing
+    if solved_and_feasible && has_values
+        objective = JuMP.objective_value(emp)
+        components = objective_components()
+    end
+    return (;
+        termination,
+        primal_status,
+        dual_status,
+        result_count,
+        has_values,
+        solved_and_feasible,
+        objective,
+        objective_components = components,
+    )
+end
+
+function _solver_result_manifest(solution, optimized::Bool)
+    return Dict{String, Any}(
+        "termination_status" =>
+            optimized ? string(solution.termination) : "not_optimized",
+        "primal_status" =>
+            optimized ? string(solution.primal_status) : "not_optimized",
+        "dual_status" =>
+            optimized ? string(solution.dual_status) : "not_optimized",
+        "result_count" => optimized ? solution.result_count : 0,
+        "has_values" => optimized ? solution.has_values : false,
+        "is_solved_and_feasible" =>
+            optimized ? solution.solved_and_feasible : false,
+        "objective_value" =>
+            optimized ? solution.objective : "not_optimized",
+        "objective_components" =>
+            solution.objective_components === nothing ?
+            nothing :
+            Dict{String, Any}(
+                string(name) => value for
+                (name, value) in pairs(solution.objective_components)
+            ),
+    )
+end
+
+function _solver_failure_message(solution)
+    return "Model optimization did not produce a feasible solution: " *
+           "termination=$(solution.termination), " *
+           "primal_status=$(solution.primal_status), " *
+           "dual_status=$(solution.dual_status), " *
+           "result_count=$(solution.result_count)"
+end
+
+function _solver_run_state(solution, optimized::Bool)
+    succeeded = !optimized || solution.solved_and_feasible
+    return succeeded, succeeded ? nothing : _solver_failure_message(solution)
+end
+
+function _finalize_run_manifest!(
+    manifest,
+    solution,
+    optimized::Bool;
+    summary_path,
+    scenario_artifact,
+    perf_enabled::Bool,
+    wall_seconds::Real,
+    end_time = now(),
+)
+    succeeded, run_error = _solver_run_state(solution, optimized)
+    manifest["solution"] = _solver_result_manifest(solution, optimized)
+    manifest["status"] = succeeded ? "complete" : "failed"
+    manifest["error"] = run_error
+    manifest["end_time"] = string(end_time)
+    manifest["timings"]["wall_seconds"] = round(wall_seconds; digits = 3)
+    manifest["summary_path"] = summary_path
+    manifest["scenario_artifact"] = scenario_artifact
+    manifest["perf_enabled"] = perf_enabled
+    return succeeded, run_error
+end
+
 function _solve_model!(
     spec::JuliaRunSpec,
     manifest,
@@ -418,25 +716,32 @@ function _solve_model!(
     )
     manifest["timings"]["solve_seconds"] = solve_seconds
     progress("Solver optimization finished in $(round(solve_seconds; digits = 2)) seconds")
-    termination = JuMP.termination_status(emp)
-    objective = JuMP.objective_value(emp)
-    progress("Computing objective component diagnostics")
-    objective_components = OpenEMPIRE.objective_component_values(
-        emp,
-        sets,
-        params,
-        periods,
-        Discounter(OpenEMPIRE.discount_rate(params), 1, periods),
-    )
+    solution = _extract_solver_result(emp) do
+        progress("Computing objective component diagnostics")
+        OpenEMPIRE.objective_component_values(
+            emp,
+            sets,
+            params,
+            periods,
+            Discounter(OpenEMPIRE.discount_rate(params), 1, periods),
+        )
+    end
     println("Solve seconds: $(round(solve_seconds; digits = 2))")
-    println("Termination status: $termination")
-    println("Objective value: $objective")
-    println("Objective components:")
-    for (name, value) in pairs(objective_components)
-        println("  $name: $value")
+    println("Termination status: $(solution.termination)")
+    println("Primal status: $(solution.primal_status)")
+    println("Dual status: $(solution.dual_status)")
+    println("Result count: $(solution.result_count)")
+    if solution.objective === nothing
+        println("Objective value: unavailable (no feasible solution)")
+    else
+        println("Objective value: $(solution.objective)")
+        println("Objective components:")
+        for (name, value) in pairs(solution.objective_components)
+            println("  $name: $value")
+        end
     end
     flush(stdout)
-    if JuMP.is_solved_and_feasible(emp)
+    if solution.solved_and_feasible
         progress("Writing solution CSV tables")
         results_stats =
             @timed OpenEMPIRE.write_solution_tables(
@@ -463,7 +768,7 @@ function _solve_model!(
         println("Solution CSVs skipped because the solved model is not feasible.")
         flush(stdout)
     end
-    return (; termination, objective, objective_components, solve_seconds)
+    return merge(solution, (; solve_seconds))
 end
 
 function _write_perf_report(
@@ -519,6 +824,7 @@ end
 
 function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
     perf_phases = JObj[]
+    include_investment_constraints = !spec.out_of_sample
 
     progress("Starting model build")
     build_stats = @timed OpenEMPIRE.create_model(
@@ -526,12 +832,15 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
         spec.data_folder;
         optimizer = spec.optimizer,
         optimizer_attributes = spec.optimizer_attributes,
+        include_investment_constraints,
         input_format = spec.input_format,
         scenario_rng = MersenneTwister(spec.seed),
         progress,
     )
     emp, periods, sets, params = build_stats.value
     build_seconds = build_stats.time
+    investments_fixed =
+        _apply_out_of_sample!(spec, emp, sets, periods, progress)
     push!(
         perf_phases,
         _perf_phase(
@@ -554,41 +863,47 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
             emp;
             count_variable_in_set_constraints = false,
         ),
+        "investment_constraints_included" => include_investment_constraints,
     )
+    manifest["out_of_sample"]["investments_fixed"] = investments_fixed
     _write_run_manifest(spec.manifest_path, manifest)
     scenario_artifact = _archive_scenario_artifacts(spec)
     manifest["sampling_key"] = _sampling_key_info(spec.data_folder)
     manifest["scenario_artifact"] = scenario_artifact
     _write_run_manifest(spec.manifest_path, manifest)
 
-    if spec.out_of_sample
-        progress("Fixing investments from previous result directory")
-        OpenEMPIRE.fix_investments_from_results!(
-            emp,
-            sets,
-            periods,
-            spec.fixed_investment_dir;
-            fix_installed_capacities = true,
-        )
-    end
-
     solution = if spec.optimize
         _solve_model!(spec, manifest, perf_phases, emp, sets, params, periods, progress)
     else
-        (termination = nothing, objective = nothing, objective_components = nothing, solve_seconds = 0.0)
+        (
+            termination = nothing,
+            primal_status = nothing,
+            dual_status = nothing,
+            result_count = 0,
+            has_values = false,
+            solved_and_feasible = false,
+            objective = nothing,
+            objective_components = nothing,
+            solve_seconds = 0.0,
+        )
     end
     termination = solution.termination
     objective = solution.objective
     objective_components = solution.objective_components
-    manifest["solution"] = Dict{String, Any}(
-        "termination_status" => termination === nothing ? "not_optimized" : string(termination),
-        "objective_value" => objective === nothing ? "not_optimized" : objective,
-        "objective_components" => objective_components === nothing ? nothing :
-            Dict{String, Any}(string(name) => value for (name, value) in pairs(objective_components)),
-    )
+    run_succeeded, run_error = _solver_run_state(solution, spec.optimize)
+    if solution.solved_and_feasible
+        capacity_metadata =
+            OpenEMPIRE._oos_fixed_capacity_metadata(spec.result_dir)
+        manifest["investment_result"] = Dict{String, Any}(
+            "fixed_investments_sha256" => capacity_metadata["sha256"],
+            "output_dir" => capacity_metadata["output_dir"],
+            "files" => capacity_metadata["files"],
+        )
+    end
 
     component_lines = if objective_components === nothing
-        ["objective_component_$name=not_optimized" for name in (
+        component_value = spec.optimize ? "unavailable" : "not_optimized"
+        ["objective_component_$name=$component_value" for name in (
             :generator_investment,
             :storage_investment,
             :transmission_investment,
@@ -599,6 +914,20 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
         ["objective_component_$name=$value" for (name, value) in pairs(objective_components)]
     end
     progress("Writing run summary")
+    run_ended_at = now()
+    fixed_metadata = manifest["out_of_sample"]["fixed_investment_metadata"]
+    fixed_compatibility =
+        manifest["out_of_sample"]["fixed_investment_compatibility"]
+    fixed_sha256 =
+        fixed_metadata === nothing ? "none" : fixed_metadata["sha256"]
+    fixed_provenance =
+        fixed_metadata === nothing ?
+        "none" :
+        fixed_metadata["provenance"]["kind"]
+    fixed_compatibility_status =
+        fixed_compatibility === nothing ?
+        "not_applicable" :
+        fixed_compatibility["status"]
     summary_path = _write_summary(
         joinpath(spec.result_dir, "summary.txt"),
         vcat([
@@ -612,24 +941,41 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
             "seed=$(spec.seed)",
             "fixed_sample=$(spec.fixed_sample)",
             "out_of_sample=$(spec.out_of_sample)",
+            "scenario_tree=$(spec.scenario_tree)",
+            "scenario_seed=$(_oos_scenario_seed(spec))",
+            "scenario_checksums_verified=$(spec.scenario_tree_checksums_verified)",
+            "base_investment_run=$(spec.original_fixed_investment_dir)",
             "fixed_investment_dir=$(spec.fixed_investment_dir)",
+            "fixed_investments_sha256=$fixed_sha256",
+            "fixed_investment_provenance=$fixed_provenance",
+            "fixed_investment_compatibility=$fixed_compatibility_status",
             "optimize=$(spec.optimize)",
             "variables=$(JuMP.num_variables(emp))",
             "constraints=$(JuMP.num_constraints(emp; count_variable_in_set_constraints = false))",
+            "investment_constraints_included=$include_investment_constraints",
             "build_seconds=$build_seconds",
             "solve_seconds=$(solution.solve_seconds)",
             "termination_status=$(termination === nothing ? "not_optimized" : string(termination))",
-            "objective_value=$(objective === nothing ? "not_optimized" : string(objective))",
-            "end_time=$(now())",
+            "primal_status=$(spec.optimize ? string(solution.primal_status) : "not_optimized")",
+            "dual_status=$(spec.optimize ? string(solution.dual_status) : "not_optimized")",
+            "result_count=$(solution.result_count)",
+            "objective_value=$(objective === nothing ? (spec.optimize ? "unavailable" : "not_optimized") : string(objective))",
+            "run_status=$(run_succeeded ? "complete" : "failed")",
+            "error=$(something(run_error, "none"))",
+            "end_time=$run_ended_at",
         ], component_lines),
     )
     println("Summary written to: $summary_path")
-    manifest["status"] = "complete"
-    manifest["end_time"] = string(now())
-    manifest["timings"]["wall_seconds"] = round(time() - run_start; digits = 3)
-    manifest["summary_path"] = summary_path
-    manifest["scenario_artifact"] = scenario_artifact
-    manifest["perf_enabled"] = spec.perf_enabled
+    _finalize_run_manifest!(
+        manifest,
+        solution,
+        spec.optimize;
+        summary_path,
+        scenario_artifact,
+        perf_enabled = spec.perf_enabled,
+        wall_seconds = time() - run_start,
+        end_time = run_ended_at,
+    )
     _write_run_manifest(spec.manifest_path, manifest)
     println("Run manifest written to: $(spec.manifest_path)")
 
@@ -638,7 +984,9 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
 
     println("End time: $(now())")
     flush(stdout)
-    progress("Run complete")
+    progress(run_succeeded ? "Run complete" : "Run failed")
+
+    run_succeeded || error(run_error)
 
     return termination
 end
