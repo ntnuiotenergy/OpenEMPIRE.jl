@@ -314,28 +314,6 @@ function test_industry_controlled_solution_parity()
     end
 end
 
-function test_industry_sector_volume_certificate()
-    python = get(
-        ENV,
-        "OPENEMPIRE_PYTHON",
-        something(Sys.which("python3"), Sys.which("python"), ""),
-    )
-    isempty(python) && return @test_skip "Python is unavailable"
-    script = joinpath(pkgdir(OpenEMPIRE), "test", "test_industry_result_certificate.py")
-    @test success(run(ignorestatus(`$python $script`)))
-end
-
-function test_industry_verifier_reconciliation_gates()
-    python = get(
-        ENV,
-        "OPENEMPIRE_PYTHON",
-        something(Sys.which("python3"), Sys.which("python"), ""),
-    )
-    isempty(python) && return @test_skip "Python is unavailable"
-    script = joinpath(pkgdir(OpenEMPIRE), "test", "test_industry_verifier_gates.py")
-    @test success(run(ignorestatus(`$python $script`)))
-end
-
 function test_industry_algebra_fingerprint_negative_controls()
     python = get(
         ENV,

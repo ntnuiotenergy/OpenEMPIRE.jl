@@ -184,12 +184,6 @@
       "sha256": "fe11d4a5d6bdd0f1fe721d0527b05d98b0fe3d6a371347cb8d99f6d8d1b1ce69"
     },
     {
-      "path": "General/availableBioEnergy.csv",
-      "bytes": 123,
-      "rows": 7,
-      "sha256": "1dc17b9e8ee6befdcbf92b61440315fd5fb9cb465140438d324a00e82dd8f0b6"
-    },
-    {
       "path": "General/seasScale.csv",
       "bytes": 137,
       "rows": 6,
@@ -212,6 +206,12 @@
       "bytes": 6468,
       "rows": 245,
       "sha256": "8b3f40405d1d8a3720a38d76d2356c9d8cfee3745d9aa8b9a23d1257205a9813"
+    },
+    {
+      "path": "Generator/MaxInstalledCapacityByPeriod.csv",
+      "bytes": 26533,
+      "rows": 896,
+      "sha256": "8835c9a946e2e4cf39522f61cda1af947fda9d7d999eee4d3c36deca6b30fbf0"
     },
     {
       "path": "Generator/genCO2Captured.csv",

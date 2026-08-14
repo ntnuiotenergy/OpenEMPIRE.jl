@@ -73,7 +73,13 @@ function test_resolve_julia_run_spec()
     full_industry_attributes = _optimizer_attributes(
         "Gurobi",
         full_industry_config,
-        Dict("gurobi-method" => "", "gurobi-crossover" => ""),
+        Dict(
+            "gurobi-method" => "",
+            "gurobi-crossover" => "",
+            "gurobi-presolve" => "",
+            "gurobi-feasibility-tol" => "",
+            "gurobi-bar-conv-tol" => "",
+        ),
     )
     @test ("Seed" => 2) in full_industry_attributes
 
