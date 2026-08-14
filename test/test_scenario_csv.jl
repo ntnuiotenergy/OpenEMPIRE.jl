@@ -1566,16 +1566,22 @@ function test_create_model_adds_storage_max_constraints()
         @test _sparse_axis_length(emp[:storage_max_inv_en]) == expected
         @test _sparse_axis_length(emp[:storage_max_inst_pow]) == expected
         @test _sparse_axis_length(emp[:storage_max_inst_en]) == expected
-        @test JuMP.num_constraints(emp; count_variable_in_set_constraints = false) == 81190
+        # 81190 core rows plus the 4 offshore wind-farm cap rows (Denmark is the test
+        # dataset's only offshore wind farm: 2 arc directions x 2 strategic periods).
+        # The cap is on by default now, so the Python side needs `north_sea: true` to
+        # reach the same total; the cap is non-binding here, so the objective is
+        # unchanged either way.
+        @test JuMP.num_constraints(emp; count_variable_in_set_constraints = false) == 81194
+        @test _sparse_axis_length(emp[:wind_farm_transmission_cap]) == 4
     end
 end
 
-function test_north_sea_transmission_cap_is_config_gated()
+function test_offshore_transmission_cap_is_on_by_default()
     sets = OpenEMPIRE.EmpireSets(
         Generator = ["Windoffshore"],
         Technology = ["Wind"],
         Node = ["Offshore", "Onshore"],
-        OffshoreNode = ["Offshore"],
+        OffshoreWindFarmNode = ["Offshore"],
         DirectionalLink = [("Offshore", "Onshore"), ("Onshore", "Offshore")],
         TransmissionType = ["HVDC"],
         TransmissionTypeOfDirectionalLink = [
@@ -1589,14 +1595,10 @@ function test_north_sea_transmission_cap_is_config_gated()
     sp = first(strat_periods(periods))
     params = OpenEMPIRE.EmpireParams()
 
-    emp_off = JuMP.Model()
-    OpenEMPIRE.create_variables(emp_off, sets, periods)
-    OpenEMPIRE.create_transmission_constraints(emp_off, sets, params, periods; north_sea = false)
-    @test !haskey(JuMP.object_dictionary(emp_off), :wind_farm_transmission_cap)
-
+    # Default: a wind farm may not build more transmission than it has generation.
     emp_on = JuMP.Model()
     OpenEMPIRE.create_variables(emp_on, sets, periods)
-    OpenEMPIRE.create_transmission_constraints(emp_on, sets, params, periods; north_sea = true)
+    OpenEMPIRE.create_transmission_constraints(emp_on, sets, params, periods)
     @test _sparse_axis_length(emp_on[:wind_farm_transmission_cap]) == 2
 
     cap = emp_on[:transmissionInstalledCap]["Offshore", "Onshore", sp]
@@ -1606,44 +1608,45 @@ function test_north_sea_transmission_cap_is_config_gated()
         @test JuMP.normalized_coefficient(constraint, cap) == 1.0
         @test JuMP.normalized_coefficient(constraint, gen) == -1.0
     end
+
+    # Still switchable off for experiments.
+    emp_off = JuMP.Model()
+    OpenEMPIRE.create_variables(emp_off, sets, periods)
+    OpenEMPIRE.create_transmission_constraints(
+        emp_off, sets, params, periods; offshore_transmission_cap = false,
+    )
+    @test !haskey(JuMP.object_dictionary(emp_off), :wind_farm_transmission_cap)
 end
 
-function test_north_sea_cap_pins_generatorless_offshore_node_to_zero()
-    # An offshore node with no generators of its own gives the cap an empty
-    # right-hand side, so the corridor is forced to zero capacity. Python does
-    # exactly the same, so this documents the behaviour rather than guarding
-    # against it -- what the port adds is a warning, because the failure is
-    # otherwise silent and disconnects the node.
-    sets = OpenEMPIRE.EmpireSets(
-        Generator = ["Windoffshore"],
-        Technology = ["Wind"],
-        Node = ["Hub", "Onshore"],
-        OffshoreNode = ["Hub"],
-        DirectionalLink = [("Hub", "Onshore"), ("Onshore", "Hub")],
-        TransmissionType = ["HVDC"],
-        TransmissionTypeOfDirectionalLink = [
-            ("Hub", "Onshore", "HVDC"),
-            ("Onshore", "Hub", "HVDC"),
-        ],
-        GeneratorsOfTechnology = [("Wind", "Windoffshore")],
-        GeneratorsOfNode = Tuple{String, String}[],
-    )
-    periods = OpenEMPIRE.create_timestruct(1, 5, 1, 2, 0, 0, 1)
-    sp = first(strat_periods(periods))
-    params = OpenEMPIRE.EmpireParams()
+function test_offshore_wind_farm_without_generators_is_rejected()
+    # The cap's right-hand side sums the wind farm's own generators, so an entry with
+    # none would force its corridors to zero capacity and silently disconnect the node.
+    # That is what "all nodes minus onshore nodes" produces when it sweeps up energy
+    # hubs, so the set validation rejects it rather than solving a disconnected model.
+    make(; hub_nodes = String[], farm_generators = Tuple{String, String}[]) =
+        OpenEMPIRE.EmpireSets(
+            Generator = ["Windoffshore"],
+            Technology = ["Wind"],
+            Node = ["Hub", "Onshore"],
+            OffshoreWindFarmNode = ["Hub"],
+            OffshoreEnergyHub = hub_nodes,
+            DirectionalLink = [("Hub", "Onshore"), ("Onshore", "Hub")],
+            TransmissionType = ["HVDC"],
+            TransmissionTypeOfDirectionalLink = [
+                ("Hub", "Onshore", "HVDC"),
+                ("Onshore", "Hub", "HVDC"),
+            ],
+            GeneratorsOfTechnology = [("Wind", "Windoffshore")],
+            GeneratorsOfNode = farm_generators,
+        )
 
-    emp = JuMP.Model()
-    OpenEMPIRE.create_variables(emp, sets, periods)
-    @test_logs (:warn,) match_mode = :any OpenEMPIRE.create_transmission_constraints(
-        emp, sets, params, periods; north_sea = true,
+    @test_throws ArgumentError make()
+    # A node cannot be both a wind farm and a hub.
+    @test_throws ArgumentError make(
+        hub_nodes = ["Hub"], farm_generators = [("Hub", "Windoffshore")],
     )
-
-    cap = emp[:transmissionInstalledCap]["Hub", "Onshore", sp]
-    for arc in (("Hub", "Onshore"), ("Onshore", "Hub"))
-        constraint = emp[:wind_farm_transmission_cap][arc, sp]
-        @test JuMP.normalized_coefficient(constraint, cap) == 1.0
-        @test JuMP.normalized_rhs(constraint) == 0.0
-    end
+    # With generators of its own it is a legitimate wind farm.
+    @test make(farm_generators = [("Hub", "Windoffshore")]) isa OpenEMPIRE.EmpireSets
 end
 
 function test_emission_constraints_match_python_formulation()

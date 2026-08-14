@@ -1,16 +1,28 @@
-# This is an OpenEMPIRE configuration file.
-# To be used with the execution script run.py
+# full_model_int to 2030, 2 scenarios, ALL optional modules off.
+#
+# Purpose: isolate the offshore formulation when comparing against
+# InternalEMPIRE (run_EMPIRE_int_2030_offshore.py). With natural gas, hydrogen and
+# industry all disabled on both sides, the remaining differences are the base
+# electricity model plus the offshore wind-farm transmission cap.
+#
+# Natural gas is priced through Generator!FuelCosts here rather than endogenously,
+# which is what InternalEMPIRE does when NaturalGas=False. The gas fuel-cost rows
+# the workbook omits were filled from europe_v51 in the dataset (ceb27f8) and the
+# same values are patched into the InternalEMPIRE tab file, so both sides price
+# gas identically.
 
 use_temporary_directory: True                          # Specifies whether to use a temporary directory for operations
 temporary_directory: './'                              # Path to the temporary directory used for certain operations
-forecast_horizon_year: 2045                            # Target or end year for the run
-number_of_scenarios: 3                                 # Number of scenarios in every investment period
+forecast_horizon_year: 2030                             # 2020 + 2 periods x 5 years
+number_of_scenarios: 2                                 # Number of scenarios in every investment period
+natural_gas: False                                     # Enable the natural-gas operational module
+number_of_gas_scenarios: 1                             # Terminal-price scenarios (weather × gas is solved)
 length_of_regular_season: 168                          # Number of hours in a regular season
 discount_rate: 0.05                                    # Rate used to discount future cash flows to present value
 wacc: 0.05                                             # Weighted average cost of capital
 optimization_solver: "Gurobi"                          # Mathematical solver used for optimization tasks
 use_scenario_generation: True                          # Indicates if scenarios should be generated dynamically
-use_fixed_sample: False                                # Specifies if fixed scenario samples should be used
+use_fixed_sample: True                                 # full_model_int ships a sampling_key.csv (FIX_SAMPLE in run_EMPIRE_int.py)
 load_change_module: False                              #
 filter_make : False                                    #
 filter_use : False                                     #
@@ -21,18 +33,20 @@ n_cluster : 10                                         #
 moment_matching : False                                #
 n_tree_compare : 20                                    # Number of trees to compare for moment matching and copula-sampling
 use_emission_cap: True                                 # Indicates if there's a cap on CO2 emissions
-compute_operational_duals: False                       # Barrier without crossover is not safe to fix exactly for a second solve
+compute_operational_duals: False                       # Resolve empire with fixed investment variables and write new duals
 print_in_iamc_format: False                            # Output should be printed in a IAMC-compatible format
 write_in_lp_format: False                              # Problem should be written in Linear Programming format
 serialize_instance: False                              # Serialize the data structure or model for later use
+# Offshore: no module flag. The offshore wind-farm transmission cap is on by
+# default (offshore_transmission_cap), matching InternalEMPIRE, which has no
+# north-sea module and always caps wind-farm corridors.
 leap_years_investment: 5                               # Number of years per period (default: 5)
 time_format: "%d/%m/%Y %H:%M"                          # Time format for scenario data files
 
 # Solver (Gurobi) performance options. Leave a value commented/absent to use the Gurobi default.
 solver_method: 2                                       # 2 = barrier (interior point), usually best for large LPs
 solver_crossover: 0                                    # 0 = skip crossover; matches Python EMPIRE's large-run default
-solver_presolve: 2                                     # 2 = aggressive presolve
+# solver_presolve: left at the Gurobi default, as InternalEMPIRE does. Presolve=2
+#                  stalled the barrier on this model (job 6503, sub-optimal).
+solver_numericfocus: 1                                 # Remedy for the ton-scale nodeEmission "large rhs" conditioning
 # solver_threads: 16                                   # Set to physical core count on the machine if needed
-# solver_scaleflag: 2                                  # Robustness option; can slow solves
-# solver_numericfocus: 1                               # Robustness option; 1-3 means progressively more numerical care
-# solver_barhomogeneous: 1                             # Robustness option for difficult/infeasible barrier runs

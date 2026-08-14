@@ -400,10 +400,16 @@
       "sha256": "ecebb834a93b20fa89c8de5650ee6ea64a768571d81d8dccad53ca27a05d7065"
     },
     {
-      "path": "Sets/OffshoreNode.csv",
-      "bytes": 218,
-      "rows": 17,
-      "sha256": "ee5718532a3f44364e287e4e3b2bdf543c719dc7a1cf68f11072261649f9f847"
+      "path": "Sets/OffshoreEnergyHub.csv",
+      "bytes": 30,
+      "rows": 1,
+      "sha256": "37fd1e66a2556a4358d5cbf94bda16fe1cb6f60b74106c10777b20bbde4a56f7"
+    },
+    {
+      "path": "Sets/OffshoreWindFarmNode.csv",
+      "bytes": 196,
+      "rows": 14,
+      "sha256": "200645c7a4bf6ee30a3d7be1b30858f8b536ccc4ecf444200483d9b512ffe33b"
     },
     {
       "path": "Sets/OnshoreNode.csv",

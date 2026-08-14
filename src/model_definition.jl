@@ -128,7 +128,7 @@ function create_constraints(
     sets,
     par,
     periods::TimeStructure;
-    north_sea::Bool = false,
+    offshore_transmission_cap::Bool = true,
     include_investment_constraints::Bool = true,
     progress = nothing,
 )
@@ -181,7 +181,7 @@ function create_constraints(
         sets,
         par,
         periods;
-        north_sea,
+        offshore_transmission_cap,
         include_investment_constraints,
         progress,
     )
@@ -408,8 +408,8 @@ function _canonical_arc(m, n)
 end
 
 function _offshore_endpoint(sets, m, n)
-    is_offshore(sets, m) && return m
-    is_offshore(sets, n) && return n
+    is_offshore_wind_farm(sets, m) && return m
+    is_offshore_wind_farm(sets, n) && return n
     return nothing
 end
 
@@ -418,7 +418,7 @@ function create_transmission_constraints(
     sets,
     par,
     periods::TimeStructure;
-    north_sea::Bool = false,
+    offshore_transmission_cap::Bool = true,
     include_investment_constraints::Bool = true,
     progress = nothing,
 )
@@ -471,25 +471,10 @@ function create_transmission_constraints(
     # raises InvalidConstraintError. So an out-of-sample run there is incompatible
     # with north_sea entirely, and omitting the family here is the only behaviour
     # that both matches the reference in effect and actually runs.
-    if north_sea
+    if offshore_transmission_cap
         @info " - offshore wind-farm transmission capacity constraints"
         _report_progress(progress, "Creating offshore wind-farm transmission capacity constraints")
         genCap = emp[:genInstalledCap]
-        # The cap's right-hand side is a sum over the offshore endpoint's generators, so
-        # an offshore node with none of its own gives an empty sum and pins every adjacent
-        # corridor to zero capacity. Python behaves identically, so this is not corrected
-        # here -- but it is silent, and it disconnects the node, so say so. It happens when
-        # OffshoreNode is derived as "all nodes minus onshore nodes" and picks up energy
-        # hubs or platforms, which the Python internal model caps through a separate
-        # converter formulation instead.
-        for node in offshore_nodes(sets)
-            isempty(generators(sets, node)) && @warn(
-                "Offshore node has no generators, so wind_farm_transmission_cap will " *
-                "force every adjacent corridor to zero transmission capacity. Remove it " *
-                "from Sets/OffshoreNode.csv unless that is intended.",
-                node,
-            )
-        end
         # Python builds this over ordered node pairs, producing duplicate rows for the
         # two directions of an offshore-adjacent corridor. Keep the same row structure
         # while pointing both directions at Julia's canonical corridor capacity.

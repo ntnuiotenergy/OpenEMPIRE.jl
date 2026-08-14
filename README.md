@@ -332,37 +332,47 @@ non-investment objective so constant investment offsets do not dominate
 cross-tree comparisons. The manifest records source and output checksums,
 units, formula, threshold, and tree provenance.
 
-### North Sea / offshore transmission cap
+### Offshore nodes
 
-The Python reference model has an optional North Sea transmission cap, and the
-Julia port implements it. When `north_sea: true` is set in the run config *and*
-the dataset provides `Sets/OffshoreNode.csv`, the `wind_farm_transmission_cap`
-constraint family is created. It caps each offshore-adjacent transmission
-corridor by the installed generation capacity at the offshore endpoint, keeping
-the Python implementation's ordered-arc row structure (both directions of a
-corridor are emitted, pointing at the same canonical corridor capacity).
+Offshore nodes come in two kinds, and they are modelled differently. This mirrors
+InternalEMPIRE, which keeps two separate lists rather than one offshore set.
 
-When `north_sea: false`, the offshore set may still exist in the data but no cap
-constraints are created. This is deliberate: the config flag, not the data
-layout, decides whether the optional formulation is active.
+**Offshore wind farms** (`Sets/OffshoreWindFarmNode.csv`) generate power. An
+offshore wind farm may not build more transmission capacity than it has
+generation — there is no point paying for a 5 GW export cable out of a 2 GW wind
+farm. The `wind_farm_transmission_cap` family enforces this, capping each
+adjacent corridor by the installed generation at the offshore endpoint. It keeps
+the Python implementation's ordered-arc row structure: both directions of a
+corridor are emitted, pointing at the same canonical corridor capacity.
 
-The cap is created before the investment-only constraints, so it is retained in
-out-of-sample evaluations. This matches the Python reference, which builds the
-equivalent constraint above its own `OUT_OF_SAMPLE` guard. With capacities fixed
-the constraint cannot restrict dispatch, but it still lets an evaluation report
-infeasibility on capacities that violate the cap.
+**Offshore energy hubs** (`Sets/OffshoreEnergyHub.csv`) generate nothing. They
+are junctions that collect power from several wind farms and route it onward, and
+are limited by converter capacity instead. The set is read and validated, but the
+converter formulation is not ported yet, so hubs currently carry no capacity
+limit of their own.
 
-**`OffshoreNode` must list only nodes whose generation should limit their
-corridors.** The cap's right-hand side is a sum over the offshore endpoint's
-generators, so an entry with *no* generators yields an empty sum and the
-constraint becomes `transmissionInstalledCap <= 0`, disconnecting that node.
-This matches the Python behaviour exactly — Python computes the same empty sum —
-but it makes the set's contents load-bearing. `europe_v51` lists exactly the 14
-offshore wind farms. Datasets that derive the set as "all nodes minus onshore
-nodes" can sweep in energy hubs or platforms that carry no generators; those
-belong in a separate formulation (the Python internal model gives energy hubs
-their own converter capacity constraints), not in this one. A warning is logged
-for any offshore node that ends up with an empty right-hand side.
+The two sets must be disjoint, and every wind farm must have at least one
+generator. Both are enforced by `validate!`, because the failure is otherwise
+silent and severe: the cap's right-hand side sums the node's own generators, so a
+generator-less entry yields an empty sum, the constraint becomes
+`transmissionInstalledCap <= 0`, and the node is disconnected from the grid
+entirely. That is exactly what a dataset produces when it derives the offshore set
+as "all nodes minus onshore nodes" and sweeps up hubs and platforms.
+
+The cap is **on by default**. Set `offshore_transmission_cap: false` in the run
+config to switch it off for an experiment. (The old `north_sea` key is obsolete:
+it is ignored, with a warning. InternalEMPIRE has no north-sea module — the flag
+existed there only to mark datasets that predate the
+`Windoffshoregrounded`/`Windoffshorefloating` split, and is always on now.)
+
+Datasets written before the split may still ship `Sets/OffshoreNode.csv`; it is
+read as the wind-farm set with a deprecation warning.
+
+The cap is created **after** the investment-only constraints, so it is omitted
+from fixed-capacity out-of-sample evaluation. With capacities fixed both sides of
+the inequality are constant, making the constraint redundant; the Python reference
+cannot even build it in that mode, because the installed capacities become `Param`s
+and the expression collapses to a Boolean.
 
 ### Comparable multi-seed Julia/Python parity runs
 
@@ -551,7 +561,9 @@ valid index tuples lets the model:
 ## Status and roadmap
 
 Items that are known to be missing or under investigation compared to the
-Python reference implementation are tracked in [TODO.md](TODO.md). The North Sea
-offshore transmission cap is implemented (see above). Notable remaining open
-points include the implementation of emission limits, as well as a documented
-discrepancy in the annuity / present value calculation for investment costs.
+Python reference implementation are tracked in [TODO.md](TODO.md). The offshore
+wind-farm transmission cap is implemented (see above); the offshore energy-hub
+converter formulation is not, so hubs are read and validated but not yet capped.
+Notable remaining open points include the implementation of emission limits, as
+well as a documented discrepancy in the annuity / present value calculation for
+investment costs.
