@@ -1875,3 +1875,129 @@ function test_december_is_sampled_into_fall()
         @test table.months[fall] == [12, 12, 12, 12]
     end
 end
+
+# Writes a raw scenario file with one column per node, all sharing `rows`' timestamps.
+function _write_multinode_raw_scenario_file(path, rows, nodes; scale = 1.0)
+    header = "time," * join(nodes, ",")
+    lines = String[]
+    for row in rows
+        timestamp, value = split(row, ",")
+        v = parse(Float64, value) * scale
+        push!(lines, timestamp * repeat(",$(v)", length(nodes)))
+    end
+    _write_csv(path, header * "\n" * join(lines, "\n") * "\n")
+end
+
+"""
+`NO1`..`NO5` must resolve to their own nodes rather than being discarded.
+
+InternalEMPIRE added them to `dict_countries` in 9310e632, so the per-elspot-area
+Norwegian series is now read on both sides. The port previously reproduced the old
+behaviour on purpose; these tests pin the corrected mapping and guard the aggregate
+`"NO"` and offshore semantics that must not change with it.
+"""
+function test_norwegian_elspot_columns_map_to_their_nodes()
+    no_nodes = ["NO$(i)" for i in 1:5]
+    node_set = Set{String}(vcat(no_nodes, ["Germany", "SorligeNordsjoI"]))
+    offshore_set = Set{String}(["SorligeNordsjoI"])
+
+    # Each elspot column maps to its own node, for every weather-driven onshore class.
+    for generator in ("Solar", "Windonshore", "Hydrorun-of-the-river")
+        for node in no_nodes
+            mapped = OpenEMPIRE._node_names_for_generator(node, generator, node_set, offshore_set)
+            @test mapped == [node]
+            @test !isempty(mapped)          # explicitly: no longer silently skipped
+        end
+    end
+
+    # The aggregate "NO" column still fans out to every elspot area present.
+    @test OpenEMPIRE._node_names_for_generator("NO", "Solar", node_set, offshore_set) == no_nodes
+
+    # Ordinary country mapping is untouched.
+    @test OpenEMPIRE._node_names_for_generator("DE", "Solar", node_set, offshore_set) == ["Germany"]
+
+    # Offshore semantics are preserved. Floating offshore wind stays confined to
+    # offshore farms, so an onshore elspot column yields nothing for it, while
+    # grounded offshore wind still reaches country nodes.
+    for node in no_nodes
+        @test isempty(
+            OpenEMPIRE._node_names_for_generator(node, "Windoffshorefloating", node_set, offshore_set),
+        )
+        @test OpenEMPIRE._node_names_for_generator(
+            node, "Windoffshoregrounded", node_set, offshore_set,
+        ) == [node]
+    end
+    @test OpenEMPIRE._node_names_for_generator(
+        "SorligeNordsjoI", "Windoffshorefloating", node_set, offshore_set,
+    ) == ["SorligeNordsjoI"]
+
+    return nothing
+end
+
+"""
+End-to-end check that Norwegian solar, onshore wind and run-of-river availability is
+actually populated once the columns are read.
+"""
+function test_norwegian_availability_is_populated()
+    no_nodes = ["NO$(i)" for i in 1:5]
+    mktempdir() do root
+        scenario_dir = joinpath(root, "ScenarioData")
+        mkpath(scenario_dir)
+        rows = _scenario_time_rows()
+        _write_multinode_raw_scenario_file(joinpath(scenario_dir, "electricload.csv"), rows, no_nodes)
+        _write_multinode_raw_scenario_file(joinpath(scenario_dir, "hydroseasonal.csv"), rows, no_nodes; scale = 10.0)
+        _write_multinode_raw_scenario_file(joinpath(scenario_dir, "solar.csv"), rows, no_nodes; scale = 0.01)
+        _write_multinode_raw_scenario_file(joinpath(scenario_dir, "windonshore.csv"), rows, no_nodes; scale = 0.02)
+        _write_multinode_raw_scenario_file(joinpath(scenario_dir, "windoffshore.csv"), rows, no_nodes; scale = 0.03)
+        _write_multinode_raw_scenario_file(joinpath(scenario_dir, "hydroror.csv"), rows, no_nodes; scale = 0.04)
+        _write_csv(
+            joinpath(scenario_dir, "sampling_key.csv"),
+            """
+Period,Scenario,Season,Year,Month,Hour
+1,1,winter,2020,1,1
+1,1,spring,2020,4,0
+1,1,summer,2020,7,0
+1,1,fall,2020,10,0
+1,1,peak,2020,0,0
+""",
+        )
+
+        sets = _scenario_test_sets(no_nodes)
+        params = OpenEMPIRE.EmpireParams(
+            genCapAvailType = Dict(
+                "Solar" => 0.0,
+                "Windonshore" => 0.0,
+                "Windoffshore" => 0.0,
+                "Hydrorun-of-the-river" => 0.0,
+            ),
+        )
+        cfg = Dict(
+            "time_format" => "%d/%m/%Y %H:%M",
+            "length_of_regular_season" => 2,
+            "number_of_scenarios" => 1,
+            "use_fixed_sample" => true,
+        )
+        periods = OpenEMPIRE.create_timestruct(1, 5, 4, 2, 2, 24, 1)
+
+        OpenEMPIRE.generate_scenario_csv!(root, periods, params, sets, cfg; rng = MersenneTwister(1))
+
+        strategic_period = first(strat_periods(periods))
+        winter = first(repr_periods(strategic_period))
+        sc_winter = first(opscenarios(winter))
+
+        # Every Norwegian node has availability for each weather-driven class, and it
+        # is the value from that node's own column -- not zero, which is what the
+        # dropped-column behaviour produced.
+        for node in no_nodes
+            for (generator, expected) in (
+                ("Solar", 0.02), ("Windonshore", 0.04), ("Hydrorun-of-the-river", 0.08),
+            )
+                key = (node, generator)
+                @test haskey(params.genCapAvail, key)
+                @test params.genCapAvail[key][sc_winter[1]] ≈ expected
+                @test params.genCapAvail[key][sc_winter[1]] > 0.0
+            end
+        end
+    end
+    return nothing
+end
