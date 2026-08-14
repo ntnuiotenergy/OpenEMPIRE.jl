@@ -9,6 +9,7 @@ using Clustering
 using Dates
 using DelimitedFiles
 using Random
+using SHA
 using Statistics
 using YAML
 
@@ -22,5 +23,6 @@ include("model_definition.jl")
 include("user_interface.jl")
 include("results.jl")
 include("out_of_sample.jl")
+include("oos_aggregation.jl")
 
 end # module OpenEMPIRE
