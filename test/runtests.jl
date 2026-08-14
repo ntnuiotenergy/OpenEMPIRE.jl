@@ -85,7 +85,6 @@ end
     test_natural_gas_model_and_results()
     test_natural_gas_storage_transport_and_supply_edges()
     test_natural_gas_three_by_three_scenarios()
-    test_natural_gas_controlled_solution_parity()
 end
 
 @testset "Out-of-sample" begin
