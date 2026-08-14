@@ -253,6 +253,28 @@ function _scenario_tree_identity(root::AbstractString, metadata)
     return fallback
 end
 
+function _validate_oos_tree_execution_config(
+    config_file::AbstractString,
+    scenario_root::AbstractString,
+)
+    metadata_file = joinpath(scenario_root, "metadata.yaml")
+    isfile(metadata_file) || return nothing
+    metadata = YAML.load_file(metadata_file)
+    metadata isa AbstractDict || throw(ArgumentError(
+        "OOS scenario metadata must be a mapping: $metadata_file",
+    ))
+    evaluation_mode = String(get(
+        metadata,
+        "evaluation_mode",
+        OpenEMPIRE._OOS_REPRESENTATIVE_MODE,
+    ))
+    has_config = get(metadata, "config", nothing) isa AbstractDict
+    if has_config || evaluation_mode != OpenEMPIRE._OOS_REPRESENTATIVE_MODE
+        OpenEMPIRE._validate_oos_execution_config(config_file, scenario_root)
+    end
+    return nothing
+end
+
 function _validate_out_of_sample_options(
     options,
     generate_only::Bool,
@@ -374,6 +396,12 @@ function _resolve_run_spec(options)
 
     isdir(original_data_folder) || throw(ArgumentError("Dataset folder not found: $original_data_folder"))
     isfile(original_config_file) || throw(ArgumentError("Config file not found: $original_config_file"))
+    if oos.out_of_sample
+        _validate_oos_tree_execution_config(
+            original_config_file,
+            oos.scenario_data_root,
+        )
+    end
 
     timestamp = Dates.format(now(), dateformat"yyyymmdd_HHMMSS")
     result_dir = joinpath(options["results"], "$(timestamp)_$(_run_label(dataset))")
