@@ -107,6 +107,7 @@ function _prepare_model_inputs(
     weather_scenarios = OpenEMPIRE.weather_scenario_count(config)
     gas_scenarios = OpenEMPIRE.gas_scenario_count(config)
     scenarios = OpenEMPIRE.combined_scenario_count(config)
+    operational_hours_per_year = Int(get(config, "operational_hours_per_year", 8760))
 
     periods = OpenEMPIRE.create_timestruct(
         strat_pers,
@@ -116,6 +117,8 @@ function _prepare_model_inputs(
         peak_count,
         hours_peak,
         scenarios,
+        ;
+        operational_hours_per_year,
     )
 
 
