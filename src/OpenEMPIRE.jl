@@ -11,6 +11,7 @@ using DelimitedFiles
 using Random
 using SHA
 using Statistics
+using Unicode
 using YAML
 
 include("empire_sets.jl")

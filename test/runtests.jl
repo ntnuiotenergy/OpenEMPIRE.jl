@@ -13,6 +13,7 @@ using YAML
 include("test_excel.jl")
 include("test_csv.jl")
 include("test_scenario_csv.jl")
+include("test_annuity.jl")
 include("test_out_of_sample.jl")
 include("test_oos_full_year.jl")
 include("test_oos_aggregation.jl")
@@ -33,6 +34,9 @@ end
     test_read_csv_dataset()
     test_read_bundled_csv_datasets()
     test_read_full_model_int_dataset()
+    test_internalempire_bioenergy_constraints()
+    test_internalempire_missing_hydro_default()
+    test_ccs_fixed_cost_is_data_driven()
     test_native_timestruct_operational_weights()
     test_write_solution_csv_tables()
     test_europe_summary_uses_per_scenario_totals()
@@ -60,11 +64,14 @@ end
     test_storage_constraints_match_python_formulation()
     test_create_model_adds_storage_max_constraints()
     test_offshore_transmission_cap_is_on_by_default()
+    test_offshore_energy_hub_converter()
     test_offshore_wind_farm_without_generators_is_rejected()
     test_emission_constraints_match_python_formulation()
     test_objective_matches_component_sum()
     test_native_dual_weight_normalization()
     test_create_model_respects_emission_cap_config()
+    test_norwegian_elspot_columns_map_to_their_nodes()
+    test_norwegian_availability_is_populated()
 end
 
 @testset "Out-of-sample" begin
@@ -107,11 +114,16 @@ end
 end
 
 @testset "Runner spec" begin
+    test_gurobi_numeric_attribute_parsing()
     test_resolve_julia_run_spec()
     test_resolve_single_tree_oos_run_spec()
     test_reject_incomplete_oos_runner_options()
     test_reject_mismatched_oos_tree_config()
     test_runner_solver_result_extraction()
+end
+
+@testset "Annuity" begin
+    test_annuity_factor()
 end
 
 @testset "Validate" begin

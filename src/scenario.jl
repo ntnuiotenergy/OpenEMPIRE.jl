@@ -70,6 +70,11 @@ regular_scenario_seasons(config) = Tuple(String.(get(config, "regular_seasons", 
 scenario_peak_count(config) = Int(get(config, "n_peak_seasons", 2))
 scenario_peak_hours(config) = Int(get(config, "len_peak_season", 24))
 
+# Bug-for-bug compatibility with InternalEMPIRE's Pyomo Param(default=1.0) for
+# absent seasonal-hydro samples. Remove when the reference uses explicit input.
+const INTERNALEMPIRE_MISSING_HYDRO_RAW_DEFAULT_KEY =
+    "internalempire_missing_hydro_raw_default_mw"
+
 const LoadScenarioRow = NamedTuple{
     (:Node, :Operationalhour, :Scenario, :Period, :ElectricLoadRaw_in_MW),
     Tuple{String, Int, String, Int, Float64},
@@ -129,7 +134,14 @@ function read_scenario_data!(
     scenario_files = _generated_scenario_csv_files(data_folder)
     has_csvs = isfile.(scenario_files)
     if all(has_csvs)
-        return read_generated_scenario_csv!(data_folder, periods, params, sets, season_for_hour)
+        return read_generated_scenario_csv!(
+            data_folder,
+            periods,
+            params,
+            sets,
+            season_for_hour,
+            config,
+        )
     elseif any(has_csvs)
         missing_files = collect(scenario_files)[.!collect(has_csvs)]
         throw(ArgumentError(
@@ -206,20 +218,70 @@ function _read_raw_scenario_table(path::AbstractString, dateformat::DateFormat)
     return RawScenarioTable(columns, timestamps, years, months, values)
 end
 
+const OFFSHORE_WIND_GENERATORS = ("Windoffshore", "Windoffshoregrounded", "Windoffshorefloating")
+
+"""
+    _fold_name(s)
+
+Accent-folded, lowercased form of a node name, used only to match a raw scenario
+column against the dataset's spelling of the same node.
+
+`COUNTRY_NODE_MAPPING` carries the open datasets' ASCII spellings
+(`HelgolanderBucht`, `Nordsoen`, `SorligeNordsjoI/II`), while `full_model_int`
+spells the same four nodes with diacritics. Without folding, those columns resolved
+to a name no node had and their availability was dropped in silence -- the four
+wind farms simply never generated.
+"""
+function _fold_name(s::AbstractString)
+    folded = replace(
+        s,
+        'ø' => 'o', 'Ø' => 'O', 'å' => 'a', 'Å' => 'A',
+        'æ' => "ae", 'Æ' => "AE", 'ð' => 'd', 'Ð' => 'D', 'þ' => "th", 'Þ' => "TH",
+    )
+    return lowercase(Unicode.normalize(folded; stripmark = true))
+end
+
 function _node_name(raw::AbstractString, node_set::Set{String})
     raw in node_set && return raw
     mapped = get(COUNTRY_NODE_MAPPING, raw, raw)
     mapped in node_set && return mapped
+    # Fall back to an accent-insensitive match against the dataset's own spelling.
+    target = _fold_name(mapped)
+    for node in node_set
+        _fold_name(node) == target && return node
+    end
     return nothing
 end
 
-function _node_names_for_generator(raw::AbstractString, generator::AbstractString, node_set::Set{String})
+function _node_names_for_generator(
+    raw::AbstractString,
+    generator::AbstractString,
+    node_set::Set{String},
+    offshore_node_set::Set{String},
+)
+    # With the north sea modelled, InternalEMPIRE samples the offshore series three
+    # times (scenario_random.py): Windoffshoregrounded and Windoffshorefloating through
+    # `dict_offshr_nodes`, then Windoffshoregrounded again through `dict_countries`. So
+    # grounded offshore wind gets availability at the offshore farms *and* at the
+    # country nodes, while floating is confined to the farms. Only floating is
+    # restricted here; treating both as offshore-only strips the country-level grounded
+    # capacity and makes the system markedly more expensive.
+    offshore_only = generator == "Windoffshorefloating"
+
+    # `NO1`..`NO5` resolve as ordinary nodes. InternalEMPIRE's `dict_countries` gained
+    # them in 9310e632, so the reference now reads the per-elspot-area Norwegian series
+    # instead of silently dropping it; the port no longer mirrors the old behaviour.
     exact = _node_name(raw, node_set)
-    exact !== nothing && return [exact]
+    if exact !== nothing
+        offshore_only && !(exact in offshore_node_set) && return String[]
+        return [exact]
+    end
 
     if raw == "NO"
-        start_area = generator in ("Windoffshore", "Windoffshoregrounded", "Windoffshorefloating") ? 2 : 1
-        return [node for node in ("NO$(i)" for i in start_area:5) if node in node_set]
+        start_area = offshore_only ? 2 : 1
+        candidates = [node for node in ("NO$(i)" for i in start_area:5) if node in node_set]
+        offshore_only && (candidates = [n for n in candidates if n in offshore_node_set])
+        return candidates
     end
 
     return String[]
@@ -1172,11 +1234,12 @@ end
 
 function _generator_columns(table::RawScenarioTable, generator::AbstractString, sets)
     node_set = Set(nodes(sets))
+    offshore_node_set = union(offshore_wind_farm_nodes(sets), offshore_energy_hubs(sets))
     node_gens = Set(sets.GeneratorsOfNode)
     mapping = Tuple{String, Vector{Tuple{String, String}}}[]
     for col in table.columns
         pairs = Tuple{String, String}[]
-        for node in _node_names_for_generator(col, generator, node_set)
+        for node in _node_names_for_generator(col, generator, node_set, offshore_node_set)
             (node, generator) in node_gens && push!(pairs, (node, generator))
         end
         !isempty(pairs) && push!(mapping, (col, pairs))
@@ -1461,6 +1524,7 @@ function generate_scenario_csv!(data_folder, periods, params::EmpireParams, sets
 
     params.sloadRaw = _build_node_profiles(load_profiles, periods)
     params.maxRegHydroGenRaw = _build_node_profiles(hydro_profiles, periods)
+    _fill_internalempire_missing_hydro_raw!(params, sets, config)
     params.genCapAvail = _build_generator_profiles(gen_profiles, periods)
     _fill_missing_stochastic_availability!(params, sets, periods)
     _validate_stochastic_availability(params, sets)
@@ -1577,6 +1641,7 @@ function read_generated_scenario_csv!(
     params::EmpireParams,
     sets,
     season_for_hour::Dict{Int, Int},
+    config = Dict{String, Any}(),
 )
     sload_file, hydro_file, availability_file = _generated_scenario_csv_files(data_folder)
 
@@ -1592,6 +1657,7 @@ function read_generated_scenario_csv!(
         season_for_hour,
         :HydroGeneratorMaxSeasonalProduction,
     )
+    _fill_internalempire_missing_hydro_raw!(params, sets, config)
     params.genCapAvail = _read_generated_generator_profiles(
         availability_file,
         periods,
@@ -1600,5 +1666,20 @@ function read_generated_scenario_csv!(
     _fill_missing_stochastic_availability!(params, sets, periods)
     _validate_stochastic_availability(params, sets)
 
+    return params
+end
+
+function _fill_internalempire_missing_hydro_raw!(params, sets, config)
+    haskey(config, INTERNALEMPIRE_MISSING_HYDRO_RAW_DEFAULT_KEY) || return params
+    default = Float64(config[INTERNALEMPIRE_MISSING_HYDRO_RAW_DEFAULT_KEY])
+    default >= 0 || throw(ArgumentError(
+        "$(INTERNALEMPIRE_MISSING_HYDRO_RAW_DEFAULT_KEY) must be non-negative",
+    ))
+
+    for node in nodes(sets)
+        any(generator -> is_reg_hydro(sets, generator), generators(sets, node)) || continue
+        haskey(params.maxRegHydroGenRaw, node) && continue
+        params.maxRegHydroGenRaw[node] = FixedProfile(default)
+    end
     return params
 end
