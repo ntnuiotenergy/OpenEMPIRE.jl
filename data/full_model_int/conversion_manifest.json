@@ -208,6 +208,12 @@
       "sha256": "8b3f40405d1d8a3720a38d76d2356c9d8cfee3745d9aa8b9a23d1257205a9813"
     },
     {
+      "path": "Generator/MaxInstalledCapacityByPeriod.csv",
+      "bytes": 26533,
+      "rows": 896,
+      "sha256": "8835c9a946e2e4cf39522f61cda1af947fda9d7d999eee4d3c36deca6b30fbf0"
+    },
+    {
       "path": "Generator/genCO2Captured.csv",
       "bytes": 229,
       "rows": 7,
