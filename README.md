@@ -1,20 +1,24 @@
 # OpenEMPIRE.jl
 
-A Julia implementation of **EMPIRE** — the European Model for Power system
-Investments with Renewable Energy. EMPIRE is a multi-horizon stochastic capacity
-expansion model: it decides how much generation, storage and transmission to
-build across European countries, while simultaneously simulating hourly
-operation under a set of weather and load scenarios.
+This Julia package provides an open version of the European Model for Power
+system Investments with Renewable Energy (EMPIRE), reimplemented in Julia based
+on the existing Python version. EMPIRE is a multi-horizon stochastic capacity
+expansion model that co-optimizes investments in generation, storage and
+transmission across European countries together with the corresponding hourly
+operational dispatch under a set of weather and load scenarios.
 
-This is a reimplementation of the existing Python (Pyomo) version, built on:
+The Julia version aims to:
 
-- **[JuMP](https://jump.dev/)** as the modelling layer, so the model runs on any
-  compatible LP solver (HiGHS, Gurobi, Xpress, CPLEX).
-- **[TimeStruct.jl](https://github.com/sintefore/TimeStruct.jl)** to make the
-  multi-horizon time structure explicit — strategic periods, operational
-  seasons, peak hours and stochastic scenarios.
-- **[SparseVariables.jl](https://github.com/sintefore/SparseVariables.jl)** so
-  only valid index combinations (node/technology/period) are created.
+- Provide a transparent, modular and easily extensible 
+  implementation of EMPIRE.
+- Use [JuMP](https://jump.dev/) as the modeling layer so the model can be
+  solved with any compatible LP/MIP solver (e.g. HiGHS, Gurobi, Xpress, CPLEX).
+- Use [TimeStruct.jl](https://github.com/sintefore/TimeStruct.jl) to make the
+  multi-horizon time structure (strategic periods, operational seasons, peak
+  hours and stochastic scenarios) explicit and easily configurable.
+- Use [SparseVariables.jl](https://github.com/sintefore/SparseVariables.jl) to
+  keep the model representation readable and efficient for the sparse index sets
+  typical in EMPIRE (e.g. only valid node/technology/period combinations).
 
 ---
 
