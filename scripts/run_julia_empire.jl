@@ -122,6 +122,7 @@ function _optimizer_attributes(value, config, options)
             "solver_scaleflag" => "ScaleFlag",
             "solver_numericfocus" => "NumericFocus",
             "solver_barhomogeneous" => "BarHomogeneous",
+            "solver_seed" => "Seed",
         )
         for (config_key, gurobi_name) in config_attribute_names
             _set_optimizer_attribute!(attributes, gurobi_name, get(config, config_key, nothing))

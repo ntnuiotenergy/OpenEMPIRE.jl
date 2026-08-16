@@ -1,0 +1,36 @@
+# Time-reduced deterministic full_model_int instance for comparison with
+# gas_reference_build.py --comparison-scope=industry.
+use_temporary_directory: True
+temporary_directory: './'
+forecast_horizon_year: 2030
+number_of_scenarios: 1
+natural_gas: True
+hydrogen: True
+industry: True
+number_of_gas_scenarios: 1
+length_of_regular_season: 24
+regular_seasons: ["winter"]
+n_peak_seasons: 2
+len_peak_season: 24
+discount_rate: 0.05
+wacc: 0.05
+optimization_solver: "HiGHS"
+use_scenario_generation: True
+use_fixed_sample: True
+load_change_module: False
+filter_make: False
+filter_use: False
+copula_clusters_make: False
+copula_clusters_use: False
+copulas_to_use: ["electricload"]
+n_cluster: 10
+moment_matching: False
+n_tree_compare: 20
+use_emission_cap: True
+compute_operational_duals: False
+print_in_iamc_format: False
+write_in_lp_format: False
+serialize_instance: False
+north_sea: True
+leap_years_investment: 5
+time_format: "%d/%m/%Y %H:%M"

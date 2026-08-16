@@ -22,6 +22,7 @@ forecast_horizon_year: 2055                            # 2020 + 7 periods x 5 ye
 number_of_scenarios: 5                                 # Number of scenarios in every investment period
 natural_gas: False                                     # Enable the natural-gas operational module
 hydrogen: False                                        # Requires natural_gas=true; deterministic evidence supports one gas scenario
+industry: False                                        # Requires natural_gas=true; Hydrogen enables H2/CCS/refinery pathways
 number_of_gas_scenarios: 1                             # Terminal-price scenarios (weather × gas is solved)
 length_of_regular_season: 168                          # Number of hours in a regular season
 discount_rate: 0.05                                    # Rate used to discount future cash flows to present value

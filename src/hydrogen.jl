@@ -492,7 +492,8 @@ function create_hydrogen_constraints!(
             init = 0.0,
         ) +
         (node in natural_gas_onshore_nodes(sets) ?
-         emp[:transportHydrogenDemandMet][node, operational_period] : 0.0),
+         emp[:transportHydrogenDemandMet][node, operational_period] : 0.0) +
+        industry_hydrogen_demand(emp, sets, par, node, operational_period),
     )
 
     @constraint(
@@ -531,6 +532,7 @@ function create_hydrogen_constraints!(
             for plant in hydrogen.ReformerPlant if node in hydrogen.ReformerLocation;
             init = 0.0,
         ) +
+        industry_captured_co2(emp, sets, par, node, operational_period) +
         sum(
             emp[:co2PipelineFlow][source, node, operational_period]
             for (source, destination) in hydrogen.CO2DirectionalLink if destination == node;

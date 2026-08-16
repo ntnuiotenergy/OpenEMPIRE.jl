@@ -17,6 +17,7 @@ include("test_scenario_csv.jl")
 include("test_annuity.jl")
 include("test_natural_gas.jl")
 include("test_hydrogen.jl")
+include("test_industry.jl")
 include("test_out_of_sample.jl")
 include("test_oos_full_year.jl")
 include("test_oos_aggregation.jl")
@@ -66,6 +67,16 @@ end
     test_hydrogen_malformed_cell_errors()
     test_hydrogen_sparse_variables()
     test_hydrogen_full_model_smoke()
+end
+
+@testset "Industry foundation" begin
+    test_industry_loading_gates_and_active_pathways()
+    test_industry_validation_and_units()
+    test_industry_dataset_validator_negative_controls()
+    test_industry_gas_only_model()
+    test_industry_model_results_and_oos()
+    test_industry_controlled_solution_parity()
+    test_industry_algebra_fingerprint_negative_controls()
 end
 
 @testset "CSV scenarios" begin

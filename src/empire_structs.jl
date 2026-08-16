@@ -34,6 +34,57 @@ const HydrogenNodeStorage = Tuple{String, String}
 const HydrogenNodeTerminalPeriod = Tuple{String, String, Int}
 const HydrogenNodePeriod = Tuple{String, Int}
 
+const IndustryPlantPeriod = Tuple{String, Int}
+const IndustryNodePlant = Tuple{String, String}
+const IndustryNodePeriod = Tuple{String, Int}
+
+"""Typed deterministic steel, cement, ammonia, and refinery parameters."""
+Base.@kwdef mutable struct IndustryParams
+    steelLifetime::Dict{String, Float64} = Dict{String, Float64}()
+    steelInitialCapacity::Dict{IndustryNodePlant, Float64} = Dict{IndustryNodePlant, Float64}()
+    steelRetirementFactor::Dict{IndustryPlantPeriod, Float64} = Dict{IndustryPlantPeriod, Float64}()
+    steelCapitalCost::Dict{IndustryPlantPeriod, Float64} = Dict{IndustryPlantPeriod, Float64}()
+    steelFixedOMCost::Dict{IndustryPlantPeriod, Float64} = Dict{IndustryPlantPeriod, Float64}()
+    steelInvestmentCost::Dict{IndustryPlantPeriod, Float64} = Dict{IndustryPlantPeriod, Float64}()
+    steelVariableOMCost::Dict{IndustryPlantPeriod, Float64} = Dict{IndustryPlantPeriod, Float64}()
+    steelCoalConsumption::Dict{IndustryPlantPeriod, Float64} = Dict{IndustryPlantPeriod, Float64}()
+    steelHydrogenConsumption::Dict{IndustryPlantPeriod, Float64} = Dict{IndustryPlantPeriod, Float64}()
+    steelBiomassConsumption::Dict{IndustryPlantPeriod, Float64} = Dict{IndustryPlantPeriod, Float64}()
+    steelOilConsumption::Dict{IndustryPlantPeriod, Float64} = Dict{IndustryPlantPeriod, Float64}()
+    steelElectricityConsumption::Dict{IndustryPlantPeriod, Float64} = Dict{IndustryPlantPeriod, Float64}()
+    steelCO2Emissions::Dict{String, Float64} = Dict{String, Float64}()
+    steelCO2Captured::Dict{String, Float64} = Dict{String, Float64}()
+    steelYearlyProduction::Dict{IndustryNodePeriod, Float64} = Dict{IndustryNodePeriod, Float64}()
+    cementLifetime::Dict{String, Float64} = Dict{String, Float64}()
+    cementInitialCapacity::Dict{IndustryNodePlant, Float64} = Dict{IndustryNodePlant, Float64}()
+    cementRetirementFactor::Dict{IndustryPlantPeriod, Float64} = Dict{IndustryPlantPeriod, Float64}()
+    cementCapitalCost::Dict{IndustryPlantPeriod, Float64} = Dict{IndustryPlantPeriod, Float64}()
+    cementFixedOMCost::Dict{IndustryPlantPeriod, Float64} = Dict{IndustryPlantPeriod, Float64}()
+    cementInvestmentCost::Dict{IndustryPlantPeriod, Float64} = Dict{IndustryPlantPeriod, Float64}()
+    cementFuelConsumption::Dict{IndustryPlantPeriod, Float64} = Dict{IndustryPlantPeriod, Float64}()
+    cementCO2CaptureRate::Dict{String, Float64} = Dict{String, Float64}()
+    cementElectricityConsumption::Dict{IndustryPlantPeriod, Float64} = Dict{IndustryPlantPeriod, Float64}()
+    cementYearlyProduction::Dict{String, Float64} = Dict{String, Float64}()
+    ammoniaLifetime::Dict{String, Float64} = Dict{String, Float64}()
+    ammoniaInitialCapacity::Dict{IndustryNodePlant, Float64} = Dict{IndustryNodePlant, Float64}()
+    ammoniaRetirementFactor::Dict{IndustryPlantPeriod, Float64} = Dict{IndustryPlantPeriod, Float64}()
+    ammoniaCapitalCost::Dict{IndustryPlantPeriod, Float64} = Dict{IndustryPlantPeriod, Float64}()
+    ammoniaFixedOMCost::Dict{IndustryPlantPeriod, Float64} = Dict{IndustryPlantPeriod, Float64}()
+    ammoniaInvestmentCost::Dict{IndustryPlantPeriod, Float64} = Dict{IndustryPlantPeriod, Float64}()
+    ammoniaFeedstockConsumption::Dict{String, Float64} = Dict{String, Float64}()
+    ammoniaElectricityConsumption::Dict{String, Float64} = Dict{String, Float64}()
+    ammoniaYearlyProduction::Dict{IndustryNodePeriod, Float64} = Dict{IndustryNodePeriod, Float64}()
+    refineryYearlyProduction::Dict{IndustryNodePeriod, Float64} = Dict{IndustryNodePeriod, Float64}()
+    availableBioEnergy::Dict{Int, Float64} = Dict{Int, Float64}()
+    industryShedCost::Float64 = 100000.0
+    refineryHydrogenConsumption::Float64 = 0.0
+    refineryHeatConsumption::Float64 = 0.0
+    rampFractionPerHour::Float64 = 0.1
+    maximumScrapShare::Float64 = 0.45
+    hoursPerYear::Float64 = 8760.0
+    oilShedCost::Float64 = 1.0e6
+end
+
 """Typed deterministic Hydrogen and CO₂ input parameters."""
 Base.@kwdef mutable struct HydrogenParams
     electrolyzerCapitalCost::Dict{Int, Float64} = Dict{Int, Float64}()
@@ -199,6 +250,7 @@ Base.@kwdef mutable struct EmpireParams
     # Optional sector modules
     NaturalGas::NaturalGasParams = NaturalGasParams()
     Hydrogen::HydrogenParams = HydrogenParams()
+    Industry::IndustryParams = IndustryParams()
 end
 
 # Default values used by the accessor helpers below.

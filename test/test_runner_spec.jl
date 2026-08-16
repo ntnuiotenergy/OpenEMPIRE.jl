@@ -67,6 +67,22 @@ function test_resolve_julia_run_spec()
         "BarConvTol" => 1.0e-8,
     )
 
+    full_industry_config = YAML.load_file(
+        joinpath(@__DIR__, "..", "config", "run_int_full_industry.yaml"),
+    )
+    full_industry_attributes = _optimizer_attributes(
+        "Gurobi",
+        full_industry_config,
+        Dict(
+            "gurobi-method" => "",
+            "gurobi-crossover" => "",
+            "gurobi-presolve" => "",
+            "gurobi-feasibility-tol" => "",
+            "gurobi-bar-conv-tol" => "",
+        ),
+    )
+    @test ("Seed" => 2) in full_industry_attributes
+
     mktempdir() do root
         model = Model(HiGHS.Optimizer)
         set_silent(model)
