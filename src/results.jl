@@ -313,8 +313,494 @@ function write_solution_tables(result_dir::AbstractString, emp::JuMP.Model, sets
     has_natural_gas(sets) &&
         haskey(JuMP.object_dictionary(emp), :ngTerminalImport) &&
         write_natural_gas_csvs(output_dir, emp, sets, par, periods)
+    has_hydrogen(sets) &&
+        haskey(JuMP.object_dictionary(emp), :electrolyzerCapBuilt) &&
+        write_hydrogen_csvs(output_dir, emp, sets, par, periods)
 
     return output_dir
+end
+
+function _write_hydrogen_table(write_rows, output_dir, filenames, header)
+    primary = _write_csv_table(joinpath(output_dir, first(filenames)), header, write_rows)
+    for filename in Iterators.drop(filenames, 1)
+        cp(primary, joinpath(output_dir, filename); force = true)
+    end
+    return primary
+end
+
+function _write_hydrogen_oos_capacity_tables(
+    output_dir,
+    emp,
+    hydrogen,
+    strategic_periods,
+    co2_corridors,
+)
+    capacity_specs = (
+        (
+            "H2ImportCapBuilt.csv", ["Node", "TerminalType", "Period", "H2ImportCapBuilt"],
+            hydrogen.TerminalsOfNode, emp[:hydrogenImportCapBuilt], :terminal,
+        ),
+        (
+            "H2ImportTotalCap.csv", ["Node", "TerminalType", "Period", "H2ImportTotalCap"],
+            hydrogen.TerminalsOfNode, emp[:hydrogenImportCapInstalled], :terminal,
+        ),
+        (
+            "elyzerCapBuilt.csv", ["Node", "Period", "elyzerCapBuilt"],
+            hydrogen.ProductionNode, emp[:electrolyzerCapBuilt], :node,
+        ),
+        (
+            "elyzerTotalCap.csv", ["Node", "Period", "elyzerTotalCap"],
+            hydrogen.ProductionNode, emp[:electrolyzerCapInstalled], :node,
+        ),
+        (
+            "ReformerCapBuilt.csv", ["Node", "ReformerPlant", "Period", "ReformerCapBuilt"],
+            [(node, plant) for node in hydrogen.ReformerLocation for plant in hydrogen.ReformerPlant],
+            emp[:reformerCapBuilt], :plant,
+        ),
+        (
+            "ReformerTotalCap.csv", ["Node", "ReformerPlant", "Period", "ReformerTotalCap"],
+            [(node, plant) for node in hydrogen.ReformerLocation for plant in hydrogen.ReformerPlant],
+            emp[:reformerCapInstalled], :plant,
+        ),
+        (
+            "hydrogenPipelineBuilt.csv", ["FromNode", "ToNode", "Period", "hydrogenPipelineBuilt"],
+            hydrogen.Corridor, emp[:hydrogenPipelineCapBuilt], :arc,
+        ),
+        (
+            "repurposedPipelineBuilt.csv", ["FromNode", "ToNode", "Period", "repurposedPipelineBuilt"],
+            hydrogen.RepurposableGasCorridor, emp[:hydrogenRepurposedGasPipelineCapBuilt], :arc,
+        ),
+        (
+            "totalHydrogenPipelineCapacity.csv", ["FromNode", "ToNode", "Period", "totalHydrogenPipelineCapacity"],
+            hydrogen.Corridor, emp[:hydrogenPipelineCapInstalled], :arc,
+        ),
+        (
+            "hydrogenStorageBuilt.csv", ["Node", "H2Storage", "Period", "hydrogenStorageBuilt"],
+            hydrogen.StoragesOfNode, emp[:hydrogenStorageCapBuilt], :storage,
+        ),
+        (
+            "hydrogenTotalStorage.csv", ["Node", "H2Storage", "Period", "hydrogenTotalStorage"],
+            hydrogen.StoragesOfNode, emp[:hydrogenStorageCapInstalled], :storage,
+        ),
+        (
+            "CO2PipelineBuilt.csv", ["FromNode", "ToNode", "Period", "CO2PipelineBuilt"],
+            co2_corridors, emp[:co2PipelineCapBuilt], :arc,
+        ),
+        (
+            "totalCO2PipelineCapacity.csv", ["FromNode", "ToNode", "Period", "totalCO2PipelineCapacity"],
+            co2_corridors, emp[:co2PipelineCapInstalled], :arc,
+        ),
+        (
+            "CO2SiteCapacityDeveloped.csv", ["Node", "Period", "CO2SiteCapacityDeveloped"],
+            hydrogen.CO2SequestrationNode, emp[:co2SequestrationCapBuilt], :node,
+        ),
+    )
+    for (filename, header, keys, variable, shape) in capacity_specs
+        _write_hydrogen_table(output_dir, (filename,), header) do io
+            for key in keys, (period, strategic_period) in strategic_periods
+                if shape === :node
+                    _write_csv_row(io, [key, period, _solution_value(variable[key, strategic_period])])
+                else
+                    first_key, second_key = key
+                    _write_csv_row(io, [
+                        first_key, second_key, period,
+                        _solution_value(variable[first_key, second_key, strategic_period]),
+                    ])
+                end
+            end
+        end
+    end
+    return nothing
+end
+
+function write_hydrogen_csvs(output_dir, emp, sets, par, periods)
+    hydrogen = hydrogen_sets(sets)
+    strategic_periods = collect(enumerate(strat_periods(periods)))
+    _write_hydrogen_table(
+        output_dir,
+        ("hydrogenElectrolyzerCapacity.csv", "results_hydrogen_electrolyzer_investments.csv"),
+        ["Node", "Period", "Built_MW", "Installed_MW"],
+    ) do io
+        for node in hydrogen.ProductionNode, (period, strategic_period) in strategic_periods
+            _write_csv_row(io, [
+                node, period,
+                _solution_value(emp[:electrolyzerCapBuilt][node, strategic_period]),
+                _solution_value(emp[:electrolyzerCapInstalled][node, strategic_period]),
+            ])
+        end
+    end
+    _write_hydrogen_table(
+        output_dir,
+        ("hydrogenReformerCapacity.csv", "results_hydrogen_reformer_investments.csv"),
+        ["Node", "Plant", "Period", "Built_MW_H2", "Installed_MW_H2"],
+    ) do io
+        for node in hydrogen.ReformerLocation, plant in hydrogen.ReformerPlant,
+            (period, strategic_period) in strategic_periods
+            _write_csv_row(io, [
+                node, plant, period,
+                _solution_value(emp[:reformerCapBuilt][node, plant, strategic_period]),
+                _solution_value(emp[:reformerCapInstalled][node, plant, strategic_period]),
+            ])
+        end
+    end
+    _write_hydrogen_table(
+        output_dir,
+        ("hydrogenPipelineCapacity.csv", "results_hydrogen_pipeline_investments.csv"),
+        ["FromNode", "ToNode", "Period", "Built_Hydrogen_ton_per_h", "Installed_Hydrogen_ton_per_h"],
+    ) do io
+        for (from, to) in hydrogen.Corridor, (period, strategic_period) in strategic_periods
+            _write_csv_row(io, [
+                from, to, period,
+                _solution_value(emp[:hydrogenPipelineCapBuilt][from, to, strategic_period]),
+                _solution_value(emp[:hydrogenPipelineCapInstalled][from, to, strategic_period]),
+            ])
+        end
+    end
+    _write_hydrogen_table(
+        output_dir,
+        ("hydrogenRepurposedGasPipeline.csv", "results_hydrogen_repurposed_pipeline.csv"),
+        ["FromNode", "ToNode", "Period", "Built_NaturalGas_ton_per_h", "Installed_NaturalGas_ton_per_h"],
+    ) do io
+        for (from, to) in hydrogen.RepurposableGasCorridor,
+            (period, strategic_period) in strategic_periods
+            _write_csv_row(io, [
+                from, to, period,
+                _solution_value(emp[:hydrogenRepurposedGasPipelineCapBuilt][from, to, strategic_period]),
+                _solution_value(emp[:hydrogenRepurposedGasPipelineCapInstalled][from, to, strategic_period]),
+            ])
+        end
+    end
+    _write_hydrogen_table(
+        output_dir,
+        ("hydrogenStorageCapacity.csv", "results_hydrogen_storage_investments.csv"),
+        ["Node", "Storage", "Period", "Built_ton", "Installed_ton"],
+    ) do io
+        for (node, storage) in hydrogen.StoragesOfNode,
+            (period, strategic_period) in strategic_periods
+            _write_csv_row(io, [
+                node, storage, period,
+                _solution_value(emp[:hydrogenStorageCapBuilt][node, storage, strategic_period]),
+                _solution_value(emp[:hydrogenStorageCapInstalled][node, storage, strategic_period]),
+            ])
+        end
+    end
+    _write_hydrogen_table(
+        output_dir,
+        ("hydrogenImportCapacity.csv", "results_hydrogen_import_investments.csv"),
+        ["Node", "Terminal", "Period", "Built_ton_per_h", "Installed_ton_per_h"],
+    ) do io
+        for (node, terminal) in hydrogen.TerminalsOfNode,
+            (period, strategic_period) in strategic_periods
+            _write_csv_row(io, [
+                node, terminal, period,
+                _solution_value(emp[:hydrogenImportCapBuilt][node, terminal, strategic_period]),
+                _solution_value(emp[:hydrogenImportCapInstalled][node, terminal, strategic_period]),
+            ])
+        end
+    end
+    co2_corridors = unique(Arc[minmax(from, to) for (from, to) in hydrogen.CO2DirectionalLink])
+    _write_hydrogen_table(
+        output_dir,
+        ("co2StrategicCapacity.csv", "results_co2_investments.csv"),
+        ["Asset", "FromOrNode", "ToNode", "Period", "Built", "Installed"],
+    ) do io
+        for (from, to) in co2_corridors, (period, strategic_period) in strategic_periods
+            _write_csv_row(io, [
+                "Pipeline", from, to, period,
+                _solution_value(emp[:co2PipelineCapBuilt][from, to, strategic_period]),
+                _solution_value(emp[:co2PipelineCapInstalled][from, to, strategic_period]),
+            ])
+        end
+        for node in hydrogen.CO2SequestrationNode,
+            (period, strategic_period) in strategic_periods
+            _write_csv_row(io, [
+                "SequestrationSite", node, "", period,
+                _solution_value(emp[:co2SequestrationCapBuilt][node, strategic_period]),
+                _solution_value(emp[:co2SequestrationCapInstalled][node, strategic_period]),
+            ])
+        end
+    end
+    _write_hydrogen_oos_capacity_tables(
+        output_dir,
+        emp,
+        hydrogen,
+        strategic_periods,
+        co2_corridors,
+    )
+
+    operational_header = [
+        "Period", "Scenario", "WeatherScenario", "GasScenario", "Season", "Hour",
+    ]
+    function each_context(f)
+        _foreach_natural_gas_operational_context(
+            (period, strategic_period, scenario, weather, gas, representative, season, hour, t) ->
+                f((period, scenario, weather, gas, season, hour), t),
+            par,
+            periods,
+        )
+    end
+    _write_hydrogen_table(
+        output_dir,
+        ("hydrogenProduction.csv", "results_hydrogen_production.csv"),
+        vcat(["Source", "Node", "Technology"], operational_header, ["Hydrogen_ton_per_h", "Hydrogen_MWh_per_h", "Electricity_MW", "NaturalGas_ton_per_h"]),
+    ) do io
+        each_context() do context, t
+            for node in hydrogen.ProductionNode
+                tonnes = _solution_value(emp[:electrolyzerHydrogen][node, t])
+                _write_csv_row(io, vcat([
+                    "Electrolyzer", node, "Electrolyzer",
+                ], collect(context), [
+                    tonnes, tonnes * par.Hydrogen.hydrogenMWhPerTon,
+                    _solution_value(emp[:electrolyzerElectricity][node, t]), 0.0,
+                ]))
+            end
+            for node in hydrogen.ReformerLocation, plant in hydrogen.ReformerPlant
+                _write_csv_row(io, vcat([
+                    "Reformer", node, plant,
+                ], collect(context), [
+                    _solution_value(emp[:reformerHydrogenTon][node, plant, t]),
+                    _solution_value(emp[:reformerHydrogenMWh][node, plant, t]),
+                    par.Hydrogen.reformerElectricityUse[(plant, context[1])] *
+                    _solution_value(emp[:reformerHydrogenTon][node, plant, t]),
+                    _solution_value(emp[:reformerNaturalGas][node, plant, t]),
+                ]))
+            end
+            for (node, terminal) in hydrogen.TerminalsOfNode
+                _write_csv_row(io, vcat([
+                    "Import", node, terminal,
+                ], collect(context), [
+                    _solution_value(emp[:hydrogenImportTon][node, terminal, t]),
+                    _solution_value(emp[:hydrogenImportMWh][node, terminal, t]),
+                    0.0, 0.0,
+                ]))
+            end
+        end
+    end
+    _write_hydrogen_table(
+        output_dir,
+        ("hydrogenPipelineFlow.csv", "results_hydrogen_pipeline_operations.csv"),
+        vcat(["FromNode", "ToNode"], operational_header, ["Flow_ton_per_h"]),
+    ) do io
+        each_context() do context, t
+            for (from, to) in hydrogen.DirectionalLink
+                _write_csv_row(io, vcat(
+                    [from, to], collect(context),
+                    [_solution_value(emp[:hydrogenPipelineFlow][from, to, t])],
+                ))
+            end
+        end
+    end
+    _write_hydrogen_table(
+        output_dir,
+        ("hydrogenStorageOperations.csv", "results_hydrogen_storage_operations.csv"),
+        vcat(["Node", "Storage"], operational_header, ["Level_ton", "Charge_ton_per_h", "Discharge_ton_per_h", "Compression_MW"]),
+    ) do io
+        each_context() do context, t
+            for (node, storage) in hydrogen.StoragesOfNode
+                _write_csv_row(io, vcat([node, storage], collect(context), [
+                    _solution_value(emp[:hydrogenStorageLevel][node, storage, t]),
+                    _solution_value(emp[:hydrogenStorageCharge][node, storage, t]),
+                    _solution_value(emp[:hydrogenStorageDischarge][node, storage, t]),
+                    _solution_value(emp[:hydrogenStorageCompressionPower][node, storage, t]),
+                ]))
+            end
+        end
+    end
+    _write_hydrogen_table(
+        output_dir,
+        ("hydrogenForPower.csv", "results_hydrogen_for_power.csv"),
+        vcat(["Node", "Generator"], operational_header, ["Hydrogen_ton_per_h"]),
+    ) do io
+        each_context() do context, t
+            for (node, generator) in _hydrogen_node_generators(sets)
+                _write_csv_row(io, vcat(
+                    [node, generator], collect(context),
+                    [_solution_value(emp[:hydrogenForPower][node, generator, t])],
+                ))
+            end
+        end
+    end
+    _write_hydrogen_table(
+        output_dir,
+        ("hydrogenTransport.csv", "results_transport_hydrogen_operations.csv"),
+        vcat(["Node"], operational_header, ["ElectricityMet_MW", "ElectricityShed_MW", "HydrogenMet_ton_per_h", "HydrogenShed_ton_per_h"]),
+    ) do io
+        each_context() do context, t
+            for node in natural_gas_onshore_nodes(sets)
+                _write_csv_row(io, vcat([node], collect(context), [
+                    _solution_value(emp[:transportElectricityDemandMet][node, t]),
+                    _solution_value(emp[:transportElectricityDemandShed][node, t]),
+                    _solution_value(emp[:transportHydrogenDemandMet][node, t]),
+                    _solution_value(emp[:transportHydrogenDemandShed][node, t]),
+                ]))
+            end
+        end
+    end
+    _write_hydrogen_table(
+        output_dir,
+        ("co2Operations.csv", "results_co2_operations.csv"),
+        vcat(["FromOrNode", "ToNode", "Operation"], operational_header, ["CO2_ton_per_h"]),
+    ) do io
+        each_context() do context, t
+            for (from, to) in hydrogen.CO2DirectionalLink
+                _write_csv_row(io, vcat(
+                    [from, to, "Pipeline"], collect(context),
+                    [_solution_value(emp[:co2PipelineFlow][from, to, t])],
+                ))
+            end
+            for node in hydrogen.CO2SequestrationNode
+                _write_csv_row(io, vcat(
+                    [node, "", "Sequestration"], collect(context),
+                    [_solution_value(emp[:co2Sequestered][node, t])],
+                ))
+            end
+        end
+    end
+    hydrogen_costs = hydrogen_objective_expressions(
+        emp,
+        sets,
+        par,
+        periods,
+        Discounter(discount_rate(par), 1, periods),
+    )
+    _write_hydrogen_table(
+        output_dir,
+        ("hydrogenCO2ObjectiveComponents.csv", "results_hydrogen_co2_objective.csv"),
+        ["Component", "DiscountedCost_EUR"],
+    ) do io
+        for (name, expression) in pairs(hydrogen_costs)
+            _write_csv_row(io, [String(name), JuMP.value(expression)])
+        end
+    end
+    # ---- tables InternalEMPIRE writes that the port previously omitted ----
+    # The "SCALED" columns follow InternalEMPIRE's seasScale weighting, which in
+    # this port is carried by TimeStruct: multiple_strat(sp, t) is the number of
+    # times an operational period repeats within its strategic period.
+
+    onshore = natural_gas_onshore_nodes(sets)
+    met = emp[:transportElectricityDemandMet]
+    shed = emp[:transportElectricityDemandShed]
+    _write_hydrogen_table(
+        output_dir,
+        ("transportElectricity.csv", "results_transport_electricity_operations.csv"),
+        ["Node", "Period", "Scenario", "Season", "Hour",
+         "DemandMet_MWh", "DemandMetScaled_MWh", "DemandShed_MWh", "DemandShedScaled_MWh"],
+    ) do io
+        for (period, sp) in strategic_periods
+            for (representative, rp) in enumerate(repr_periods(sp))
+                season = season_name(par, representative)
+                for (scenario, sc) in enumerate(opscenarios(rp))
+                    for (hour, t) in enumerate(sc)
+                        scale = multiple_strat(sp, t)
+                        for node in onshore
+                            m = _value_or_zero(met, node, t)
+                            h = _value_or_zero(shed, node, t)
+                            _write_csv_row(io, [node, period, scenario, season, hour,
+                                                m, scale * m, h, scale * h])
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    reformer_gas = emp[:reformerNaturalGas]
+    reformer_h2 = emp[:reformerHydrogenTon]
+    _write_hydrogen_table(
+        output_dir,
+        ("naturalGasForHydrogen.csv", "results_natural_gas_hydrogen.csv"),
+        ["Node", "Period", "Scenario", "Season", "Hour", "Reformer",
+         "NaturalGasForHydrogen_ton", "HydrogenProduced_ton"],
+    ) do io
+        _foreach_operational_index(par, periods) do period, scenario, season, hour, t
+            for node in hydrogen.ProductionNode, plant in hydrogen.ReformerPlant
+                _write_csv_row(io, [node, period, scenario, season, hour, plant,
+                                    _value_or_zero(reformer_gas, node, plant, t),
+                                    _value_or_zero(reformer_h2, node, plant, t)])
+            end
+        end
+    end
+
+    # Combined per-node hydrogen picture: where the hydrogen comes from and
+    # where it goes, in one row per node-hour.
+    elyzer_h2 = emp[:electrolyzerHydrogen]
+    stor_charge = emp[:hydrogenStorageCharge]
+    stor_discharge = emp[:hydrogenStorageDischarge]
+    h2_for_power = emp[:hydrogenForPower]
+    import_ton = emp[:hydrogenImportTon]
+    pipeline_flow = emp[:hydrogenPipelineFlow]
+    transport_met = emp[:transportHydrogenDemandMet]
+    _write_hydrogen_table(
+        output_dir,
+        ("hydrogenUse.csv", "results_hydrogen_use.csv"),
+        ["Node", "Period", "Scenario", "Season", "Hour",
+         "Produced_ton", "Stored_ton", "WithdrawnFromStorage_ton",
+         "BurnedForPower_ton", "Exported_ton", "Imported_ton", "ForTransport_ton"],
+    ) do io
+        outgoing = Dict(node => [to for (from, to) in hydrogen.Corridor if from == node]
+                        for node in hydrogen.ProductionNode)
+        _foreach_operational_index(par, periods) do period, scenario, season, hour, t
+            for node in hydrogen.ProductionNode
+                produced = _value_or_zero(elyzer_h2, node, t)
+                for plant in hydrogen.ReformerPlant
+                    produced += _value_or_zero(reformer_h2, node, plant, t)
+                end
+                stored = 0.0
+                withdrawn = 0.0
+                for storage in hydrogen.Storage
+                    stored += _value_or_zero(stor_charge, node, storage, t)
+                    withdrawn += _value_or_zero(stor_discharge, node, storage, t)
+                end
+                burned = 0.0
+                for generator in hydrogen.Generator
+                    burned += _value_or_zero(h2_for_power, node, generator, t)
+                end
+                exported = 0.0
+                for destination in get(outgoing, node, String[])
+                    exported += _value_or_zero(pipeline_flow, node, destination, t)
+                end
+                imported = 0.0
+                for terminal in hydrogen.Terminal
+                    imported += _value_or_zero(import_ton, node, terminal, t)
+                end
+                _write_csv_row(io, [node, period, scenario, season, hour,
+                                    produced, stored, withdrawn, burned, exported, imported,
+                                    _value_or_zero(transport_met, node, t)])
+            end
+        end
+    end
+
+    JuMP.has_duals(emp) && write_hydrogen_dual_csvs(output_dir, emp, sets, par, periods)
+    return output_dir
+
+end
+
+function write_hydrogen_dual_csvs(output_dir, emp, sets, par, periods)
+    discounter = Discounter(discount_rate(par), 1, periods)
+    return _write_csv_table(
+        joinpath(output_dir, "hydrogenCO2OperationalDuals.csv"),
+        ["Commodity", "Node", "Period", "Scenario", "WeatherScenario", "GasScenario", "Season", "Hour", "Price_EUR_per_ton"],
+    ) do io
+        _foreach_natural_gas_operational_context(
+            (period, strategic_period, scenario, weather, gas, representative, season, hour, t) -> begin
+                weight = objective_weight(t, discounter; type = "avg_year")
+                for node in hydrogen_nodes(sets)
+                    _write_csv_row(io, [
+                        "Hydrogen", node, period, scenario, weather, gas, season, hour,
+                        _dual_or_nan(emp[:hydrogen_flow_balance], node, t) / weight,
+                    ])
+                end
+                for node in natural_gas_onshore_nodes(sets)
+                    _write_csv_row(io, [
+                        "CO2", node, period, scenario, weather, gas, season, hour,
+                        _dual_or_nan(emp[:co2_flow_balance], node, t) / weight,
+                    ])
+                end
+            end,
+            par,
+            periods,
+        )
+    end
 end
 
 function _write_natural_gas_table(

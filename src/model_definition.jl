@@ -82,6 +82,8 @@ function create_variables(
     sets,
     periods::TimeStruct.TimeStructure;
     natural_gas::Bool = false,
+    hydrogen::Bool = false,
+    gas_transport_demand::Bool = natural_gas,
     progress = nothing,
 )
 
@@ -172,7 +174,10 @@ function create_variables(
     for n in N, t in T
         unsafe_insertvar!(loadShed, n, t)
     end
-    natural_gas && create_natural_gas_variables!(emp, sets, periods)
+    natural_gas && create_natural_gas_variables!(
+        emp, sets, periods; transport_demand = gas_transport_demand,
+    )
+    hydrogen && create_hydrogen_variables!(emp, sets, periods)
     return
 end
 
@@ -183,6 +188,7 @@ function create_objective(
     periods::TimeStructure,
     discounter::Discounter;
     natural_gas::Bool = false,
+    hydrogen::Bool = false,
     progress = nothing,
 )
     @info "Creating objective function"
@@ -193,6 +199,10 @@ function create_objective(
     return @objective(emp, Min, sum(values(components)))
 end
 
+# `include_investment_constraints` gates the investment-linking constraints. The
+# controlled parity fixtures pin every investment variable to zero and set installed
+# capacity exogenously; the linking constraints make that infeasible. Defaults to
+# true, so ordinary model building is unchanged.
 # Create all constraints in the model
 function create_constraints(
     emp::JuMP.Model,
@@ -202,6 +212,9 @@ function create_constraints(
     offshore_transmission_cap::Bool = true,
     include_investment_constraints::Bool = true,
     natural_gas::Bool = false,
+    hydrogen::Bool = false,
+    # InternalEMPIRE declares natural-gas transport demand in its Hydrogen block.
+    gas_transport_demand::Bool = natural_gas,
     progress = nothing,
 )
     @info "Creating constraints"
@@ -216,6 +229,10 @@ function create_constraints(
     storDischarge = emp[:storDischarge]
     trOp = emp[:transmissionOperational]
     shed = emp[:loadShed]
+    if hydrogen
+        _sector_period_context(emp, periods, par.NaturalGas.gasScenarioCount)
+        _hydrogen_electricity_context!(emp, sets, par)
+    end
 
     @info "Flow balance constraints: $((length(N)) * length(T))"
     _report_progress(progress, "Creating flow-balance constraints ($(length(N) * length(T)) constraints)")
@@ -229,7 +246,9 @@ function create_constraints(
                 natural_gas ?
                 natural_gas_pipeline_electricity_demand(emp, sets, par, n, t) :
                 0.0
-            ) == load(par, n, t)
+            ) -
+            (hydrogen ? hydrogen_electricity_demand(emp, sets, par, n, t) : 0.0) ==
+            load(par, n, t)
     )
 
     if !include_investment_constraints
@@ -262,8 +281,17 @@ function create_constraints(
         include_investment_constraints,
         progress,
     )
-    create_emission_constraints(emp, sets, par, periods; progress)
-    natural_gas && create_natural_gas_constraints!(emp, sets, par, periods)
+    create_emission_constraints(emp, sets, par, periods; hydrogen, progress)
+    natural_gas && create_natural_gas_constraints!(
+        emp, sets, par, periods; transport_demand = gas_transport_demand,
+    )
+    hydrogen && create_hydrogen_constraints!(
+        emp,
+        sets,
+        par,
+        periods;
+        include_investment_constraints,
+    )
     return nothing
 
 end
@@ -705,7 +733,14 @@ function _opscenario_count(sp)
     return length(opscenarios(first_rp))
 end
 
-function create_emission_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
+function create_emission_constraints(
+    emp::JuMP.Model,
+    sets,
+    par,
+    periods::TimeStructure;
+    hydrogen::Bool = false,
+    progress = nothing,
+)
     par.CO2cap === nothing && return nothing
 
     @info "Creating emission constraints"
@@ -715,6 +750,7 @@ function create_emission_constraints(emp::JuMP.Model, sets, par, periods::TimeSt
 
     N = nodes(sets)
     genOp = emp[:genOperational]
+    strategic_index = Dict(period => index for (index, period) in enumerate(SP))
 
     @variable(emp, nodeEmission[N, sp in SP, sc in 1:_opscenario_count(sp)])
 
@@ -733,7 +769,19 @@ function create_emission_constraints(emp::JuMP.Model, sets, par, periods::TimeSt
                 if scenario_index == sc
                 for t in scenario;
                 init = 0.0
-            )
+            ) +
+            (hydrogen && n in hydrogen_sets(sets).ReformerLocation ?
+                sum(
+                    multiple_strat(sp, t) *
+                    par.Hydrogen.reformerEmissionFactor[(plant, strategic_index[sp])] *
+                    emp[:reformerHydrogenTon][n, plant, t]
+                    for plant in hydrogen_sets(sets).ReformerPlant
+                    for rp in repr_periods(sp)
+                    for (scenario_index, scenario) in enumerate(opscenarios(rp))
+                    if scenario_index == sc
+                    for t in scenario;
+                    init = 0.0,
+                ) : 0.0)
     )
 
     return @constraint(
@@ -754,6 +802,14 @@ function objective_component_expressions(emp::JuMP.Model, sets, par, periods::Ti
     shed = emp[:loadShed]
     genOp = emp[:genOperational]
     gas_costs = natural_gas_objective_expressions(emp, sets, par, periods, discounter)
+    hydrogen_costs = has_hydrogen(sets) ?
+                     hydrogen_objective_expressions(emp, sets, par, periods, discounter) :
+                     (
+        investment = JuMP.AffExpr(0.0),
+        terminal_import = JuMP.AffExpr(0.0),
+        reformer_operation = JuMP.AffExpr(0.0),
+        transport_shedding = JuMP.AffExpr(0.0),
+    )
 
     # `total += coef * var` rebuilds the whole expression each iteration, making an
     # n-term sum O(n^2) in both time and allocation. `add_to_expression!` appends in
@@ -833,6 +889,10 @@ function objective_component_expressions(emp::JuMP.Model, sets, par, periods::Ti
         generator_operation = accumulate_operational(generator_operation_expr),
         natural_gas_terminal_import = gas_costs.terminal_import,
         natural_gas_transport_shedding = gas_costs.transport_shedding,
+        hydrogen_investment = hydrogen_costs.investment,
+        hydrogen_terminal_import = hydrogen_costs.terminal_import,
+        hydrogen_reformer_operation = hydrogen_costs.reformer_operation,
+        hydrogen_transport_shedding = hydrogen_costs.transport_shedding,
     )
 end
 

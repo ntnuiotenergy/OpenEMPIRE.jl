@@ -80,6 +80,30 @@ written only when operational duals are available. The run manifest records the
 module gate, both scenario counts, exact gas-input hashes, and conversion
 manifest hash.
 
+### Hydrogen and CO2 evidence module
+
+The in-development Hydrogen port is also opt-in:
+
+```yaml
+natural_gas: true
+hydrogen: true
+number_of_gas_scenarios: 1
+```
+
+Hydrogen currently requires natural gas because reformers consume gas through
+the shared gas balance. Deterministic evidence deliberately rejects more than
+one gas-price scenario until an actual InternalEMPIRE two-price comparison is
+complete. With Hydrogen disabled, its CSV files are neither required nor read.
+
+The module covers electrolyzers, reformers, imports, Hydrogen pipelines and
+storage, gas-pipeline repurposing, Hydrogen-fired generation, transport demand,
+and the coupled CO2 network. Native and Python-style results are written below
+`<result-dir>/output/`; exact input and conversion-manifest hashes are recorded
+in `run_manifest.yaml`. See
+[`docs/hydrogen_data_conversion.md`](docs/hydrogen_data_conversion.md) and
+[`HYDROGEN_IMPLEMENTATION_STATUS.md`](HYDROGEN_IMPLEMENTATION_STATUS.md) for
+the evidence boundary and remaining reference-parity work.
+
 The model can then be optimized using `JuMP` with the associated solver:
 ```
 JuMP.optimize!(emp)

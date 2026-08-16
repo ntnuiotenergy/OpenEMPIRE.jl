@@ -29,9 +29,10 @@ function preprocess_params(
     sets,
     periods;
     natural_gas::Bool = false,
+    hydrogen::Bool = false,
 )
     preprocess_invest_cost(params, sets, periods)
-    preprocess_operational_cost(params, sets, periods; natural_gas)
+    preprocess_operational_cost(params, sets, periods; natural_gas, hydrogen)
     preprocess_initcap_gen(params, sets, periods)
     preprocess_stoch_load(params, sets, periods)
     preprocess_max_installed_cap(params, sets, periods)
@@ -187,9 +188,15 @@ function preprocess_max_installed_cap(params::EmpireParams, sets, periods)
         for sp in strat_periods(periods)
             max_cap = get(params.genMaxInstalledCapRaw, (n, gt), DEFAULT_GEN_MAX_INST_CAP_RAW)
             init_cap = sum(gencap_init(params, n, g, sp) for g in generators_tech(sets, n, gt); init = 0)
-            if init_cap > max_cap
-                @warn "Initial capacity $init_cap for technology $gt at node $n exceeds maximum installed capacity $max_cap. Setting maximum installed capacity to initial capacity."
+            period_cap = haskey(params.genMaxInstalledCapByPeriod, (n, gt)) ?
+                         params.genMaxInstalledCapByPeriod[(n, gt)][sp] : 0.0
+            if max_cap <= init_cap
+                if init_cap > max_cap
+                    @warn "Initial capacity $init_cap for technology $gt at node $n exceeds maximum installed capacity $max_cap. Setting maximum installed capacity to initial capacity."
+                end
                 max_cap = init_cap
+            elseif init_cap < period_cap < max_cap
+                max_cap = period_cap
             end
             push!(vals, max_cap)
         end
@@ -219,6 +226,7 @@ function preprocess_operational_cost(
     sets,
     periods;
     natural_gas::Bool = false,
+    hydrogen::Bool = false,
 )
     params.genMargCost = Dict{String, StrategicProfile}()
     for g in sets.Generator
@@ -228,17 +236,18 @@ function preprocess_operational_cost(
         # must not be skipped here: a missing `genMargCost` key silently falls back
         # to `DEFAULT_GEN_MARGINAL_COST` (zero) and makes gas generation free.
         gas_fuelled = natural_gas && g in natural_gas_generators(sets)
+        hydrogen_fuelled = hydrogen && g in hydrogen_generators(sets)
 
         # Without an efficiency profile there is no marginal-cost basis at all, so
         # the generator keeps the documented accessor fallback. Never construct an
         # empty StrategicProfile: validation and model evaluation cannot index one.
         haskey(params.genEfficiency, g) || continue
 
-        if !haskey(params.genFuelCost, g) && !gas_fuelled
+        if !haskey(params.genFuelCost, g) && !(gas_fuelled || hydrogen_fuelled)
             throw(ArgumentError(
                 "Generator $g has a genEfficiency profile but no genFuelCost entry. " *
                 "Add its fuel cost, or enable `natural_gas` if it is gas-fired and " *
-                "priced through natural-gas terminal imports.",
+                "priced through its enabled sector module.",
             ))
         end
 
@@ -258,7 +267,7 @@ function preprocess_operational_cost(
             # active. Keep variable O&M and carbon costs here, but do not charge
             # the ordinary generator fuel price a second time.
             fuel_cost =
-                natural_gas && g in natural_gas_generators(sets) ?
+                gas_fuelled || hydrogen_fuelled ?
                 0.0 : params.genFuelCost[g][sp]
             cost_per_energy =
                 (3.6 / params.genEfficiency[g][sp]) *

@@ -29,6 +29,61 @@ Base.@kwdef mutable struct NaturalGasParams
     gasScenarioCount::Int = 1
 end
 
+const HydrogenPlantPeriod = Tuple{String, Int}
+const HydrogenNodeStorage = Tuple{String, String}
+const HydrogenNodeTerminalPeriod = Tuple{String, String, Int}
+const HydrogenNodePeriod = Tuple{String, Int}
+
+"""Typed deterministic Hydrogen and CO₂ input parameters."""
+Base.@kwdef mutable struct HydrogenParams
+    electrolyzerCapitalCost::Dict{Int, Float64} = Dict{Int, Float64}()
+    electrolyzerFixedOMCost::Dict{Int, Float64} = Dict{Int, Float64}()
+    electrolyzerPowerUse::Dict{Int, Float64} = Dict{Int, Float64}()
+    electrolyzerLifetime::Float64 = 0.0
+    reformerCapitalCost::Dict{HydrogenPlantPeriod, Float64} = Dict{HydrogenPlantPeriod, Float64}()
+    reformerFixedOMCost::Dict{HydrogenPlantPeriod, Float64} = Dict{HydrogenPlantPeriod, Float64}()
+    reformerVariableOMCost::Dict{HydrogenPlantPeriod, Float64} = Dict{HydrogenPlantPeriod, Float64}()
+    reformerEfficiency::Dict{HydrogenPlantPeriod, Float64} = Dict{HydrogenPlantPeriod, Float64}()
+    reformerElectricityUse::Dict{HydrogenPlantPeriod, Float64} = Dict{HydrogenPlantPeriod, Float64}()
+    reformerEmissionFactor::Dict{HydrogenPlantPeriod, Float64} = Dict{HydrogenPlantPeriod, Float64}()
+    reformerCO2CaptureFactor::Dict{HydrogenPlantPeriod, Float64} = Dict{HydrogenPlantPeriod, Float64}()
+    reformerLifetime::Dict{String, Float64} = Dict{String, Float64}()
+    pipelineCapitalCost::Dict{Int, Float64} = Dict{Int, Float64}()
+    pipelineOMCostPerKM::Dict{Int, Float64} = Dict{Int, Float64}()
+    pipelineCompressorPowerUsage::Float64 = 0.0
+    storageCapitalCost::Dict{HydrogenPlantPeriod, Float64} = Dict{HydrogenPlantPeriod, Float64}()
+    storageFixedOMCost::Dict{HydrogenPlantPeriod, Float64} = Dict{HydrogenPlantPeriod, Float64}()
+    storageLifetime::Dict{String, Float64} = Dict{String, Float64}()
+    storageMaxCapacity::Dict{HydrogenNodeStorage, Float64} = Dict{HydrogenNodeStorage, Float64}()
+    terminalInitialCapacity::Dict{HydrogenNodeTerminalPeriod, Float64} = Dict{HydrogenNodeTerminalPeriod, Float64}()
+    terminalCapitalCost::Dict{HydrogenNodeTerminalPeriod, Float64} = Dict{HydrogenNodeTerminalPeriod, Float64}()
+    terminalFixedOMCost::Dict{HydrogenNodeTerminalPeriod, Float64} = Dict{HydrogenNodeTerminalPeriod, Float64}()
+    terminalPrice::Dict{HydrogenNodeTerminalPeriod, Float64} = Dict{HydrogenNodeTerminalPeriod, Float64}()
+    terminalLifetime::Dict{String, Float64} = Dict{String, Float64}()
+    electricityTransportDemand::Dict{HydrogenNodePeriod, Float64} = Dict{HydrogenNodePeriod, Float64}()
+    hydrogenTransportDemand::Dict{HydrogenNodePeriod, Float64} = Dict{HydrogenNodePeriod, Float64}()
+    generatorCO2Captured::Dict{String, Float64} = Dict{String, Float64}()
+    co2StorageMaxCapacity::Dict{HydrogenNodePeriod, Float64} = Dict{HydrogenNodePeriod, Float64}()
+    co2MaxSequestrationCapacity::Dict{String, Float64} = Dict{String, Float64}()
+    co2StorageSiteCapitalCost::Dict{String, Float64} = Dict{String, Float64}()
+    co2StorageSiteFixedOMCost::Dict{String, Float64} = Dict{String, Float64}()
+    co2PipelineCapitalCost::Float64 = 0.0
+    co2PipelineFixedOMCost::Float64 = 0.0
+    co2PipelineElectricityUsage::Float64 = 0.0
+    co2PipelineLifetime::Float64 = 0.0
+    hydrogenMWhPerTon::Float64 = 33.3
+    storageInitialFraction::Float64 = 0.5
+    storageCompressionMWhPerTon::Float64 = 0.333
+    pipelineCompressorStaticMWhPerTon::Float64 = 1.0
+    pipelineLifetime::Float64 = 40.0
+    pipelineLeakageFractionPerKM::Float64 = 5e-6
+    reformerRampFractionPerHour::Float64 = 0.1
+    repurposeCostFactor::Float64 = 0.25
+    repurposeEnergyFlowFactor::Float64 = 0.8
+    terminalEURPerKgToEURPerTon::Float64 = 1000.0
+    hoursPerYear::Float64 = 8760.0
+end
+
 """
     EmpireParams
 
@@ -71,6 +126,7 @@ Base.@kwdef mutable struct EmpireParams
     genInitCap::Dict{Tuple{String, String}, TimeProfile}         = Dict{Tuple{String, String}, TimeProfile}()
     genMaxBuiltCap::Dict{Tuple{String, String}, TimeProfile}     = Dict{Tuple{String, String}, TimeProfile}()
     genMaxInstalledCapRaw::Dict{Tuple{String, String}, Float64}  = Dict{Tuple{String, String}, Float64}()
+    genMaxInstalledCapByPeriod::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
     genMaxInstalledCap::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
     genMaxBiomethaneAvailability::Dict{String, TimeProfile}      = Dict{String, TimeProfile}()
     genRampUpCap::Dict{String, Float64}                          = Dict{String, Float64}()
@@ -142,6 +198,7 @@ Base.@kwdef mutable struct EmpireParams
 
     # Optional sector modules
     NaturalGas::NaturalGasParams = NaturalGasParams()
+    Hydrogen::HydrogenParams = HydrogenParams()
 end
 
 # Default values used by the accessor helpers below.
@@ -618,6 +675,218 @@ function validate_natural_gas(
     return errs
 end
 
+function _check_hydrogen_values!(errs, name, values; min = 0.0, max = nothing)
+    for (key, value) in values
+        isfinite(value) || push!(errs, "Hydrogen.$name[$key] must be finite")
+        value >= min || push!(errs, "Hydrogen.$name[$key] must be at least $min")
+        max !== nothing && value > max &&
+            push!(errs, "Hydrogen.$name[$key] must be at most $max")
+    end
+    return
+end
+
+function _check_hydrogen_params!(
+    errs::Vector{String},
+    par::EmpireParams,
+    sets::Union{Nothing, EmpireSets},
+    periods::Union{Nothing, TimeStructure},
+)
+    hydrogen = par.Hydrogen
+    module_present = sets !== nothing && has_hydrogen(sets)
+    has_inputs = !isempty(hydrogen.electrolyzerCapitalCost)
+    (module_present || has_inputs) || return
+
+    for (name, value, positive, at_most_one) in (
+        ("electrolyzerLifetime", hydrogen.electrolyzerLifetime, true, false),
+        ("pipelineCompressorPowerUsage", hydrogen.pipelineCompressorPowerUsage, false, false),
+        ("co2PipelineCapitalCost", hydrogen.co2PipelineCapitalCost, false, false),
+        ("co2PipelineFixedOMCost", hydrogen.co2PipelineFixedOMCost, false, false),
+        ("co2PipelineElectricityUsage", hydrogen.co2PipelineElectricityUsage, false, false),
+        ("co2PipelineLifetime", hydrogen.co2PipelineLifetime, true, false),
+        ("hydrogenMWhPerTon", hydrogen.hydrogenMWhPerTon, true, false),
+        ("storageInitialFraction", hydrogen.storageInitialFraction, false, true),
+        ("storageCompressionMWhPerTon", hydrogen.storageCompressionMWhPerTon, false, false),
+        ("pipelineCompressorStaticMWhPerTon", hydrogen.pipelineCompressorStaticMWhPerTon, false, false),
+        ("pipelineLifetime", hydrogen.pipelineLifetime, true, false),
+        ("pipelineLeakageFractionPerKM", hydrogen.pipelineLeakageFractionPerKM, false, true),
+        ("reformerRampFractionPerHour", hydrogen.reformerRampFractionPerHour, false, true),
+        ("repurposeCostFactor", hydrogen.repurposeCostFactor, false, true),
+        ("repurposeEnergyFlowFactor", hydrogen.repurposeEnergyFlowFactor, false, true),
+        ("terminalEURPerKgToEURPerTon", hydrogen.terminalEURPerKgToEURPerTon, true, false),
+        ("hoursPerYear", hydrogen.hoursPerYear, true, false),
+    )
+        isfinite(value) || push!(errs, "Hydrogen.$name must be finite")
+        value >= 0 || push!(errs, "Hydrogen.$name must be non-negative")
+        positive && value <= 0 && push!(errs, "Hydrogen.$name must be positive")
+        at_most_one && value > 1 && push!(errs, "Hydrogen.$name must be at most 1")
+    end
+
+    for (name, values) in (
+        ("electrolyzerCapitalCost", hydrogen.electrolyzerCapitalCost),
+        ("electrolyzerFixedOMCost", hydrogen.electrolyzerFixedOMCost),
+        ("electrolyzerPowerUse", hydrogen.electrolyzerPowerUse),
+        ("reformerCapitalCost", hydrogen.reformerCapitalCost),
+        ("reformerFixedOMCost", hydrogen.reformerFixedOMCost),
+        ("reformerVariableOMCost", hydrogen.reformerVariableOMCost),
+        ("reformerEmissionFactor", hydrogen.reformerEmissionFactor),
+        ("reformerCO2CaptureFactor", hydrogen.reformerCO2CaptureFactor),
+        ("reformerLifetime", hydrogen.reformerLifetime),
+        ("pipelineCapitalCost", hydrogen.pipelineCapitalCost),
+        ("pipelineOMCostPerKM", hydrogen.pipelineOMCostPerKM),
+        ("storageCapitalCost", hydrogen.storageCapitalCost),
+        ("storageFixedOMCost", hydrogen.storageFixedOMCost),
+        ("storageLifetime", hydrogen.storageLifetime),
+        ("storageMaxCapacity", hydrogen.storageMaxCapacity),
+        ("terminalInitialCapacity", hydrogen.terminalInitialCapacity),
+        ("terminalCapitalCost", hydrogen.terminalCapitalCost),
+        ("terminalFixedOMCost", hydrogen.terminalFixedOMCost),
+        ("terminalPrice", hydrogen.terminalPrice),
+        ("terminalLifetime", hydrogen.terminalLifetime),
+        ("electricityTransportDemand", hydrogen.electricityTransportDemand),
+        ("hydrogenTransportDemand", hydrogen.hydrogenTransportDemand),
+        ("generatorCO2Captured", hydrogen.generatorCO2Captured),
+        ("co2StorageMaxCapacity", hydrogen.co2StorageMaxCapacity),
+        ("co2MaxSequestrationCapacity", hydrogen.co2MaxSequestrationCapacity),
+        ("co2StorageSiteCapitalCost", hydrogen.co2StorageSiteCapitalCost),
+        ("co2StorageSiteFixedOMCost", hydrogen.co2StorageSiteFixedOMCost),
+    )
+        _check_hydrogen_values!(errs, name, values)
+    end
+    _check_hydrogen_values!(errs, "reformerEfficiency", hydrogen.reformerEfficiency; max = 1.0)
+    for (key, value) in hydrogen.reformerEfficiency
+        value > 0 || push!(errs, "Hydrogen.reformerEfficiency[$key] must be positive")
+    end
+    for (key, value) in hydrogen.reformerElectricityUse
+        isfinite(value) || push!(errs, "Hydrogen.reformerElectricityUse[$key] must be finite")
+        value < 0 && key[1] != "SMR" && push!(
+            errs,
+            "Hydrogen.reformerElectricityUse[$key] may be negative only for the audited SMR source row",
+        )
+    end
+    for (name, values) in (
+        ("reformerLifetime", hydrogen.reformerLifetime),
+        ("storageLifetime", hydrogen.storageLifetime),
+        ("terminalLifetime", hydrogen.terminalLifetime),
+    )
+        for (key, value) in values
+            value > 0 || push!(errs, "Hydrogen.$name[$key] must be positive")
+        end
+    end
+
+    sets === nothing && return
+    hsets = hydrogen_sets(sets)
+    production_nodes = Set(hsets.ProductionNode)
+    reformer_plants = Set(hsets.ReformerPlant)
+    storage_set = Set(hsets.Storage)
+    terminal_pairs = Set(hsets.TerminalsOfNode)
+    terminal_set = Set(hsets.Terminal)
+    co2_nodes = Set(hsets.CO2SequestrationNode)
+    generator_set = Set(generators(sets))
+    for (key, _) in hydrogen.storageMaxCapacity
+        key[1] in production_nodes || push!(errs, "Hydrogen.storageMaxCapacity has unknown node: $key")
+        key[2] in storage_set || push!(errs, "Hydrogen.storageMaxCapacity has unknown storage: $key")
+    end
+    for (name, values) in (
+        ("terminalInitialCapacity", hydrogen.terminalInitialCapacity),
+        ("terminalCapitalCost", hydrogen.terminalCapitalCost),
+        ("terminalFixedOMCost", hydrogen.terminalFixedOMCost),
+        ("terminalPrice", hydrogen.terminalPrice),
+    )
+        for key in keys(values)
+            key[1:2] in terminal_pairs || push!(errs, "Hydrogen.$name has unknown terminal pair: $key")
+        end
+    end
+    for key in keys(hydrogen.terminalLifetime)
+        key in terminal_set || push!(errs, "Hydrogen.terminalLifetime has unknown terminal: $key")
+    end
+    for (name, values) in (
+        ("reformerCapitalCost", hydrogen.reformerCapitalCost),
+        ("reformerFixedOMCost", hydrogen.reformerFixedOMCost),
+        ("reformerVariableOMCost", hydrogen.reformerVariableOMCost),
+        ("reformerEfficiency", hydrogen.reformerEfficiency),
+        ("reformerElectricityUse", hydrogen.reformerElectricityUse),
+        ("reformerEmissionFactor", hydrogen.reformerEmissionFactor),
+        ("reformerCO2CaptureFactor", hydrogen.reformerCO2CaptureFactor),
+    )
+        for key in keys(values)
+            key[1] in reformer_plants || push!(errs, "Hydrogen.$name has unknown reformer: $key")
+        end
+    end
+    for key in keys(hydrogen.generatorCO2Captured)
+        key in generator_set || push!(errs, "Hydrogen.generatorCO2Captured has unknown generator: $key")
+    end
+    for (name, values) in (
+        ("co2StorageMaxCapacity", hydrogen.co2StorageMaxCapacity),
+        ("co2MaxSequestrationCapacity", hydrogen.co2MaxSequestrationCapacity),
+        ("co2StorageSiteCapitalCost", hydrogen.co2StorageSiteCapitalCost),
+        ("co2StorageSiteFixedOMCost", hydrogen.co2StorageSiteFixedOMCost),
+    )
+        for key in keys(values)
+            node = key isa Tuple ? key[1] : key
+            node in co2_nodes || push!(errs, "Hydrogen.$name has unknown CO2 node: $key")
+        end
+    end
+
+    periods === nothing && return
+    period_ids = Set(1:length(strat_periods(periods)))
+    expected_plant_periods = Set((plant, period) for plant in reformer_plants for period in period_ids)
+    expected_storage_periods = Set((storage, period) for storage in storage_set for period in period_ids)
+    expected_terminal_periods = Set(
+        (node, terminal, period) for (node, terminal) in terminal_pairs for period in period_ids
+    )
+    expected_transport = Set(
+        (node, period) for node in natural_gas_onshore_nodes(sets) for period in period_ids
+    )
+    expected_co2_periods = Set((node, period) for node in co2_nodes for period in period_ids)
+    for (name, expected, actual) in (
+        ("electrolyzerCapitalCost", period_ids, Set(keys(hydrogen.electrolyzerCapitalCost))),
+        ("electrolyzerFixedOMCost", period_ids, Set(keys(hydrogen.electrolyzerFixedOMCost))),
+        ("electrolyzerPowerUse", period_ids, Set(keys(hydrogen.electrolyzerPowerUse))),
+        ("pipelineCapitalCost", period_ids, Set(keys(hydrogen.pipelineCapitalCost))),
+        ("pipelineOMCostPerKM", period_ids, Set(keys(hydrogen.pipelineOMCostPerKM))),
+        ("reformerCapitalCost", expected_plant_periods, Set(keys(hydrogen.reformerCapitalCost))),
+        ("reformerFixedOMCost", expected_plant_periods, Set(keys(hydrogen.reformerFixedOMCost))),
+        ("reformerVariableOMCost", expected_plant_periods, Set(keys(hydrogen.reformerVariableOMCost))),
+        ("reformerEfficiency", expected_plant_periods, Set(keys(hydrogen.reformerEfficiency))),
+        ("reformerElectricityUse", expected_plant_periods, Set(keys(hydrogen.reformerElectricityUse))),
+        ("reformerEmissionFactor", expected_plant_periods, Set(keys(hydrogen.reformerEmissionFactor))),
+        ("reformerCO2CaptureFactor", expected_plant_periods, Set(keys(hydrogen.reformerCO2CaptureFactor))),
+        ("storageCapitalCost", expected_storage_periods, Set(keys(hydrogen.storageCapitalCost))),
+        ("storageFixedOMCost", expected_storage_periods, Set(keys(hydrogen.storageFixedOMCost))),
+        ("terminalInitialCapacity", expected_terminal_periods, Set(keys(hydrogen.terminalInitialCapacity))),
+        ("terminalCapitalCost", expected_terminal_periods, Set(keys(hydrogen.terminalCapitalCost))),
+        ("terminalFixedOMCost", expected_terminal_periods, Set(keys(hydrogen.terminalFixedOMCost))),
+        ("terminalPrice", expected_terminal_periods, Set(keys(hydrogen.terminalPrice))),
+        ("electricityTransportDemand", expected_transport, Set(keys(hydrogen.electricityTransportDemand))),
+        ("hydrogenTransportDemand", expected_transport, Set(keys(hydrogen.hydrogenTransportDemand))),
+        ("co2StorageMaxCapacity", expected_co2_periods, Set(keys(hydrogen.co2StorageMaxCapacity))),
+    )
+        missing = setdiff(expected, actual)
+        isempty(missing) || push!(errs, "Hydrogen.$name is missing $(length(missing)) required key(s)")
+        # A self-contained dataset may cover more strategic periods than a reduced
+        # smoke/parity configuration uses. Those later rows are valid source data;
+        # only absence of an active-period key is a model error.
+    end
+    Set(keys(hydrogen.reformerLifetime)) == reformer_plants ||
+        push!(errs, "Hydrogen.reformerLifetime does not exactly cover ReformerPlant")
+    Set(keys(hydrogen.storageLifetime)) == storage_set ||
+        push!(errs, "Hydrogen.storageLifetime does not exactly cover Storage")
+    Set(keys(hydrogen.terminalLifetime)) == terminal_set ||
+        push!(errs, "Hydrogen.terminalLifetime does not exactly cover Terminal")
+    return
+end
+
+"""Return fatal deterministic Hydrogen/CO₂ input issues."""
+function validate_hydrogen(
+    par::EmpireParams,
+    sets::EmpireSets,
+    periods::Union{Nothing, TimeStructure} = nothing,
+)
+    errs = String[]
+    _check_hydrogen_params!(errs, par, sets, periods)
+    return errs
+end
+
 """
     validate(par::EmpireParams; sets::Union{Nothing, EmpireSets} = nothing,
              periods::Union{Nothing, TimeStructure} = nothing,
@@ -697,6 +966,7 @@ function validate(
             ("genScaleInitCap", par.genScaleInitCap),
             ("genInitCap", par.genInitCap),
             ("genMaxBuiltCap", par.genMaxBuiltCap),
+            ("genMaxInstalledCapByPeriod", par.genMaxInstalledCapByPeriod),
             ("genMaxInstalledCap", par.genMaxInstalledCap),
             ("genMaxBiomethaneAvailability", par.genMaxBiomethaneAvailability),
             ("transmissionInitCap", par.transmissionInitCap),
@@ -738,6 +1008,7 @@ function validate(
     _check_profile_scalar!(errs, "CO2price", par.CO2price, periods; min = 0.0)
     _check_profile_scalar!(errs, "availableBioEnergy", par.availableBioEnergy, periods; min = 0.0)
     _check_natural_gas_params!(errs, par, sets, periods)
+    _check_hydrogen_params!(errs, par, sets, periods)
 
     # Index checks (only if a set is provided)
     if sets !== nothing
@@ -824,6 +1095,7 @@ function validate(
         for (name, d) in (
                 ("genMaxBuiltCap", par.genMaxBuiltCap),
                 ("genMaxInstalledCapRaw", par.genMaxInstalledCapRaw),
+                ("genMaxInstalledCapByPeriod", par.genMaxInstalledCapByPeriod),
                 ("genMaxInstalledCap", par.genMaxInstalledCap),
             )
             _check_tuple_keys_in_sets!(errs, name, d, nset, "node", Set(techs(sets)), "technology")

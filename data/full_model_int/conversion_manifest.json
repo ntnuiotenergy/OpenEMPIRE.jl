@@ -106,6 +106,66 @@
   ],
   "files": [
     {
+      "path": "CO2/CO2SequestrationNodes.csv",
+      "bytes": 65,
+      "rows": 6,
+      "sha256": "805ee6f342245d09153a8865e8de68da219a1c2ce04621fe9b5e2292b7361af4"
+    },
+    {
+      "path": "CO2/MaxSequestrationCapacity.csv",
+      "bytes": 161,
+      "rows": 6,
+      "sha256": "a62f065881927518968d5643a217f7661b816561e8175f9f346b07682dc9bd61"
+    },
+    {
+      "path": "CO2/PipelineCapitalCost.csv",
+      "bytes": 41,
+      "rows": 1,
+      "sha256": "6b7028aceeca5d461eb1a0498e6a338885550fea3d46cfb0312b2d6371b9d8c1"
+    },
+    {
+      "path": "CO2/PipelineElectricityUsage.csv",
+      "bytes": 30,
+      "rows": 1,
+      "sha256": "f0f6e104ced084b1bda8712daebff91c1c82cf1a4d3a864b0770467b7499c230"
+    },
+    {
+      "path": "CO2/PipelineFixedOM.csv",
+      "bytes": 26,
+      "rows": 1,
+      "sha256": "a92edba2ca8ae89181c80ba6ba1785370c118c8fa0998115b1be09b8e85d3e01"
+    },
+    {
+      "path": "CO2/PipelineLifetime.csv",
+      "bytes": 20,
+      "rows": 1,
+      "sha256": "e3194dc0507d878e5705b29994f1dae6732521ea8892bac0d3efd62d46e52d5a"
+    },
+    {
+      "path": "CO2/StorageMaxCapacity.csv",
+      "bytes": 722,
+      "rows": 42,
+      "sha256": "24e88d7e0455a0c2db625eddc4c430d287135fc8583d37bbc50612b8c182488c"
+    },
+    {
+      "path": "CO2/StorageSiteCapitalCost.csv",
+      "bytes": 124,
+      "rows": 6,
+      "sha256": "f7d62488a372573790a73aaf2045ce3da043733f185d7f2922706a12663e503f"
+    },
+    {
+      "path": "CO2/StorageSiteFixedOMCost.csv",
+      "bytes": 110,
+      "rows": 6,
+      "sha256": "f8cd8f78a19547737f7d7df161d4ff5e3c874c047d06099dae551a5e8aac1ea0"
+    },
+    {
+      "path": "CO2/generated_default_rows.csv",
+      "bytes": 1601,
+      "rows": 24,
+      "sha256": "a446ccc400983c9fba955f0ef056c20d06bdb634a022efe87d44c361c53f8599"
+    },
+    {
       "path": "General/AvailableBioEnergy.csv",
       "bytes": 123,
       "rows": 7,
@@ -146,6 +206,18 @@
       "bytes": 6468,
       "rows": 245,
       "sha256": "8b3f40405d1d8a3720a38d76d2356c9d8cfee3745d9aa8b9a23d1257205a9813"
+    },
+    {
+      "path": "Generator/MaxInstalledCapacityByPeriod.csv",
+      "bytes": 26533,
+      "rows": 896,
+      "sha256": "8835c9a946e2e4cf39522f61cda1af947fda9d7d999eee4d3c36deca6b30fbf0"
+    },
+    {
+      "path": "Generator/genCO2Captured.csv",
+      "bytes": 229,
+      "rows": 7,
+      "sha256": "d9d17e18cbcf4567fb443b20d1e726cff896442ceeab541e5f60a5443af310d8"
     },
     {
       "path": "Generator/genCO2TypeFactor.csv",
@@ -230,6 +302,216 @@
       "bytes": 645,
       "rows": 33,
       "sha256": "da3de3d6f051beb76352a135824afdcec076d86919d7187c95e053087079aa0c"
+    },
+    {
+      "path": "Hydrogen/Constants.csv",
+      "bytes": 782,
+      "rows": 11,
+      "sha256": "f0e7de72c0ffa22643267b7d60ceb9c311036e884af27b9875a3c8073cdebc0e"
+    },
+    {
+      "path": "Hydrogen/ElectrolyzerFixedOMCost.csv",
+      "bytes": 104,
+      "rows": 7,
+      "sha256": "c2c7590ce55c6a8cd1e974b2d70875b4273fd66def570860230aa2457e51c740"
+    },
+    {
+      "path": "Hydrogen/ElectrolyzerLifetime.csv",
+      "bytes": 18,
+      "rows": 1,
+      "sha256": "ff01b3d0ae7cca2926a2ffa9c2787c4d4442d937fb19306498331203da5681ed"
+    },
+    {
+      "path": "Hydrogen/ElectrolyzerPlantCapitalCost.csv",
+      "bytes": 120,
+      "rows": 7,
+      "sha256": "41d3a6878d41065c1f2c712e4ce38898be51a241c72ea62a7c30f4e82d889956"
+    },
+    {
+      "path": "Hydrogen/ElectrolyzerPowerUse.csv",
+      "bytes": 173,
+      "rows": 7,
+      "sha256": "c7ad9413f2aae13c0c639f1473bebe87dbbdc2d12e46eafc3ba2802b448d5f37"
+    },
+    {
+      "path": "Hydrogen/H2Storages.csv",
+      "bytes": 32,
+      "rows": 2,
+      "sha256": "8eabe60c794d32112e416ca5f04ff8f66e7026650f149658f37a4d19fe432e00"
+    },
+    {
+      "path": "Hydrogen/H2TerminalCapacity.csv",
+      "bytes": 2762,
+      "rows": 119,
+      "sha256": "7f804eb91f47faa4efcfad8acc07f835bd9f2c73dd675cbf58e349c5df3c59fe"
+    },
+    {
+      "path": "Hydrogen/H2TerminalCapitalCost.csv",
+      "bytes": 4015,
+      "rows": 119,
+      "sha256": "bea03c139bc1bbd66266887f3d1dfc9db4dbdb7a54e900012fcc53807a5b0b35"
+    },
+    {
+      "path": "Hydrogen/H2TerminalFixedOM.csv",
+      "bytes": 4635,
+      "rows": 119,
+      "sha256": "e9d22c1124a7ed2af645818c565d7fccea63426c1590a5501894cbcf6fefbd61"
+    },
+    {
+      "path": "Hydrogen/H2TerminalLifetime.csv",
+      "bytes": 64,
+      "rows": 2,
+      "sha256": "d8369557ed7122e9300d9d5a5a3e82ebf518c492ae4808f922fcfff3cc8c4851"
+    },
+    {
+      "path": "Hydrogen/H2TerminalNodes.csv",
+      "bytes": 139,
+      "rows": 15,
+      "sha256": "0629382e07539512b4d76f0437a43c47a5c621daa72f1abbdaeafc786fe9a6bf"
+    },
+    {
+      "path": "Hydrogen/H2TerminalPrice.csv",
+      "bytes": 4573,
+      "rows": 119,
+      "sha256": "d9befa3a666c1d189cce17580c0bf87520904b042a9d0ce8569a1f94569cfd5b"
+    },
+    {
+      "path": "Hydrogen/H2Terminals.csv",
+      "bytes": 39,
+      "rows": 2,
+      "sha256": "c52de25dedd3098071236716b63a81729c28cd8d750b88df8fa622092deccd3d"
+    },
+    {
+      "path": "Hydrogen/H2TerminalsOfNode.csv",
+      "bytes": 347,
+      "rows": 17,
+      "sha256": "7db63d93a3535451f22e9cd24643607fe6c900cb54f6f8a69c580f203e5f1bb2"
+    },
+    {
+      "path": "Hydrogen/HydrogenGenerators.csv",
+      "bytes": 61,
+      "rows": 3,
+      "sha256": "a99ff026f4489594d66270b171e7e5f849736a618bfe9208d1e7fa50be60ea9d"
+    },
+    {
+      "path": "Hydrogen/PipelineCapitalCost.csv",
+      "bytes": 155,
+      "rows": 7,
+      "sha256": "5532e49b4a9be8bef99d02e65afe5fa140be8a05d914f96263c1ad44c6059bb0"
+    },
+    {
+      "path": "Hydrogen/PipelineCompressorPowerUsage.csv",
+      "bytes": 40,
+      "rows": 1,
+      "sha256": "e7a87b88725071d97923cdf324b04d147935f48e66035ac30f8fc1b1e0f96634"
+    },
+    {
+      "path": "Hydrogen/PipelineOMCostPerKM.csv",
+      "bytes": 150,
+      "rows": 7,
+      "sha256": "66e55c654095cedb80f2d7ce927674933d366752ffa3a069cf305186f4631cd4"
+    },
+    {
+      "path": "Hydrogen/ProductionNodes.csv",
+      "bytes": 296,
+      "rows": 36,
+      "sha256": "3f5eabf03bdeb579dd596a24141ffd86faa899aa7eae89cd2d3fe72bf8932609"
+    },
+    {
+      "path": "Hydrogen/ReformerCO2CaptureFactor.csv",
+      "bytes": 308,
+      "rows": 21,
+      "sha256": "a218999919131b6806e45f73c2a5fc8a373f189f97fee7b5c7f59daaed23c984"
+    },
+    {
+      "path": "Hydrogen/ReformerCapitalCost.csv",
+      "bytes": 428,
+      "rows": 21,
+      "sha256": "ed5178a0bf30097be3aad8ad741be4784513bcb003c02eee2e3cfa862246aeeb"
+    },
+    {
+      "path": "Hydrogen/ReformerEfficiency.csv",
+      "bytes": 446,
+      "rows": 21,
+      "sha256": "65a51b434143b704861d53166fb825f4ccda9eb8c5833232186022d2ed2343aa"
+    },
+    {
+      "path": "Hydrogen/ReformerElectricityUse.csv",
+      "bytes": 658,
+      "rows": 21,
+      "sha256": "62127794799bd29583795fdb0abf12ba17eec2477c2470ad72b66351de473ff4"
+    },
+    {
+      "path": "Hydrogen/ReformerEmissionFactor.csv",
+      "bytes": 635,
+      "rows": 21,
+      "sha256": "fe8ea81ec06f801bf8ae3da5a802c3c556a669af142b5054adc216b9a6e1fc30"
+    },
+    {
+      "path": "Hydrogen/ReformerFixedOMCost.csv",
+      "bytes": 423,
+      "rows": 21,
+      "sha256": "57bde5d456b14c5965e54c3e9cd45c58540668b3ba197114666c3383b8de9571"
+    },
+    {
+      "path": "Hydrogen/ReformerLifetime.csv",
+      "bytes": 60,
+      "rows": 3,
+      "sha256": "8dd822ad641a1507529c6910543d5daa6dd362fbbae8769407ae37c0fe721744"
+    },
+    {
+      "path": "Hydrogen/ReformerLocations.csv",
+      "bytes": 286,
+      "rows": 35,
+      "sha256": "579dd9735d8942d91169d33bcfb5d3624a71ff1fec973eadbb87d5f36ef6efe7"
+    },
+    {
+      "path": "Hydrogen/ReformerPlants.csv",
+      "bytes": 39,
+      "rows": 3,
+      "sha256": "1f0c78284435280fdea0df1bfdd36844dfd4177c4a9789f4e8ed7d9f0953b396"
+    },
+    {
+      "path": "Hydrogen/ReformerVariableOMCost.csv",
+      "bytes": 441,
+      "rows": 21,
+      "sha256": "0eefe77107bff6e5caaa86ea2f0a0c056edefdc80932006e97b203fad03f242a"
+    },
+    {
+      "path": "Hydrogen/StorageCapitalCost.csv",
+      "bytes": 432,
+      "rows": 14,
+      "sha256": "0cfae863189d48b59aeb3e88db65a0dc5c748254ce923ff068e7334b3d2430a4"
+    },
+    {
+      "path": "Hydrogen/StorageFixedOMCost.csv",
+      "bytes": 402,
+      "rows": 14,
+      "sha256": "53a6cbf02112abcde87d24ce0454d405cccb1677197f3238d3b6595b2c15fc73"
+    },
+    {
+      "path": "Hydrogen/StorageLifetime.csv",
+      "bytes": 47,
+      "rows": 2,
+      "sha256": "4ea2779d379073c60c6a69677df4f40da12c998fa7dabc0ec9f49e99f88edd44"
+    },
+    {
+      "path": "Hydrogen/StorageMaxCapacity.csv",
+      "bytes": 1516,
+      "rows": 49,
+      "sha256": "f94ade38479f1f57aa85398b54da93da38696648fc86f6e5f85a96f4a33bf83b"
+    },
+    {
+      "path": "Hydrogen/duplicate_input_audit.csv",
+      "bytes": 89,
+      "rows": 0,
+      "sha256": "7754c67270da97eabaaf7774884acd11a44632776e96da35d722f23dda0afa87"
+    },
+    {
+      "path": "Hydrogen/excluded_input_rows.csv",
+      "bytes": 2120,
+      "rows": 21,
+      "sha256": "1ab5fadb376a9b32c3b0def470ab54049e0f39c1b1df10143123743a2b5e827f"
     },
     {
       "path": "NaturalGas/PipelineCapacity.csv",
@@ -646,10 +928,28 @@
       "sha256": "1fd315c427def26576547857d641753b06514d70b5639826f1407ab34ffd398e"
     },
     {
+      "path": "Transport/ElectricityDemand.csv",
+      "bytes": 6924,
+      "rows": 245,
+      "sha256": "45550e3726a86046d85351c842b3738d665fe6919b09051966a6d006d6a552e2"
+    },
+    {
+      "path": "Transport/HydrogenDemand.csv",
+      "bytes": 6856,
+      "rows": 245,
+      "sha256": "47bbcacfb490987318413d8037dd236b0a56ba7600fbe35aedb43d7971c07a00"
+    },
+    {
       "path": "Transport/NaturalGasDemand.csv",
       "bytes": 5891,
       "rows": 245,
       "sha256": "4263a074b9408a317a9195eff83502ed4bb3b3f3a5a4a3b0891a01c92a7d8208"
+    },
+    {
+      "path": "hydrogen_conversion_manifest.json",
+      "bytes": 10511,
+      "rows": null,
+      "sha256": "47aa0de4f46cb0adc310361fbca6a0997db06b1c03432f0046f65690d6c3f48b"
     }
   ],
   "owner_confirmed_corrections": {
@@ -673,5 +973,6 @@
         "reason": "The workbook RussianGas block has 8 periods and its value column was pasted on a 7-row stride, so the 278 drifted one period later per country. Owner-confirmed intent: cheap pre-war gas in period 1, 800 EUR/ton thereafter."
       }
     ]
-  }
+  },
+  "hydrogen_conversion_manifest": "hydrogen_conversion_manifest.json"
 }
