@@ -10,6 +10,67 @@ const NodeGen = Tuple{NodeId, GenId}
 const NodeStor = Tuple{NodeId, StorId}
 const NodeTech = Tuple{NodeId, TechId}
 const TechGen = Tuple{TechId, GenId}
+const NaturalGasTerminalNode = Tuple{NodeId, String}
+
+"""
+    NaturalGasSets
+
+Natural-gas index sets and precomputed adjacency lookups. An empty instance
+represents a disabled natural-gas module without introducing abstract fields.
+"""
+struct NaturalGasSets
+    Node::Vector{NodeId}
+    DirectionalLink::Vector{Arc}
+    Terminal::Vector{String}
+    TerminalsOfNode::Vector{NaturalGasTerminalNode}
+    OnshoreNode::Set{NodeId}
+    Generator::Set{GenId}
+    Incoming::Dict{NodeId, Vector{NodeId}}
+    Outgoing::Dict{NodeId, Vector{NodeId}}
+    TerminalsByNode::Dict{NodeId, Vector{String}}
+end
+
+function NaturalGasSets(
+    ;
+    Node::AbstractVector{<:AbstractString} = String[],
+    DirectionalLink::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString}} =
+        Tuple{String, String}[],
+    Terminal::AbstractVector{<:AbstractString} = String[],
+    TerminalsOfNode::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString}} =
+        Tuple{String, String}[],
+    OnshoreNode::Union{AbstractVector{<:AbstractString}, AbstractSet{<:AbstractString}} =
+        String[],
+    Generator::Union{AbstractVector{<:AbstractString}, AbstractSet{<:AbstractString}} =
+        String[],
+)
+    nodes = String.(Node)
+    links = Arc[(String(from), String(to)) for (from, to) in DirectionalLink]
+    terminals = String.(Terminal)
+    terminal_nodes =
+        NaturalGasTerminalNode[(String(node), String(terminal)) for
+                               (node, terminal) in TerminalsOfNode]
+    incoming = Dict{NodeId, Vector{NodeId}}()
+    outgoing = Dict{NodeId, Vector{NodeId}}()
+    for (from, to) in links
+        push!(get!(outgoing, from, NodeId[]), to)
+        push!(get!(incoming, to, NodeId[]), from)
+    end
+    terminals_by_node = Dict{NodeId, Vector{String}}()
+    for (node, terminal) in terminal_nodes
+        push!(get!(terminals_by_node, node, String[]), terminal)
+    end
+    return NaturalGasSets(
+        nodes,
+        links,
+        terminals,
+        terminal_nodes,
+        Set(String.(collect(OnshoreNode))),
+        Set(String.(collect(Generator))),
+        incoming,
+        outgoing,
+        terminals_by_node,
+    )
+end
 
 """
     EmpireSets
@@ -124,6 +185,7 @@ struct EmpireSets
     TechsByNode::Dict{NodeId, Vector{TechId}}
     GeneratorsByNodeTech::Dict{NodeTech, Vector{GenId}}
     Corridors::Vector{Arc}
+    NaturalGas::NaturalGasSets
 end
 
 function EmpireSets(
@@ -143,6 +205,7 @@ function EmpireSets(
     GeneratorsOfTechnology::Vector{TechGen},
     GeneratorsOfNode::Vector{NodeGen},
     StoragesOfNode::Vector{NodeStor};
+    NaturalGas::NaturalGasSets = NaturalGasSets(),
     validate::Bool = true,
 )
     generators_by_node = Dict{NodeId, Vector{GenId}}()
@@ -201,6 +264,7 @@ function EmpireSets(
         techs_by_node_vec,
         generators_by_node_tech_vec,
         corridors,
+        NaturalGas,
     )
 
     validate && validate!(sets)
@@ -226,6 +290,7 @@ function EmpireSets(
     GeneratorsOfTechnology::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString}} = Tuple{String, String}[],
     GeneratorsOfNode::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString}} = Tuple{String, String}[],
     StoragesOfNode::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString}} = Tuple{String, String}[],
+    NaturalGas::NaturalGasSets = NaturalGasSets(),
     validate::Bool = true,
 )
     return EmpireSets(
@@ -245,6 +310,7 @@ function EmpireSets(
         TechGen[(String(t), String(g)) for (t, g) in GeneratorsOfTechnology],
         NodeGen[(String(n), String(g)) for (n, g) in GeneratorsOfNode],
         NodeStor[(String(n), String(s)) for (n, s) in StoragesOfNode];
+        NaturalGas,
         validate = validate,
     )
 end
@@ -275,6 +341,20 @@ storages(sets::EmpireSets, n) = get(sets.StoragesByNode, n, StorId[])
 node_storages(sets::EmpireSets) = sets.StoragesOfNode
 techs(sets::EmpireSets, n) = get(sets.TechsByNode, n, TechId[])
 generators_tech(sets::EmpireSets, n, t) = get(sets.GeneratorsByNodeTech, (n, t), GenId[])
+natural_gas_sets(sets::EmpireSets) = sets.NaturalGas
+natural_gas_nodes(sets::EmpireSets) = sets.NaturalGas.Node
+natural_gas_links(sets::EmpireSets) = sets.NaturalGas.DirectionalLink
+natural_gas_terminals(sets::EmpireSets) = sets.NaturalGas.Terminal
+natural_gas_terminal_nodes(sets::EmpireSets) = sets.NaturalGas.TerminalsOfNode
+natural_gas_onshore_nodes(sets::EmpireSets) = sets.NaturalGas.OnshoreNode
+natural_gas_generators(sets::EmpireSets) = sets.NaturalGas.Generator
+natural_gas_incoming(sets::EmpireSets, node) =
+    get(sets.NaturalGas.Incoming, node, NodeId[])
+natural_gas_outgoing(sets::EmpireSets, node) =
+    get(sets.NaturalGas.Outgoing, node, NodeId[])
+natural_gas_terminals(sets::EmpireSets, node) =
+    get(sets.NaturalGas.TerminalsByNode, node, String[])
+has_natural_gas(sets::EmpireSets) = !isempty(natural_gas_nodes(sets))
 
 function _check_unique(name::AbstractString, items)
     seen = Set{eltype(items)}()
@@ -385,6 +465,42 @@ function validate!(sets::EmpireSets)
     _check_unique("GeneratorsOfTechnology", sets.GeneratorsOfTechnology)
     _check_unique("DirectionalLink", arcs(sets))
     _check_unique("TransmissionTypeOfDirectionalLink", sets.TransmissionTypeOfDirectionalLink)
+
+    gas = natural_gas_sets(sets)
+    _check_unique("NaturalGas.Node", gas.Node)
+    _check_unique("NaturalGas.DirectionalLink", gas.DirectionalLink)
+    _check_unique("NaturalGas.Terminal", gas.Terminal)
+    _check_unique("NaturalGas.TerminalsOfNode", gas.TerminalsOfNode)
+    _check_no_empty("NaturalGas.Node", gas.Node)
+    _check_no_empty("NaturalGas.Terminal", gas.Terminal)
+    isempty(setdiff(Set(gas.Node), node_set)) ||
+        throw(ArgumentError("All natural-gas nodes must exist in Node"))
+    isempty(setdiff(gas.OnshoreNode, node_set)) ||
+        throw(ArgumentError("All natural-gas onshore nodes must exist in Node"))
+    isempty(setdiff(gas.Generator, gen_set)) ||
+        throw(ArgumentError("All natural-gas generators must exist in Generator"))
+    gas_node_set = Set(gas.Node)
+    gas_terminal_set = Set(gas.Terminal)
+    for (from, to) in gas.DirectionalLink
+        from in gas_node_set ||
+            throw(ArgumentError("Unknown from-node in NaturalGas.DirectionalLink: $from"))
+        to in gas_node_set ||
+            throw(ArgumentError("Unknown to-node in NaturalGas.DirectionalLink: $to"))
+        from == to &&
+            throw(ArgumentError("Self-loop in NaturalGas.DirectionalLink: ($from, $to)"))
+    end
+    for (node, terminal) in gas.TerminalsOfNode
+        node in gas_node_set ||
+            throw(ArgumentError("Unknown node in NaturalGas.TerminalsOfNode: $node"))
+        terminal in gas_terminal_set ||
+            throw(ArgumentError("Unknown terminal in NaturalGas.TerminalsOfNode: $terminal"))
+    end
+    for (node, generator) in node_generators(sets)
+        generator in gas.Generator || continue
+        node in gas_node_set || throw(ArgumentError(
+            "Natural-gas generator $generator is assigned to non-gas node $node",
+        ))
+    end
 
     # Every generator belongs to at least one technology
     let gen_tech_counts = Dict{GenId, Int}()

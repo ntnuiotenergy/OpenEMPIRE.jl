@@ -4,6 +4,7 @@ using HiGHS
 using JuMP
 using OpenEMPIRE
 using Dates
+using Logging
 using Random
 using Test
 using TimeStruct
@@ -14,6 +15,7 @@ include("test_excel.jl")
 include("test_csv.jl")
 include("test_scenario_csv.jl")
 include("test_annuity.jl")
+include("test_natural_gas.jl")
 include("test_out_of_sample.jl")
 include("test_oos_full_year.jl")
 include("test_oos_aggregation.jl")
@@ -32,11 +34,11 @@ end
 
 @testset "CSV" begin
     test_read_csv_dataset()
+    test_ccs_fixed_cost_is_data_driven()
     test_read_bundled_csv_datasets()
     test_read_full_model_int_dataset()
     test_internalempire_bioenergy_constraints()
     test_internalempire_missing_hydro_default()
-    test_ccs_fixed_cost_is_data_driven()
     test_native_timestruct_operational_weights()
     test_write_solution_csv_tables()
     test_europe_summary_uses_per_scenario_totals()
@@ -46,6 +48,8 @@ end
     test_read_raw_csv_scenarios()
     test_fixed_sample_raw_csv_scenarios()
     test_configurable_regular_scenario_seasons()
+    test_season_months_match_python()
+    test_december_is_sampled_into_fall()
     test_scenario_filter_metrics_and_clustering()
     test_scenario_filter_make_and_use()
     test_scenario_filter_defaults()
@@ -72,6 +76,20 @@ end
     test_create_model_respects_emission_cap_config()
     test_norwegian_elspot_columns_map_to_their_nodes()
     test_norwegian_availability_is_populated()
+end
+
+@testset "Natural gas" begin
+    test_natural_gas_csv_loading_and_validation()
+    test_natural_gas_scenario_mapping_and_costs()
+    test_gas_marginal_cost_without_a_fuel_price()
+    test_full_model_int_gas_generators_are_priced()
+    test_natural_gas_validation_is_enforced()
+    test_multiple_gas_scenarios_rejected_until_verified()
+    test_natural_gas_multi_period_scenario_weighting()
+    test_weather_profiles_replicate_across_gas_scenarios()
+    test_natural_gas_model_and_results()
+    test_natural_gas_storage_transport_and_supply_edges()
+    test_natural_gas_three_by_three_scenarios()
 end
 
 @testset "Out-of-sample" begin
@@ -114,8 +132,8 @@ end
 end
 
 @testset "Runner spec" begin
-    test_gurobi_numeric_attribute_parsing()
     test_resolve_julia_run_spec()
+    test_gurobi_numeric_attribute_parsing()
     test_resolve_single_tree_oos_run_spec()
     test_reject_incomplete_oos_runner_options()
     test_reject_mismatched_oos_tree_config()

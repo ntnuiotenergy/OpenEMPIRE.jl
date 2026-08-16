@@ -33,6 +33,8 @@ function test_gurobi_numeric_attribute_parsing()
     )
     @test_throws ArgumentError _optional_float("not-a-number", "FeasibilityTol")
     @test_throws ArgumentError _parse_args(["--gurobi-preslove=1"])
+
+    return nothing
 end
 
 function test_resolve_julia_run_spec()

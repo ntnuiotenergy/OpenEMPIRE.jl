@@ -1,3 +1,34 @@
+const NaturalGasTerminalPeriod = Tuple{String, String, Int}
+const NaturalGasTerminalScenario = Tuple{String, String, Int, Int}
+const NaturalGasNodePeriod = Tuple{String, Int}
+
+"""
+    NaturalGasParams
+
+Numeric natural-gas inputs. The defaults reproduce InternalEMPIRE's fixed
+conversion and storage assumptions; all table-backed fields default empty.
+"""
+Base.@kwdef mutable struct NaturalGasParams
+    pipelineCapacity::Dict{Tuple{String, String}, Float64} =
+        Dict{Tuple{String, String}, Float64}()
+    pipelinePowerDemandPerTon::Float64 = 0.0
+    terminalCost::Dict{NaturalGasTerminalScenario, Float64} =
+        Dict{NaturalGasTerminalScenario, Float64}()
+    terminalCapacity::Dict{NaturalGasTerminalPeriod, Float64} =
+        Dict{NaturalGasTerminalPeriod, Float64}()
+    storageCapacity::Dict{String, Float64} = Dict{String, Float64}()
+    reserves::Dict{String, Float64} = Dict{String, Float64}()
+    transportDemand::Dict{NaturalGasNodePeriod, Float64} =
+        Dict{NaturalGasNodePeriod, Float64}()
+    transportCurtailCost::Float64 = 10000.0
+    mwhPerTon::Float64 = 13.9
+    storageInitialFraction::Float64 = 0.5
+    storageChargeEfficiency::Float64 = 1.0
+    storageDischargeEfficiency::Float64 = 1.0
+    weatherScenarioCount::Int = 1
+    gasScenarioCount::Int = 1
+end
+
 """
     EmpireParams
 
@@ -29,8 +60,10 @@ Base.@kwdef mutable struct EmpireParams
     genVariableOMCost::Dict{String, Float64}                     = Dict{String, Float64}()
     genFuelCost::Dict{String, TimeProfile}                       = Dict{String, TimeProfile}()
     CCSCostTSVariable::Union{Nothing, TimeProfile}               = nothing
-    # EUR per tCO2 of annual capture capability. `nothing` preserves the
-    # historical default; a CSV value of 0.0 explicitly disables the charge.
+    # CO2 transport-and-storage cost charged on CCS generator *investment*, in
+    # EUR per tCO2 of annual capture capability. `nothing` keeps the historical
+    # hardcoded default (see `ccs_cost_fixed`); supply Generator/CCSCostTSFixed.csv
+    # to override, including with 0.0 to disable the charge entirely.
     CCSCostTSFixed::Union{Nothing, Float64}                      = nothing
     genEfficiency::Dict{String, TimeProfile}                     = Dict{String, TimeProfile}()
     genRefInitCap::Dict{Tuple{String, String}, Float64}          = Dict{Tuple{String, String}, Float64}()
@@ -87,11 +120,11 @@ Base.@kwdef mutable struct EmpireParams
     maxHydroNode::Dict{String, Float64}          = Dict{String, Float64}()
 
     # General parameters from file
-    CO2cap::Union{Nothing, TimeProfile}   = nothing
-    CO2price::Union{Nothing, TimeProfile} = nothing
+    CO2cap::Union{Nothing, TimeProfile}          = nothing
+    CO2price::Union{Nothing, TimeProfile}        = nothing
     availableBioEnergy::Union{Nothing, TimeProfile} = nothing
-    seasonNames::Vector{String}           = String[]
-    regularSeasonCount::Int               = 0
+    seasonNames::Vector{String}                  = String[]
+    regularSeasonCount::Int                      = 0
 
     # Stochastic parameters
     sloadRaw::Dict{String, TimeProfile}                   = Dict{String, TimeProfile}()
@@ -106,6 +139,9 @@ Base.@kwdef mutable struct EmpireParams
     storPWInvCost::Dict{String, TimeProfile}                      = Dict{String, TimeProfile}()
     transmissionInvCost::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
     genMargCost::Dict{String, TimeProfile}                        = Dict{String, TimeProfile}()
+
+    # Optional sector modules
+    NaturalGas::NaturalGasParams = NaturalGasParams()
 end
 
 # Default values used by the accessor helpers below.
@@ -135,6 +171,11 @@ const DEFAULT_GEN_MAX_INST_CAP_RAW = 0.0
 const DEFAULT_MAX_BUILD_CAP        = 500000.0
 const DEFAULT_MAX_INST_CAP         = 0.0
 const DEFAULT_TRANS_MAX_BUILD      = nothing
+# Pyomo's `transmissionMaxBuiltCap` Param default (base EMPIRE, `empire.py:255`).
+# Used only to fill periods that a corridor's CSV rows do not cover, mirroring
+# Pyomo's per-cell fallback. Whole-corridor absence keeps `DEFAULT_TRANS_MAX_BUILD`
+# (no constraint) for now - see the tracking notes on aligning that with Pyomo.
+const PYOMO_DEFAULT_TRANS_MAX_BUILD_CAP = 20000.0
 const DEFAULT_TRANS_MAX_INST       = nothing
 const DEFAULT_MAX_HYDRO_NODE       = nothing
 
@@ -193,18 +234,30 @@ discount_rate(par) = par.discountRate
 co2_price(par, sp) = par.CO2price === nothing ? 0.0 : par.CO2price[sp]
 co2_cap(par, sp) = par.CO2cap === nothing ? nothing : par.CO2cap[sp]
 co2_content(par, g) = get(par.genCO2Content, g, 0.0)
-ccs_cost_variable(par, sp) = par.CCSCostTSVariable === nothing ? 0.0 : par.CCSCostTSVariable[sp]
-
-"""Historical fixed CCS transport-and-storage charge, in EUR/tCO2."""
-const DEFAULT_CCS_COST_FIXED = 1149873.72
-
-ccs_cost_fixed(par) =
-    par.CCSCostTSFixed === nothing ? DEFAULT_CCS_COST_FIXED : par.CCSCostTSFixed
 available_bioenergy(par, sp) =
     par.availableBioEnergy === nothing ? nothing : par.availableBioEnergy[sp]
 max_biomethane_availability(par, n, sp) =
     haskey(par.genMaxBiomethaneAvailability, n) ?
     par.genMaxBiomethaneAvailability[n][sp] : DEFAULT_MAX_BIOMETHANE_AVAILABILITY
+ccs_cost_variable(par, sp) = par.CCSCostTSVariable === nothing ? 0.0 : par.CCSCostTSVariable[sp]
+
+"""
+    DEFAULT_CCS_COST_FIXED
+
+CO2 transport-and-storage cost charged on CCS generator investment, EUR/tCO2.
+
+Matches the value InternalEMPIRE declares at `empire.py:461`
+(`CCSCostTSFix = Param(initialize=1149873.72) #NB! Hard-coded`). Note that the
+reference has that declaration, and its variable counterpart at `empire.py:462`,
+**commented out**, so InternalEMPIRE charges neither. OpenEMPIRE.jl charges both,
+which is a documented difference rather than an accident: base OpenEMPIRE charges
+CCS transport-and-storage costs, and this port follows the base. Whether these
+costs should apply is a modelling decision for the dataset owner; both values are
+data-driven and can be zeroed per dataset.
+"""
+const DEFAULT_CCS_COST_FIXED = 1149873.72
+
+ccs_cost_fixed(par) = par.CCSCostTSFixed === nothing ? DEFAULT_CCS_COST_FIXED : par.CCSCostTSFixed
 
 # General properties
 load(par, n, t) = haskey(par.sload, n) ? par.sload[n][t] : DEFAULT_LOAD
@@ -295,6 +348,27 @@ offshore_conv_invest_cost(par, sp) =
 lost_load_cost(par, n, t) = haskey(par.nodeLostLoadCost, n) ? par.nodeLostLoadCost[n][t] : DEFAULT_LOST_LOAD_COST
 sload(par, n, t) = haskey(par.sload, n) ? par.sload[n][t] : DEFAULT_LOAD
 gen_marginal_cost(par, g, t) = haskey(par.genMargCost, g) ? par.genMargCost[g][t] : DEFAULT_GEN_MARGINAL_COST
+natural_gas_pipeline_capacity(par::EmpireParams, from, to) =
+    get(par.NaturalGas.pipelineCapacity, (from, to), 0.0)
+natural_gas_storage_capacity(par::EmpireParams, node) =
+    get(par.NaturalGas.storageCapacity, node, 0.0)
+natural_gas_reserves(par::EmpireParams, node) =
+    get(par.NaturalGas.reserves, node, 0.0)
+natural_gas_terminal_capacity(par::EmpireParams, node, terminal, period::Integer) =
+    get(par.NaturalGas.terminalCapacity, (node, terminal, Int(period)), 0.0)
+natural_gas_terminal_cost(
+    par::EmpireParams,
+    node,
+    terminal,
+    period::Integer,
+    gas_scenario::Integer,
+) = get(
+    par.NaturalGas.terminalCost,
+    (node, terminal, Int(period), Int(gas_scenario)),
+    99999.0,
+)
+natural_gas_transport_demand(par::EmpireParams, node, period::Integer) =
+    get(par.NaturalGas.transportDemand, (node, Int(period)), 0.0)
 
 # Validation
 
@@ -384,6 +458,164 @@ function _check_tuple_keys_in_sets!(
         end
     end
     return
+end
+
+function _check_natural_gas_params!(
+    errs::Vector{String},
+    par::EmpireParams,
+    sets::Union{Nothing, EmpireSets},
+    periods::Union{Nothing, TimeStructure},
+)
+    gas = par.NaturalGas
+    for (name, value) in (
+        ("pipelinePowerDemandPerTon", gas.pipelinePowerDemandPerTon),
+        ("transportCurtailCost", gas.transportCurtailCost),
+        ("mwhPerTon", gas.mwhPerTon),
+        ("storageInitialFraction", gas.storageInitialFraction),
+        ("storageChargeEfficiency", gas.storageChargeEfficiency),
+        ("storageDischargeEfficiency", gas.storageDischargeEfficiency),
+    )
+        isfinite(value) || push!(errs, "NaturalGas.$name must be finite")
+        value >= 0 || push!(errs, "NaturalGas.$name must be non-negative")
+    end
+    gas.mwhPerTon > 0 || push!(errs, "NaturalGas.mwhPerTon must be positive")
+    gas.storageInitialFraction <= 1 ||
+        push!(errs, "NaturalGas.storageInitialFraction must be at most 1")
+    gas.storageChargeEfficiency <= 1 ||
+        push!(errs, "NaturalGas.storageChargeEfficiency must be at most 1")
+    gas.storageDischargeEfficiency <= 1 ||
+        push!(errs, "NaturalGas.storageDischargeEfficiency must be at most 1")
+    gas.weatherScenarioCount > 0 ||
+        push!(errs, "NaturalGas.weatherScenarioCount must be positive")
+    gas.gasScenarioCount > 0 ||
+        push!(errs, "NaturalGas.gasScenarioCount must be positive")
+
+    # Missing functionality, deliberately gated rather than shipped half-verified:
+    # the stochastic gas-price axis (gasScenarioCount > 1) is implemented on the
+    # evidence branches, but the weather x gas scenario-combination convention has
+    # never been verified against InternalEMPIRE's `empire.py`, and no
+    # two-price-scenario reference parity exists. Until that evidence exists the
+    # deterministic delivery refuses to build rather than risk silently mis-weighting
+    # scenarios. Lifting the gate requires: (1) verifying the combination order
+    # against the reference, (2) a stochastic parity comparison, (3) removing this
+    # validation error.
+    gas.gasScenarioCount == 1 || push!(
+        errs,
+        "NaturalGas.gasScenarioCount must equal 1: multiple gas-price scenarios " *
+        "have not been verified against InternalEMPIRE",
+    )
+
+    for (name, values) in (
+        ("pipelineCapacity", gas.pipelineCapacity),
+        ("terminalCost", gas.terminalCost),
+        ("terminalCapacity", gas.terminalCapacity),
+        ("storageCapacity", gas.storageCapacity),
+        ("reserves", gas.reserves),
+        ("transportDemand", gas.transportDemand),
+    )
+        for (key, value) in values
+            isfinite(value) ||
+                push!(errs, "NaturalGas.$name[$key] must be finite")
+            value >= 0 ||
+                push!(errs, "NaturalGas.$name[$key] must be non-negative")
+        end
+    end
+
+    sets === nothing && return
+    gas_sets = natural_gas_sets(sets)
+    isempty(gas_sets.Node) && return
+    node_set = Set(gas_sets.Node)
+    link_set = Set(gas_sets.DirectionalLink)
+    terminal_pair_set = Set(gas_sets.TerminalsOfNode)
+    for key in keys(gas.pipelineCapacity)
+        key in link_set ||
+            push!(errs, "NaturalGas.pipelineCapacity has unknown link key: $key")
+    end
+    for key in keys(gas.storageCapacity)
+        key in node_set ||
+            push!(errs, "NaturalGas.storageCapacity has unknown node key: $key")
+    end
+    for key in keys(gas.reserves)
+        key in node_set ||
+            push!(errs, "NaturalGas.reserves has unknown node key: $key")
+    end
+    for key in keys(gas.terminalCapacity)
+        key[1:2] in terminal_pair_set ||
+            push!(errs, "NaturalGas.terminalCapacity has unknown terminal key: $key")
+    end
+    for key in keys(gas.terminalCost)
+        key[1:2] in terminal_pair_set ||
+            push!(errs, "NaturalGas.terminalCost has unknown terminal key: $key")
+        key[4] in 1:gas.gasScenarioCount ||
+            push!(errs, "NaturalGas.terminalCost has invalid gas scenario key: $key")
+    end
+    for key in keys(gas.transportDemand)
+        key[1] in gas_sets.OnshoreNode ||
+            push!(errs, "NaturalGas.transportDemand has unknown onshore-node key: $key")
+    end
+    # The gas-to-power conversion divides by generator efficiency, so a missing
+    # profile would otherwise surface as a bare KeyError during model building.
+    for generator in gas_sets.Generator
+        haskey(par.genEfficiency, generator) ||
+            push!(
+                errs,
+                "NaturalGas generator $generator has no genEfficiency profile",
+            )
+    end
+
+    periods === nothing && return
+    period_count = length(strat_periods(periods))
+    expected_pipeline = link_set
+    expected_terminal_capacity = Set(
+        (node, terminal, period)
+        for (node, terminal) in gas_sets.TerminalsOfNode for period in 1:period_count
+    )
+    expected_terminal_cost = Set(
+        (node, terminal, period, gas_scenario)
+        for (node, terminal) in gas_sets.TerminalsOfNode for period in 1:period_count
+        for gas_scenario in 1:gas.gasScenarioCount
+    )
+    expected_transport = Set(
+        (node, period) for node in gas_sets.OnshoreNode for period in 1:period_count
+    )
+    expected_reserves = Set(
+        node
+        for (node, terminal) in gas_sets.TerminalsOfNode
+        if is_finite_reserve_terminal(terminal)
+    )
+    for (name, expected, actual) in (
+        ("pipelineCapacity", expected_pipeline, Set(keys(gas.pipelineCapacity))),
+        ("terminalCapacity", expected_terminal_capacity, Set(keys(gas.terminalCapacity))),
+        ("terminalCost", expected_terminal_cost, Set(keys(gas.terminalCost))),
+        ("transportDemand", expected_transport, Set(keys(gas.transportDemand))),
+        ("reserves", expected_reserves, Set(keys(gas.reserves))),
+    )
+        missing = setdiff(expected, actual)
+        isempty(missing) ||
+            push!(errs, "NaturalGas.$name is missing $(length(missing)) required key(s)")
+    end
+    return
+end
+
+"""
+    validate_natural_gas(par, sets, periods)
+
+Return the natural-gas validation issues for `par` as a vector of strings.
+
+The general [`validate`](@ref) entry point is called with `strict = false` during
+model building, which downgrades every issue to a single warning. Natural-gas
+inputs cannot tolerate that: a missing terminal cost silently becomes 99999
+EUR/t and a missing capacity silently becomes zero, so `create_model` treats
+these issues as fatal whenever the module is enabled.
+"""
+function validate_natural_gas(
+    par::EmpireParams,
+    sets::EmpireSets,
+    periods::Union{Nothing, TimeStructure} = nothing,
+)
+    errs = String[]
+    _check_natural_gas_params!(errs, par, sets, periods)
+    return errs
 end
 
 """
@@ -505,6 +737,7 @@ function validate(
     _check_profile_scalar!(errs, "CO2cap", par.CO2cap, periods; min = 0.0)
     _check_profile_scalar!(errs, "CO2price", par.CO2price, periods; min = 0.0)
     _check_profile_scalar!(errs, "availableBioEnergy", par.availableBioEnergy, periods; min = 0.0)
+    _check_natural_gas_params!(errs, par, sets, periods)
 
     # Index checks (only if a set is provided)
     if sets !== nothing

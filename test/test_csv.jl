@@ -171,10 +171,10 @@ function test_read_full_model_int_dataset()
     @test params.genMaxBiomethaneAvailability["Germany"][first_period] ≈
           210231.42290671438
     @test OpenEMPIRE.ccs_cost_fixed(params) == 0.0
-    @test all(
-        OpenEMPIRE.ccs_cost_variable(params, period) == 0.0
-        for period in strat_periods(periods)
-    )
+    @test all(OpenEMPIRE.ccs_cost_variable(params, period) == 0.0 for period in strat_periods(periods))
+
+    # InternalEMPIRE applies its default=0 maximum-installed-capacity parameter
+    # to every corridor, including NO2-France, even though the workbook omits it.
     @test OpenEMPIRE.trans_max_inst_cap(params, "NO2", "France", first_period) == 0.0
 
     # Module off: gas is priced from its fuel cost like any other thermal unit.
@@ -290,19 +290,6 @@ function test_internalempire_missing_hydro_default()
         sets,
         Dict("internalempire_missing_hydro_raw_default_mw" => -1.0),
     )
-end
-
-function test_ccs_fixed_cost_is_data_driven()
-    params = OpenEMPIRE.EmpireParams()
-    @test OpenEMPIRE.ccs_cost_fixed(params) == OpenEMPIRE.DEFAULT_CCS_COST_FIXED
-    params.CCSCostTSFixed = 0.0
-    @test OpenEMPIRE.ccs_cost_fixed(params) == 0.0
-
-    mktempdir() do root
-        path = joinpath(root, "CCSCostTSFixed.csv")
-        write(path, "CCSCostTSFixed\n1234.5\n")
-        @test OpenEMPIRE._read_scalar_csv(path) == 1234.5
-    end
 end
 
 function test_native_timestruct_operational_weights()
@@ -563,5 +550,34 @@ function test_europe_summary_uses_per_scenario_totals()
         scenario_two = only(row for row in europe_summary if row.Scenario == "scenario2")
         @test scenario_one.AnnualGeneration_GWh ≈ annual_multiple * (4.0 + 6.0) / 1000
         @test scenario_two.AnnualGeneration_GWh ≈ annual_multiple * (10.0 + 14.0) / 1000
+    end
+end
+
+"""
+The CCS fixed transport-and-storage cost is data-driven, and its default is the
+historical hardcoded constant.
+
+`ccs_cost_fix` used to be a literal `1149873.72` in `utils.jl` (with a standing TODO
+to remove the hardcoding). It is now read from an optional
+`Generator/CCSCostTSFixed.csv`. Datasets without that file must behave exactly as
+before, or every existing CCS investment cost silently changes.
+"""
+function test_ccs_fixed_cost_is_data_driven()
+    par = OpenEMPIRE.EmpireParams()
+    @test par.CCSCostTSFixed === nothing
+    @test OpenEMPIRE.ccs_cost_fixed(par) == OpenEMPIRE.DEFAULT_CCS_COST_FIXED
+    @test OpenEMPIRE.DEFAULT_CCS_COST_FIXED == 1149873.72
+
+    par.CCSCostTSFixed = 0.0
+    @test OpenEMPIRE.ccs_cost_fixed(par) == 0.0
+    par.CCSCostTSFixed = 42.5
+    @test OpenEMPIRE.ccs_cost_fixed(par) == 42.5
+
+    mktempdir() do root
+        path = joinpath(root, "CCSCostTSFixed.csv")
+        write(path, "CCS_TSfixed_cost_in_euro_per_tCO2\n1234.5\n")
+        @test OpenEMPIRE._read_scalar_csv(path) == 1234.5
+        write(path, "header\n")
+        @test_throws ArgumentError OpenEMPIRE._read_scalar_csv(path)
     end
 end

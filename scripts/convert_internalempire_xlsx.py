@@ -552,8 +552,8 @@ PYOMO_PERIOD_DEFAULTS = {
 FUEL_COST_FALLBACK_DATASET = "europe_v51"
 
 # InternalEMPIRE currently comments out the declarations, input load, and both
-# objective uses of CCS transport-and-storage cost. Remove this bug-for-bug
-# compatibility switch when the reference starts charging those inputs.
+# objective uses of CCS transport-and-storage cost in empire.py. Remove this
+# bug-for-bug compatibility switch when the reference starts charging those inputs.
 INTERNALEMPIRE_OMITS_CCS_TRANSPORT_AND_STORAGE_COST = True
 
 

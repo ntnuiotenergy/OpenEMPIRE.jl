@@ -24,9 +24,14 @@ function present_value(cost, discount_rate, years; at_start = true)
     return pv
 end
 
-function preprocess_params(params::EmpireParams, sets, periods)
+function preprocess_params(
+    params::EmpireParams,
+    sets,
+    periods;
+    natural_gas::Bool = false,
+)
     preprocess_invest_cost(params, sets, periods)
-    preprocess_operational_cost(params, sets, periods)
+    preprocess_operational_cost(params, sets, periods; natural_gas)
     preprocess_initcap_gen(params, sets, periods)
     preprocess_stoch_load(params, sets, periods)
     preprocess_max_installed_cap(params, sets, periods)
@@ -45,6 +50,8 @@ function preprocess_invest_cost(params::EmpireParams, sets, periods)
 
     # Generator investment costs
 
+    # CCS transport-and-storage cost on investment. Data-driven so it can be
+    # overridden (or zeroed) per dataset; falls back to the historical constant.
     ccs_cost_fix = ccs_cost_fixed(params)
     ccs_rem_frac = 0.9
 
@@ -207,24 +214,33 @@ end
 
 # Find the marginal cost of generation for each generator and strategic period
 # including fuel cost, variable O&M cost and CO2 cost
-function preprocess_operational_cost(params::EmpireParams, sets, periods)
+function preprocess_operational_cost(
+    params::EmpireParams,
+    sets,
+    periods;
+    natural_gas::Bool = false,
+)
     params.genMargCost = Dict{String, StrategicProfile}()
     for g in sets.Generator
-        # Without an efficiency profile there is no marginal-cost basis, so the
-        # generator keeps the documented accessor fallback. Never fall through to
-        # an empty StrategicProfile: validation and model evaluation index it and
-        # fail with an opaque BoundsError.
+        # Gas fuel is bought through terminal imports when the module is active, so
+        # gas-fired generators carry no ordinary fuel price and legitimately have no
+        # `genFuelCost` row. They still pay variable O&M and carbon costs, so they
+        # must not be skipped here: a missing `genMargCost` key silently falls back
+        # to `DEFAULT_GEN_MARGINAL_COST` (zero) and makes gas generation free.
+        gas_fuelled = natural_gas && g in natural_gas_generators(sets)
+
+        # Without an efficiency profile there is no marginal-cost basis at all, so
+        # the generator keeps the documented accessor fallback. Never construct an
+        # empty StrategicProfile: validation and model evaluation cannot index one.
         haskey(params.genEfficiency, g) || continue
 
-        # A generator with an efficiency but no fuel price cannot be costed here.
-        # `full_model_int` is the motivating case: it deliberately omits gas fuel
-        # prices because InternalEMPIRE prices gas through its natural-gas module,
-        # so that dataset needs the gas module rather than a silent zero cost.
-        haskey(params.genFuelCost, g) || throw(ArgumentError(
-            "Generator $g has a genEfficiency profile but no genFuelCost entry. " *
-            "Add its fuel cost, or use a dataset whose fuels are all priced in " *
-            "genFuelCost.",
-        ))
+        if !haskey(params.genFuelCost, g) && !gas_fuelled
+            throw(ArgumentError(
+                "Generator $g has a genEfficiency profile but no genFuelCost entry. " *
+                "Add its fuel cost, or enable `natural_gas` if it is gas-fired and " *
+                "priced through natural-gas terminal imports.",
+            ))
+        end
 
         values = Float64[]
         for sp in strat_periods(periods)
@@ -238,9 +254,16 @@ function preprocess_operational_cost(params::EmpireParams, sets, periods)
                 carbon_cost = co2_price(params, sp) * co2_content(params, g)
             end
 
-            # Convert fuel cost from €/GJ to €/MWh and add variable O&M cost and CO2 cost
-            cost_per_energy = (3.6 / params.genEfficiency[g][sp]) * (params.genFuelCost[g][sp] +
-                carbon_cost) + get(params.genVariableOMCost, g, 0.0) # in €/MWh
+            # Gas fuel is purchased through terminal imports when the module is
+            # active. Keep variable O&M and carbon costs here, but do not charge
+            # the ordinary generator fuel price a second time.
+            fuel_cost =
+                natural_gas && g in natural_gas_generators(sets) ?
+                0.0 : params.genFuelCost[g][sp]
+            cost_per_energy =
+                (3.6 / params.genEfficiency[g][sp]) *
+                (fuel_cost + carbon_cost) +
+                get(params.genVariableOMCost, g, 0.0) # in €/MWh
 
             push!(values, cost_per_energy)
         end

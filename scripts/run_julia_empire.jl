@@ -126,10 +126,11 @@ function _optimizer_attributes(value, config, options)
         for (config_key, gurobi_name) in config_attribute_names
             _set_optimizer_attribute!(attributes, gurobi_name, get(config, config_key, nothing))
         end
-        for (config_key, gurobi_name) in (
-                "solver_feasibilitytol" => "FeasibilityTol",
-                "solver_barconvtol" => "BarConvTol",
-            )
+    float_config_attribute_names = (
+        "solver_feasibilitytol" => "FeasibilityTol",
+        "solver_barconvtol" => "BarConvTol",
+    )
+    for (config_key, gurobi_name) in float_config_attribute_names
             _set_optimizer_attribute!(
                 attributes,
                 gurobi_name,
