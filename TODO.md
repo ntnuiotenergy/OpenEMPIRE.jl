@@ -28,7 +28,35 @@ costperperiodPW=costperyearPW*1000*(1-(1+model.discountrate)**-(min(value((len(m
 
 ## Missing in Julia version
 
-Nothing tracked here at present. The North Sea offshore transmission cap and the
-emission limits (both the CO2 cap and the CO2 price) have since been implemented.
+The North Sea offshore transmission cap and the emission limits (both the CO2 cap
+and the CO2 price) have since been implemented.
+
+### Config options the Python version has and this one does not
+
+These keys were removed from `config/*.yaml`, because carrying a setting that
+nothing reads is worse than not having it: it looks supported, and setting it
+silently does nothing. They are recorded here so the intent is not lost, and so
+that the key names match the Python version if any of them is implemented later.
+
+| key | what it does in the Python version |
+| --- | --- |
+| `compute_operational_duals` | after solving, fix the investment variables and re-solve, so the operational constraints yield dual values (shadow prices). Skipped for out-of-sample runs |
+| `print_in_iamc_format` | additionally write selected results in the IAMC format used for cross-model comparison, alongside the normal EMPIRE output |
+| `write_in_lp_format` | write the problem out as an `.lp` file, for inspecting or re-solving the model outside EMPIRE |
+| `serialize_instance` | serialise the built model so a later run can reuse it instead of rebuilding |
+| `use_temporary_directory` / `temporary_directory` | build in a temporary directory rather than in place, and where that directory should be |
+| `moment_matching` | a scenario-generation method that selects trees by matching statistical moments of the source data |
+| `n_tree_compare` | how many candidate trees moment matching and copula sampling compare before choosing |
+
+Worth noting which of these are merely conveniences and which change results.
+`compute_operational_duals` produces output the Julia version cannot currently
+produce at all, and `moment_matching` would select a different scenario tree, so
+those two are genuine functional gaps. The rest — LP export, IAMC formatting,
+serialisation, temporary directories — affect how a run is carried out or
+reported, not what it computes.
+
+`number_of_gas_scenarios` was deliberately **not** removed: it is unused on
+branches without the natural-gas module, but is read in four files once that
+module is present.
 
 The clarification points above are still open.
