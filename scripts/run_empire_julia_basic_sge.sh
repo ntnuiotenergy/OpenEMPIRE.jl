@@ -162,7 +162,21 @@ mkdir -p logs
 
 echo "Loading optional Solstorm modules..."
 module load gurobi/13.0 2>/dev/null || module load gurobi/12.0 2>/dev/null || true
-module load Julia/1.9.3 2>/dev/null || module load julia/1.9.3 2>/dev/null || module load Julia/1.10.0 2>/dev/null || module load julia/1.10.0 2>/dev/null || module load Julia/1.11.2 2>/dev/null || module load julia/1.11.2 2>/dev/null || module load Julia 2>/dev/null || module load julia 2>/dev/null || true
+# Solstorm's Julia modules change over time: 1.9.3 was removed, and a hard-coded
+# load that ends in "|| true" fails silently, leaving the job to run with no Julia
+# at all and die later on a missing package. Try the supported versions newest
+# first and stop immediately if none of them load.
+for _julia_version in 1.12.2 1.11.2 1.11.1 1.10.0; do
+	module load "Julia/$_julia_version" 2>/dev/null && break
+	module load "julia/$_julia_version" 2>/dev/null && break
+done
+command -v "${JULIA_CMD:-julia}" >/dev/null 2>&1 || {
+	echo "ERROR: could not load a Julia module (tried 1.12.2 1.11.2 1.11.1 1.10.0)," >&2
+	echo "       and ${JULIA_CMD:-julia} is not on PATH." >&2
+	echo "       Available: $(module avail 2>&1 | grep -io 'julia/[0-9.]*' | tr '\n' ' ')" >&2
+	exit 1
+}
+echo "julia=$("${JULIA_CMD:-julia}" --version)"
 export JULIA_PKG_UNPACK_REGISTRY=true
 
 if ! command -v "$JULIA_CMD" >/dev/null 2>&1; then
@@ -209,13 +223,19 @@ if ! check_julia_project >/dev/null 2>&1; then
 		$JULIA_CMD --version || true
 		if [[ "$JULIA_CMD" == "julia" ]]; then
 			echo "Trying fallback Julia module because the current module could not instantiate the project..."
-			module unload Julia/1.9.3 2>/dev/null || true
-			module unload julia/1.9.3 2>/dev/null || true
-			module unload Julia/1.10.0 2>/dev/null || true
-			module unload julia/1.10.0 2>/dev/null || true
-			module unload Julia/1.11.2 2>/dev/null || true
-			module unload julia/1.11.2 2>/dev/null || true
-			module load Julia/1.10.0 2>/dev/null || module load julia/1.10.0 2>/dev/null || module load Julia/1.11.2 2>/dev/null || module load julia/1.11.2 2>/dev/null || true
+			for _julia_version in 1.12.2 1.11.2 1.11.1 1.10.0 1.9.3; do
+				module unload "Julia/$_julia_version" 2>/dev/null || true
+				module unload "julia/$_julia_version" 2>/dev/null || true
+			done
+			# Same version list as the primary load above. This is the fallback path, so
+			# it only warns: the instantiation check below already fails with a clearer
+			# message than a missing-module error would give here.
+			for _julia_version in 1.12.2 1.11.2 1.11.1 1.10.0; do
+				module load "Julia/$_julia_version" 2>/dev/null && break
+				module load "julia/$_julia_version" 2>/dev/null && break
+			done
+			command -v "${JULIA_CMD:-julia}" >/dev/null 2>&1 || \
+				echo "WARNING: no fallback Julia module loaded; the instantiation check below will report the failure." >&2
 			echo "Fallback Julia version:"
 			$JULIA_CMD --version || true
 			if ! check_julia_project >/dev/null 2>&1 && ! instantiate_julia_project; then
