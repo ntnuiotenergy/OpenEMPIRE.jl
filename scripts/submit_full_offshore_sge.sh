@@ -72,7 +72,21 @@ mkdir -p logs "$RESULTS_DIR"
 
 # Julia 1.12.2 is unusable on these nodes (its bundled 7z fails), so 1.9.3 first.
 module load gurobi/13.0 2>/dev/null || module load gurobi/12.0 2>/dev/null || true
-module load Julia/1.9.3 2>/dev/null || module load julia/1.9.3 2>/dev/null || true
+# Solstorm's Julia modules change over time: 1.9.3 was removed, and a hard-coded
+# load that ends in "|| true" fails silently, leaving the job to run with no Julia
+# at all and die later on a missing package. Try the supported versions newest
+# first and stop immediately if none of them load.
+for _julia_version in 1.12.2 1.11.2 1.11.1 1.10.0; do
+	module load "Julia/$_julia_version" 2>/dev/null && break
+	module load "julia/$_julia_version" 2>/dev/null && break
+done
+command -v "${JULIA_CMD:-julia}" >/dev/null 2>&1 || {
+	echo "ERROR: could not load a Julia module (tried 1.12.2 1.11.2 1.11.1 1.10.0)," >&2
+	echo "       and ${JULIA_CMD:-julia} is not on PATH." >&2
+	echo "       Available: $(module avail 2>&1 | grep -io 'julia/[0-9.]*' | tr '\n' ' ')" >&2
+	exit 1
+}
+echo "julia=$("${JULIA_CMD:-julia}" --version)"
 
 $JULIA_CMD --version
 echo "GRB_LICENSE_FILE=${GRB_LICENSE_FILE:-not set}"
