@@ -106,6 +106,66 @@
   ],
   "files": [
     {
+      "path": "CO2/CO2SequestrationNodes.csv",
+      "bytes": 65,
+      "rows": 6,
+      "sha256": "805ee6f342245d09153a8865e8de68da219a1c2ce04621fe9b5e2292b7361af4"
+    },
+    {
+      "path": "CO2/MaxSequestrationCapacity.csv",
+      "bytes": 161,
+      "rows": 6,
+      "sha256": "a62f065881927518968d5643a217f7661b816561e8175f9f346b07682dc9bd61"
+    },
+    {
+      "path": "CO2/PipelineCapitalCost.csv",
+      "bytes": 41,
+      "rows": 1,
+      "sha256": "6b7028aceeca5d461eb1a0498e6a338885550fea3d46cfb0312b2d6371b9d8c1"
+    },
+    {
+      "path": "CO2/PipelineElectricityUsage.csv",
+      "bytes": 30,
+      "rows": 1,
+      "sha256": "f0f6e104ced084b1bda8712daebff91c1c82cf1a4d3a864b0770467b7499c230"
+    },
+    {
+      "path": "CO2/PipelineFixedOM.csv",
+      "bytes": 26,
+      "rows": 1,
+      "sha256": "a92edba2ca8ae89181c80ba6ba1785370c118c8fa0998115b1be09b8e85d3e01"
+    },
+    {
+      "path": "CO2/PipelineLifetime.csv",
+      "bytes": 20,
+      "rows": 1,
+      "sha256": "e3194dc0507d878e5705b29994f1dae6732521ea8892bac0d3efd62d46e52d5a"
+    },
+    {
+      "path": "CO2/StorageMaxCapacity.csv",
+      "bytes": 722,
+      "rows": 42,
+      "sha256": "24e88d7e0455a0c2db625eddc4c430d287135fc8583d37bbc50612b8c182488c"
+    },
+    {
+      "path": "CO2/StorageSiteCapitalCost.csv",
+      "bytes": 124,
+      "rows": 6,
+      "sha256": "f7d62488a372573790a73aaf2045ce3da043733f185d7f2922706a12663e503f"
+    },
+    {
+      "path": "CO2/StorageSiteFixedOMCost.csv",
+      "bytes": 110,
+      "rows": 6,
+      "sha256": "f8cd8f78a19547737f7d7df161d4ff5e3c874c047d06099dae551a5e8aac1ea0"
+    },
+    {
+      "path": "CO2/generated_default_rows.csv",
+      "bytes": 1601,
+      "rows": 24,
+      "sha256": "a446ccc400983c9fba955f0ef056c20d06bdb634a022efe87d44c361c53f8599"
+    },
+    {
       "path": "General/AvailableBioEnergy.csv",
       "bytes": 123,
       "rows": 7,
@@ -146,6 +206,18 @@
       "bytes": 6468,
       "rows": 245,
       "sha256": "8b3f40405d1d8a3720a38d76d2356c9d8cfee3745d9aa8b9a23d1257205a9813"
+    },
+    {
+      "path": "Generator/MaxInstalledCapacityByPeriod.csv",
+      "bytes": 26533,
+      "rows": 896,
+      "sha256": "8835c9a946e2e4cf39522f61cda1af947fda9d7d999eee4d3c36deca6b30fbf0"
+    },
+    {
+      "path": "Generator/genCO2Captured.csv",
+      "bytes": 229,
+      "rows": 7,
+      "sha256": "d9d17e18cbcf4567fb443b20d1e726cff896442ceeab541e5f60a5443af310d8"
     },
     {
       "path": "Generator/genCO2TypeFactor.csv",
@@ -230,6 +302,462 @@
       "bytes": 645,
       "rows": 33,
       "sha256": "da3de3d6f051beb76352a135824afdcec076d86919d7187c95e053087079aa0c"
+    },
+    {
+      "path": "Hydrogen/Constants.csv",
+      "bytes": 782,
+      "rows": 11,
+      "sha256": "f0e7de72c0ffa22643267b7d60ceb9c311036e884af27b9875a3c8073cdebc0e"
+    },
+    {
+      "path": "Hydrogen/ElectrolyzerFixedOMCost.csv",
+      "bytes": 104,
+      "rows": 7,
+      "sha256": "c2c7590ce55c6a8cd1e974b2d70875b4273fd66def570860230aa2457e51c740"
+    },
+    {
+      "path": "Hydrogen/ElectrolyzerLifetime.csv",
+      "bytes": 18,
+      "rows": 1,
+      "sha256": "ff01b3d0ae7cca2926a2ffa9c2787c4d4442d937fb19306498331203da5681ed"
+    },
+    {
+      "path": "Hydrogen/ElectrolyzerPlantCapitalCost.csv",
+      "bytes": 120,
+      "rows": 7,
+      "sha256": "41d3a6878d41065c1f2c712e4ce38898be51a241c72ea62a7c30f4e82d889956"
+    },
+    {
+      "path": "Hydrogen/ElectrolyzerPowerUse.csv",
+      "bytes": 173,
+      "rows": 7,
+      "sha256": "c7ad9413f2aae13c0c639f1473bebe87dbbdc2d12e46eafc3ba2802b448d5f37"
+    },
+    {
+      "path": "Hydrogen/H2Storages.csv",
+      "bytes": 32,
+      "rows": 2,
+      "sha256": "8eabe60c794d32112e416ca5f04ff8f66e7026650f149658f37a4d19fe432e00"
+    },
+    {
+      "path": "Hydrogen/H2TerminalCapacity.csv",
+      "bytes": 2762,
+      "rows": 119,
+      "sha256": "7f804eb91f47faa4efcfad8acc07f835bd9f2c73dd675cbf58e349c5df3c59fe"
+    },
+    {
+      "path": "Hydrogen/H2TerminalCapitalCost.csv",
+      "bytes": 4015,
+      "rows": 119,
+      "sha256": "bea03c139bc1bbd66266887f3d1dfc9db4dbdb7a54e900012fcc53807a5b0b35"
+    },
+    {
+      "path": "Hydrogen/H2TerminalFixedOM.csv",
+      "bytes": 4635,
+      "rows": 119,
+      "sha256": "e9d22c1124a7ed2af645818c565d7fccea63426c1590a5501894cbcf6fefbd61"
+    },
+    {
+      "path": "Hydrogen/H2TerminalLifetime.csv",
+      "bytes": 64,
+      "rows": 2,
+      "sha256": "d8369557ed7122e9300d9d5a5a3e82ebf518c492ae4808f922fcfff3cc8c4851"
+    },
+    {
+      "path": "Hydrogen/H2TerminalNodes.csv",
+      "bytes": 139,
+      "rows": 15,
+      "sha256": "0629382e07539512b4d76f0437a43c47a5c621daa72f1abbdaeafc786fe9a6bf"
+    },
+    {
+      "path": "Hydrogen/H2TerminalPrice.csv",
+      "bytes": 4573,
+      "rows": 119,
+      "sha256": "d9befa3a666c1d189cce17580c0bf87520904b042a9d0ce8569a1f94569cfd5b"
+    },
+    {
+      "path": "Hydrogen/H2Terminals.csv",
+      "bytes": 39,
+      "rows": 2,
+      "sha256": "c52de25dedd3098071236716b63a81729c28cd8d750b88df8fa622092deccd3d"
+    },
+    {
+      "path": "Hydrogen/H2TerminalsOfNode.csv",
+      "bytes": 347,
+      "rows": 17,
+      "sha256": "7db63d93a3535451f22e9cd24643607fe6c900cb54f6f8a69c580f203e5f1bb2"
+    },
+    {
+      "path": "Hydrogen/HydrogenGenerators.csv",
+      "bytes": 61,
+      "rows": 3,
+      "sha256": "a99ff026f4489594d66270b171e7e5f849736a618bfe9208d1e7fa50be60ea9d"
+    },
+    {
+      "path": "Hydrogen/PipelineCapitalCost.csv",
+      "bytes": 155,
+      "rows": 7,
+      "sha256": "5532e49b4a9be8bef99d02e65afe5fa140be8a05d914f96263c1ad44c6059bb0"
+    },
+    {
+      "path": "Hydrogen/PipelineCompressorPowerUsage.csv",
+      "bytes": 40,
+      "rows": 1,
+      "sha256": "e7a87b88725071d97923cdf324b04d147935f48e66035ac30f8fc1b1e0f96634"
+    },
+    {
+      "path": "Hydrogen/PipelineOMCostPerKM.csv",
+      "bytes": 150,
+      "rows": 7,
+      "sha256": "66e55c654095cedb80f2d7ce927674933d366752ffa3a069cf305186f4631cd4"
+    },
+    {
+      "path": "Hydrogen/ProductionNodes.csv",
+      "bytes": 296,
+      "rows": 36,
+      "sha256": "3f5eabf03bdeb579dd596a24141ffd86faa899aa7eae89cd2d3fe72bf8932609"
+    },
+    {
+      "path": "Hydrogen/ReformerCO2CaptureFactor.csv",
+      "bytes": 308,
+      "rows": 21,
+      "sha256": "a218999919131b6806e45f73c2a5fc8a373f189f97fee7b5c7f59daaed23c984"
+    },
+    {
+      "path": "Hydrogen/ReformerCapitalCost.csv",
+      "bytes": 428,
+      "rows": 21,
+      "sha256": "ed5178a0bf30097be3aad8ad741be4784513bcb003c02eee2e3cfa862246aeeb"
+    },
+    {
+      "path": "Hydrogen/ReformerEfficiency.csv",
+      "bytes": 446,
+      "rows": 21,
+      "sha256": "65a51b434143b704861d53166fb825f4ccda9eb8c5833232186022d2ed2343aa"
+    },
+    {
+      "path": "Hydrogen/ReformerElectricityUse.csv",
+      "bytes": 658,
+      "rows": 21,
+      "sha256": "62127794799bd29583795fdb0abf12ba17eec2477c2470ad72b66351de473ff4"
+    },
+    {
+      "path": "Hydrogen/ReformerEmissionFactor.csv",
+      "bytes": 635,
+      "rows": 21,
+      "sha256": "fe8ea81ec06f801bf8ae3da5a802c3c556a669af142b5054adc216b9a6e1fc30"
+    },
+    {
+      "path": "Hydrogen/ReformerFixedOMCost.csv",
+      "bytes": 423,
+      "rows": 21,
+      "sha256": "57bde5d456b14c5965e54c3e9cd45c58540668b3ba197114666c3383b8de9571"
+    },
+    {
+      "path": "Hydrogen/ReformerLifetime.csv",
+      "bytes": 60,
+      "rows": 3,
+      "sha256": "8dd822ad641a1507529c6910543d5daa6dd362fbbae8769407ae37c0fe721744"
+    },
+    {
+      "path": "Hydrogen/ReformerLocations.csv",
+      "bytes": 286,
+      "rows": 35,
+      "sha256": "579dd9735d8942d91169d33bcfb5d3624a71ff1fec973eadbb87d5f36ef6efe7"
+    },
+    {
+      "path": "Hydrogen/ReformerPlants.csv",
+      "bytes": 39,
+      "rows": 3,
+      "sha256": "1f0c78284435280fdea0df1bfdd36844dfd4177c4a9789f4e8ed7d9f0953b396"
+    },
+    {
+      "path": "Hydrogen/ReformerVariableOMCost.csv",
+      "bytes": 441,
+      "rows": 21,
+      "sha256": "0eefe77107bff6e5caaa86ea2f0a0c056edefdc80932006e97b203fad03f242a"
+    },
+    {
+      "path": "Hydrogen/StorageCapitalCost.csv",
+      "bytes": 432,
+      "rows": 14,
+      "sha256": "0cfae863189d48b59aeb3e88db65a0dc5c748254ce923ff068e7334b3d2430a4"
+    },
+    {
+      "path": "Hydrogen/StorageFixedOMCost.csv",
+      "bytes": 402,
+      "rows": 14,
+      "sha256": "53a6cbf02112abcde87d24ce0454d405cccb1677197f3238d3b6595b2c15fc73"
+    },
+    {
+      "path": "Hydrogen/StorageLifetime.csv",
+      "bytes": 47,
+      "rows": 2,
+      "sha256": "4ea2779d379073c60c6a69677df4f40da12c998fa7dabc0ec9f49e99f88edd44"
+    },
+    {
+      "path": "Hydrogen/StorageMaxCapacity.csv",
+      "bytes": 1516,
+      "rows": 49,
+      "sha256": "f94ade38479f1f57aa85398b54da93da38696648fc86f6e5f85a96f4a33bf83b"
+    },
+    {
+      "path": "Hydrogen/duplicate_input_audit.csv",
+      "bytes": 89,
+      "rows": 0,
+      "sha256": "7754c67270da97eabaaf7774884acd11a44632776e96da35d722f23dda0afa87"
+    },
+    {
+      "path": "Hydrogen/excluded_input_rows.csv",
+      "bytes": 2120,
+      "rows": 21,
+      "sha256": "1ab5fadb376a9b32c3b0def470ab54049e0f39c1b1df10143123743a2b5e827f"
+    },
+    {
+      "path": "Industry/AmmoniaElConsumption.csv",
+      "bytes": 82,
+      "rows": 2,
+      "sha256": "675b0b173ee1bbe232c5335131d1e3d127575546a825dc8f594cd859d0ad5da0"
+    },
+    {
+      "path": "Industry/AmmoniaFeedstockConsumption.csv",
+      "bytes": 97,
+      "rows": 2,
+      "sha256": "d72789c51d060dbbd8eff34717ac3a87206ed6a4d8b588f45e76f21e0c72e2e0"
+    },
+    {
+      "path": "Industry/AmmoniaFixedOM.csv",
+      "bytes": 476,
+      "rows": 14,
+      "sha256": "ab3824e26b3a39c1f9bb78bb1ecb72d41bd73c7cd07d7776b53dd0533ca510a1"
+    },
+    {
+      "path": "Industry/AmmoniaInitialCapacity.csv",
+      "bytes": 1189,
+      "rows": 40,
+      "sha256": "2afde762357f0d9cd01db84dd49b70607a4962c98b7514e3231c99898e62c69b"
+    },
+    {
+      "path": "Industry/AmmoniaInvCost.csv",
+      "bytes": 426,
+      "rows": 14,
+      "sha256": "7e77ee5913250fe8feff138bf5d4a3d2f7d29b5ffaef72acbf73d496b1e4b075"
+    },
+    {
+      "path": "Industry/AmmoniaPlantLifetime.csv",
+      "bytes": 47,
+      "rows": 2,
+      "sha256": "a99612434816cc1d46d7df563780c02a6b066c74fefde1d4068e8a076d00de24"
+    },
+    {
+      "path": "Industry/AmmoniaPlants.csv",
+      "bytes": 36,
+      "rows": 2,
+      "sha256": "b3ec6661d429b0233df953d05f0f51d8916f583446233baac9fce0889e7018c3"
+    },
+    {
+      "path": "Industry/AmmoniaScaleFactorInitialCap.csv",
+      "bytes": 319,
+      "rows": 14,
+      "sha256": "313b41a30a4eddfa6d8b379b1395777834de091db55487dc91f2c61225f8d922"
+    },
+    {
+      "path": "Industry/AmmoniaYearlyProduction.csv",
+      "bytes": 4017,
+      "rows": 140,
+      "sha256": "760009aafc62412017b1a7a224bd8836dc721c1f5975982c9225c3455501cf17"
+    },
+    {
+      "path": "Industry/CementCO2CaptureRate.csv",
+      "bytes": 71,
+      "rows": 3,
+      "sha256": "5e580866a1fb6d6a8ef4e4a82cfd59f8affd4b3608288ee6b4f899d9b80f17a0"
+    },
+    {
+      "path": "Industry/CementElConsumption.csv",
+      "bytes": 566,
+      "rows": 21,
+      "sha256": "5a61f4f8be3e04c4293d2ce14b538a06f79aad9be2fc481c2b9f2a4fde1509bd"
+    },
+    {
+      "path": "Industry/CementFixedOM.csv",
+      "bytes": 539,
+      "rows": 21,
+      "sha256": "53a5988bf72b826fcffcddd543990fa350de6cf10500eaecc8f5aedab3ad5212"
+    },
+    {
+      "path": "Industry/CementFuelConsumption.csv",
+      "bytes": 496,
+      "rows": 21,
+      "sha256": "0ec63727aecbc57688421a85d15baa5c01cfd975e88d4e4bf5095363dc3e544f"
+    },
+    {
+      "path": "Industry/CementInitialCapacity.csv",
+      "bytes": 2449,
+      "rows": 105,
+      "sha256": "274d83efbfd63aa5f6f8fd5c66269eec171c547d1f97d21a2fbde291ea5c73c2"
+    },
+    {
+      "path": "Industry/CementInvCost.csv",
+      "bytes": 530,
+      "rows": 21,
+      "sha256": "79f7b38fed47f1f0f986369dd620ce2647845b6a80d8ee367e9eec53498c0a38"
+    },
+    {
+      "path": "Industry/CementPlantLifetime.csv",
+      "bytes": 62,
+      "rows": 3,
+      "sha256": "cdf97937a5bea59365246858d5034ffe5d1478d45f32189d3c8a7d28171f0309"
+    },
+    {
+      "path": "Industry/CementPlants.csv",
+      "bytes": 47,
+      "rows": 3,
+      "sha256": "312bd3c58c615d57e5cea05aa208f47248c0c87f3c6e148718e752742bbc6ccc"
+    },
+    {
+      "path": "Industry/CementScaleFactorInitialCap.csv",
+      "bytes": 445,
+      "rows": 21,
+      "sha256": "8f03038da34dcee02f186e7ebbff12ce0f214ad792aacd4649caeeb4cffcb276"
+    },
+    {
+      "path": "Industry/CementYearlyProduction.csv",
+      "bytes": 354,
+      "rows": 35,
+      "sha256": "e828523762f5072be794d769397851f42bdfe86ac29227d733f253f90a68b12b"
+    },
+    {
+      "path": "Industry/Constants.csv",
+      "bytes": 252,
+      "rows": 4,
+      "sha256": "b6c2b9be443cb7b49d46431d5b6312bb177153dc34afdf6969ef27f55675fcbc"
+    },
+    {
+      "path": "Industry/RefineryHeatConsumption.csv",
+      "bytes": 33,
+      "rows": 1,
+      "sha256": "ed9074546ee2d4e40971fbdfc1e0beaddd035e4a53d60457067b3518ab06e3df"
+    },
+    {
+      "path": "Industry/RefineryHydrogenConsumption.csv",
+      "bytes": 50,
+      "rows": 1,
+      "sha256": "6a9071e0174aa632645003fde27ea38049eac412eb2fac2fee998f2a1970b552"
+    },
+    {
+      "path": "Industry/RefineryYearlyProduction.csv",
+      "bytes": 4272,
+      "rows": 175,
+      "sha256": "3f2cb7edbb505c77e424252e4c3a05b85b20f0c641a362b0c7f5fd9303eec34b"
+    },
+    {
+      "path": "Industry/ShedCost.csv",
+      "bytes": 26,
+      "rows": 1,
+      "sha256": "d18ef811e382c9b502ce531cda93210534c25422dac0d93933ab7dcf07287e3f"
+    },
+    {
+      "path": "Industry/SteelBioConsumption.csv",
+      "bytes": 566,
+      "rows": 42,
+      "sha256": "0cb64ca247352c850186f0703bb912cdd57ce80ddb96265c6f794716d75a2305"
+    },
+    {
+      "path": "Industry/SteelCO2Captured.csv",
+      "bytes": 127,
+      "rows": 6,
+      "sha256": "c7d4bec84860632aab33ac6b56ff8e533417c75dfe182c2e169250d237d78ed5"
+    },
+    {
+      "path": "Industry/SteelCO2Emissions.csv",
+      "bytes": 145,
+      "rows": 6,
+      "sha256": "22c0bcaec59f1fe27c154506506aaf5f77cac686b3503335ad56ae2378acfaa4"
+    },
+    {
+      "path": "Industry/SteelCoalConsumption.csv",
+      "bytes": 567,
+      "rows": 42,
+      "sha256": "d26e21931ec8f87418d10801b026c4cf9235ed05d9ea46f5b42f17bc52324d2b"
+    },
+    {
+      "path": "Industry/SteelElConsumption.csv",
+      "bytes": 573,
+      "rows": 42,
+      "sha256": "7f78a1b8f5cb394540629807346f4213526fe926b0112bb33d0654aaaa09d2d3"
+    },
+    {
+      "path": "Industry/SteelFixedOM.csv",
+      "bytes": 756,
+      "rows": 42,
+      "sha256": "88c842393d638f1e728c260907bfd7f54be7a90b0567d6664191615fafb2212b"
+    },
+    {
+      "path": "Industry/SteelHydrogenConsumption.csv",
+      "bytes": 740,
+      "rows": 42,
+      "sha256": "42ab2baf9d7dbc8396d237506f2aa718b2be0912f1ee8f498139babee1c28579"
+    },
+    {
+      "path": "Industry/SteelInitialCapacity.csv",
+      "bytes": 2735,
+      "rows": 120,
+      "sha256": "07ab4d61a4d1661ed3a3e5910bd97781c2a4a47605da562d764f7bcd1e7b2981"
+    },
+    {
+      "path": "Industry/SteelInvCost.csv",
+      "bytes": 847,
+      "rows": 42,
+      "sha256": "92e193d12d7ec530b1c88f06e6926eafb13e55bc34f236dbe147b7f08b4aecb4"
+    },
+    {
+      "path": "Industry/SteelOilConsumption.csv",
+      "bytes": 566,
+      "rows": 42,
+      "sha256": "0cb64ca247352c850186f0703bb912cdd57ce80ddb96265c6f794716d75a2305"
+    },
+    {
+      "path": "Industry/SteelPlantLifetime.csv",
+      "bytes": 89,
+      "rows": 6,
+      "sha256": "7465c6e845a1587781a4fb7662d5ae40cf6efb5916e742f51953da31d2a63f1e"
+    },
+    {
+      "path": "Industry/SteelPlants.csv",
+      "bytes": 64,
+      "rows": 6,
+      "sha256": "545369f92c09c6413485fde7ba29f80fca4158e2818b64a398637fb35572743a"
+    },
+    {
+      "path": "Industry/SteelScaleFactorInitialCap.csv",
+      "bytes": 680,
+      "rows": 42,
+      "sha256": "4dcb629e2ed0a655e56fa3f98199446033a65541fb8fdfa674e35175c2fbae38"
+    },
+    {
+      "path": "Industry/SteelVarOpex.csv",
+      "bytes": 756,
+      "rows": 42,
+      "sha256": "168e37f6a9bd27f49ad76a7e653b192751d9e5dda34d969268bbb96052564fd0"
+    },
+    {
+      "path": "Industry/SteelYearlyProduction.csv",
+      "bytes": 3518,
+      "rows": 140,
+      "sha256": "08f90e754a30c6b7aee74db8cac464d96f294499ea1c33737335c5344a9bf0cd"
+    },
+    {
+      "path": "Industry/duplicate_input_audit.csv",
+      "bytes": 89,
+      "rows": 0,
+      "sha256": "7754c67270da97eabaaf7774884acd11a44632776e96da35d722f23dda0afa87"
+    },
+    {
+      "path": "Industry/generated_default_rows.csv",
+      "bytes": 25453,
+      "rows": 222,
+      "sha256": "d4a0ebd22e8ffd37d672de34e42da59bd97967e722a4b2554d16e74d2ab4ec7c"
     },
     {
       "path": "NaturalGas/PipelineCapacity.csv",
@@ -352,6 +880,18 @@
       "sha256": "2734e5c68c7a1b516e5d46ee5755e4423da7729b76d9e54f761eae25438a0b89"
     },
     {
+      "path": "Sets/AmmoniaProducers.csv",
+      "bytes": 176,
+      "rows": 20,
+      "sha256": "872a70914c81e9420e834fd5f77fbec1f80e4e4354cb1fe51e53abb82499b27d"
+    },
+    {
+      "path": "Sets/CementProducers.csv",
+      "bytes": 284,
+      "rows": 35,
+      "sha256": "bbff9cbc5d476c28fcf6f8375efffbb66d0ff4dfc22ff65f7e5cfc33930d2924"
+    },
+    {
       "path": "Sets/DependentStorage.csv",
       "bytes": 29,
       "rows": 1,
@@ -430,6 +970,12 @@
       "sha256": "200645c7a4bf6ee30a3d7be1b30858f8b536ccc4ecf444200483d9b512ffe33b"
     },
     {
+      "path": "Sets/OilProducers.csv",
+      "bytes": 210,
+      "rows": 25,
+      "sha256": "b6a3781a36a3d9873f572605d4d0eddde730f09ff5c2baea39ecb586231c7643"
+    },
+    {
       "path": "Sets/OnshoreNode.csv",
       "bytes": 280,
       "rows": 35,
@@ -446,6 +992,12 @@
       "bytes": 43,
       "rows": 1,
       "sha256": "33f6c0710f308d3736cf39749973a78e7db4166dbccdb5341c16ab3f7cd750b6"
+    },
+    {
+      "path": "Sets/SteelProducers.csv",
+      "bytes": 176,
+      "rows": 20,
+      "sha256": "5c8486c02a3e05f6dc9b2632b346fd92a072df80f8ae17609d5d4ef8cf7e58e3"
     },
     {
       "path": "Sets/Storage.csv",
@@ -646,10 +1198,34 @@
       "sha256": "1fd315c427def26576547857d641753b06514d70b5639826f1407ab34ffd398e"
     },
     {
+      "path": "Transport/ElectricityDemand.csv",
+      "bytes": 6924,
+      "rows": 245,
+      "sha256": "45550e3726a86046d85351c842b3738d665fe6919b09051966a6d006d6a552e2"
+    },
+    {
+      "path": "Transport/HydrogenDemand.csv",
+      "bytes": 6856,
+      "rows": 245,
+      "sha256": "47bbcacfb490987318413d8037dd236b0a56ba7600fbe35aedb43d7971c07a00"
+    },
+    {
       "path": "Transport/NaturalGasDemand.csv",
       "bytes": 5891,
       "rows": 245,
       "sha256": "4263a074b9408a317a9195eff83502ed4bb3b3f3a5a4a3b0891a01c92a7d8208"
+    },
+    {
+      "path": "hydrogen_conversion_manifest.json",
+      "bytes": 10511,
+      "rows": null,
+      "sha256": "47aa0de4f46cb0adc310361fbca6a0997db06b1c03432f0046f65690d6c3f48b"
+    },
+    {
+      "path": "industry_conversion_manifest.json",
+      "bytes": 9598,
+      "rows": null,
+      "sha256": "b9675059810f2a4841ced64fa187d26e2dc68ef5dd7816c62c0c9747ec0c46dd"
     }
   ],
   "owner_confirmed_corrections": {
@@ -673,5 +1249,7 @@
         "reason": "The workbook RussianGas block has 8 periods and its value column was pasted on a 7-row stride, so the 278 drifted one period later per country. Owner-confirmed intent: cheap pre-war gas in period 1, 800 EUR/ton thereafter."
       }
     ]
-  }
+  },
+  "hydrogen_conversion_manifest": "hydrogen_conversion_manifest.json",
+  "industry_conversion_manifest": "industry_conversion_manifest.json"
 }

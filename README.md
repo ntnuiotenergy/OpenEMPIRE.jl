@@ -449,6 +449,95 @@ emp, periods, sets, params = OpenEMPIRE.create_model(
 Solving is a separate step:
 
 ```julia
+
+The module sections below are summarised, with the full flag reference and the
+dependencies between them, in [config/README.md](config/README.md).
+
+### Natural-gas module
+
+Natural gas is opt-in and does not affect existing electricity-only runs:
+
+```yaml
+natural_gas: true
+number_of_gas_scenarios: 1
+```
+
+With the module enabled, gas-fired generators buy gas through terminals,
+pipelines and seasonal storage. Gas transport demand may be met or shed, and
+pipeline flows consume electricity at their sending node. The ordinary
+generator fuel-price term is removed for gas generators so terminal imports
+are not charged twice; variable O&M and carbon costs remain.
+
+`number_of_scenarios` remains the weather axis.
+`number_of_gas_scenarios` is the terminal-price axis, so the operational model
+contains their Cartesian product. Combined scenarios are ordered weather first,
+then gas price. Weather profiles are sampled once and replicated across all gas
+prices. The bundled `full_model_int` source currently contains one complete gas
+price scenario; higher counts require a complete
+`NaturalGas/TerminalCost_stochastic.csv`.
+
+Run the parity-tested full-model profile with:
+
+```bash
+julia --project=. scripts/run_julia_empire.jl \
+  --dataset=full_model_int \
+  --config=config/run_int_full_gas.yaml \
+  --solver=Gurobi \
+  --fixed-sample
+```
+
+Gas outputs are written below `<result-dir>/output/` as `ng*.csv`,
+`naturalGasBalance.csv`, and `transportNaturalGas.csv`, together with
+`results_natural_gas_*.csv` comparison reports. Gas-price and storage duals are
+written only when operational duals are available. The run manifest records the
+module gate, both scenario counts, exact gas-input hashes, and conversion
+manifest hash.
+
+### Hydrogen and CO2 evidence module
+
+The in-development Hydrogen port is also opt-in:
+
+```yaml
+natural_gas: true
+hydrogen: true
+number_of_gas_scenarios: 1
+```
+
+Hydrogen currently requires natural gas because reformers consume gas through
+the shared gas balance. Deterministic evidence deliberately rejects more than
+one gas-price scenario until an actual InternalEMPIRE two-price comparison is
+complete. With Hydrogen disabled, its CSV files are neither required nor read.
+
+The module covers electrolyzers, reformers, imports, Hydrogen pipelines and
+storage, gas-pipeline repurposing, Hydrogen-fired generation, transport demand,
+and the coupled CO2 network. Native and Python-style results are written below
+`<result-dir>/output/`; exact input and conversion-manifest hashes are recorded
+in `run_manifest.yaml`. See
+[`docs/hydrogen_data_conversion.md`](docs/hydrogen_data_conversion.md) and
+[`HYDROGEN_IMPLEMENTATION_STATUS.md`](HYDROGEN_IMPLEMENTATION_STATUS.md) for
+the evidence boundary and remaining reference-parity work.
+
+### Industry evidence module
+
+The deterministic Industry port is opt-in and requires natural gas:
+
+```yaml
+natural_gas: true
+hydrogen: true   # optional; enables H2/CCS routes and refineries
+industry: true
+number_of_gas_scenarios: 1
+```
+
+It co-optimizes steel, cement, and ammonia investment and operation and couples
+industrial electricity, gas, Hydrogen, biomass, emissions, and captured CO2 to the
+existing systems. With Hydrogen disabled, H2/CO2-dependent routes and refineries
+are omitted explicitly. Native and Python-style tables are written beneath
+`<result-dir>/output/`, and six strategic capacity tables participate in fixed-
+investment OOS. See [`docs/industry_module.md`](docs/industry_module.md) and
+[`docs/industry_data_conversion.md`](docs/industry_data_conversion.md).
+
+The model can then be optimized using `JuMP` with the associated solver:
+```
 JuMP.optimize!(emp)
 ```
 

@@ -33,9 +33,70 @@ function test_gurobi_numeric_attribute_parsing()
     )
     @test_throws ArgumentError _optional_float("not-a-number", "FeasibilityTol")
     @test_throws ArgumentError _parse_args(["--gurobi-preslove=1"])
+
+    return nothing
 end
 
 function test_resolve_julia_run_spec()
+    full_hydrogen_config = YAML.load_file(
+        joinpath(@__DIR__, "..", "config", "run_int_full_hydrogen.yaml"),
+    )
+    @test full_hydrogen_config["forecast_horizon_year"] == 2055
+    @test full_hydrogen_config["number_of_scenarios"] == 5
+    @test full_hydrogen_config["length_of_regular_season"] == 168
+    @test full_hydrogen_config["natural_gas"] === true
+    @test full_hydrogen_config["hydrogen"] === true
+    full_hydrogen_attributes = _optimizer_attributes(
+        "Gurobi",
+        full_hydrogen_config,
+        Dict(
+            "gurobi-method" => "",
+            "gurobi-crossover" => "",
+            "gurobi-presolve" => "",
+            "gurobi-feasibility-tol" => "",
+            "gurobi-bar-conv-tol" => "",
+        ),
+    )
+    @test full_hydrogen_attributes == (
+        "Method" => 2,
+        "Crossover" => 0,
+        "Presolve" => 1,
+        "NumericFocus" => 1,
+        "BarHomogeneous" => 1,
+        "FeasibilityTol" => 1.0e-9,
+        "BarConvTol" => 1.0e-8,
+    )
+
+    full_industry_config = YAML.load_file(
+        joinpath(@__DIR__, "..", "config", "run_int_full_industry.yaml"),
+    )
+    full_industry_attributes = _optimizer_attributes(
+        "Gurobi",
+        full_industry_config,
+        Dict(
+            "gurobi-method" => "",
+            "gurobi-crossover" => "",
+            "gurobi-presolve" => "",
+            "gurobi-feasibility-tol" => "",
+            "gurobi-bar-conv-tol" => "",
+        ),
+    )
+    @test ("Seed" => 2) in full_industry_attributes
+
+    mktempdir() do root
+        model = Model(HiGHS.Optimizer)
+        set_silent(model)
+        @variable(model, quoted_name[1:2] >= 0)
+        @constraint(model, quoted_name[1] + quoted_name[2] >= 3)
+        @objective(model, Min, quoted_name[1] + 2 * quoted_name[2])
+        optimize!(model)
+        raw_solution_path = _write_raw_solution(model, joinpath(root, "raw_solution.csv"))
+        raw_solution = read(raw_solution_path, String)
+        @test startswith(raw_solution, "variable,value\n")
+        @test occursin("\"quoted_name[1]\",", raw_solution)
+        @test occursin("\"quoted_name[2]\",", raw_solution)
+    end
+
     mktempdir() do root
         source = joinpath(root, "source")
         scenario_dir = joinpath(source, "ScenarioData")
