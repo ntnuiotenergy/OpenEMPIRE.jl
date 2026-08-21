@@ -1,6 +1,6 @@
 # OpenEMPIRE.jl
 
-[Julia documentation](https://openempire-jl.readthedocs.io/en/latest/)
+[Julia documentation](https://openempirejl.readthedocs.io/en/latest/)
 
 The [Julia documentation](docs/src/index.md) contains the user guide, input
 data reference, scenario and out-of-sample workflows, mathematical overview,
