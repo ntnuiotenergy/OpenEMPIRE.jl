@@ -1,5 +1,15 @@
 # OpenEMPIRE.jl
 
+[Julia documentation](https://openempire-jl.readthedocs.io/en/latest/)
+
+The [Julia documentation](docs/src/index.md) contains the user guide, input
+data reference, scenario and out-of-sample workflows, mathematical overview,
+and generated API reference. Build it locally with:
+
+```bash
+julia --project=docs docs/make.jl
+```
+
 > **Current implementation:** OpenEMPIRE is now developed in Julia in this
 > repository. The [legacy Python/Pyomo implementation](https://github.com/ntnuiotenergy/OpenEMPIRE)
 > remains available for reference, but new users and development should use

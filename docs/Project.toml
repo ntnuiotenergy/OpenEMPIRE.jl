@@ -1,0 +1,9 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+OpenEMPIRE = "0a5e0d9c-b95c-459b-9a1c-b5e5a9d7c465"
+
+[sources]
+OpenEMPIRE = {path = ".."}
+
+[compat]
+Documenter = "1"
