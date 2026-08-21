@@ -11,18 +11,23 @@ build:
     pre_build:
       - |
         set -eux
-        JULIA_VERSION=1.10.10
+        JULIA_VERSION=1.12.6
+        echo "Installing Julia ${JULIA_VERSION}"
         curl --fail --location --silent --show-error \
-          "https://julialang-s3.julialang.org/bin/linux/x64/1.10/julia-${JULIA_VERSION}-linux-x86_64.tar.gz" \
+          "https://julialang-s3.julialang.org/bin/linux/x64/1.12/julia-${JULIA_VERSION}-linux-x86_64.tar.gz" \
           --output /tmp/julia.tar.gz
         tar -xzf /tmp/julia.tar.gz -C /tmp
         export PATH="/tmp/julia-${JULIA_VERSION}/bin:$PATH"
+        julia --version
+        echo "Instantiating docs environment"
         julia --project=docs -e 'using Pkg; Pkg.instantiate()'
+        echo "Building Documenter site"
         julia --project=docs docs/make.jl
 
     post_build:
       - |
         set -eux
+        echo "Publishing Documenter site"
         mkdir -p "$READTHEDOCS_OUTPUT/html"
         cp -R docs/build-clean/. "$READTHEDOCS_OUTPUT/html/"
 
