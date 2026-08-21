@@ -1,5 +1,10 @@
 # OpenEMPIRE.jl
 
+> **Current implementation:** OpenEMPIRE is now developed in Julia in this
+> repository. The [legacy Python/Pyomo implementation](https://github.com/ntnuiotenergy/OpenEMPIRE)
+> remains available for reference, but new users and development should use
+> [OpenEMPIRE.jl](https://github.com/ntnuiotenergy/OpenEMPIRE.jl).
+
 This Julia package provides an open version of the European Model for Power
 system Investments with Renewable Energy (EMPIRE), reimplemented in Julia based
 on the existing Python version. EMPIRE is a multi-horizon stochastic capacity
