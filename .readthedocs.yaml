@@ -8,7 +8,7 @@ build:
   tools:
     python: "3.12"
   jobs:
-    post_build:
+    pre_build:
       - |
         set -eux
         JULIA_VERSION=1.10.10
@@ -19,6 +19,10 @@ build:
         export PATH="/tmp/julia-${JULIA_VERSION}/bin:$PATH"
         julia --project=docs -e 'using Pkg; Pkg.instantiate()'
         julia --project=docs docs/make.jl
+
+    post_build:
+      - |
+        set -eux
         mkdir -p "$READTHEDOCS_OUTPUT/html"
         cp -R docs/build-clean/. "$READTHEDOCS_OUTPUT/html/"
 
