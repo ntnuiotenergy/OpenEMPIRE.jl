@@ -20,7 +20,7 @@ build:
         export PATH="/tmp/julia-${JULIA_VERSION}/bin:$PATH"
         julia --version
         echo "Instantiating docs environment"
-        julia --project=docs -e 'using Pkg; Pkg.instantiate()'
+        julia --project=docs docs/instantiate.jl
         echo "Building Documenter site"
         julia --project=docs docs/make.jl
 
