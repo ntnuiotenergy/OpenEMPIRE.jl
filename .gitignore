@@ -1,3 +1,6 @@
+# Generated Documenter output
+/docs/build/
+/docs/build-clean/
 Manifest.toml
 .vscode/settings.json
 data/~$*.xlsx
