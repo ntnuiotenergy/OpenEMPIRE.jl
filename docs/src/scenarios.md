@@ -25,6 +25,10 @@ julia --project=. scripts/run_julia_empire.jl `
 
 Julia and Python use different random-number generators. Cross-language comparisons should therefore share a `sampling_key.csv`, then set `use_fixed_sample: true` in both implementations.
 
+The key records the sampled `(Year, Hour)` for each `(Period, Scenario,
+Season)`. The derived `*Raw.csv` files and the key are archived with the run,
+so a fixed-sample run can be reproduced from the same raw inputs and key.
+
 ## Filters and copula clusters
 
 Set `filter_make: true` to cluster possible regular-season load windows and write `ScenarioData/filter_result.csv`. Set `filter_use: true` to sample from that file. The `n_cluster` configuration controls the number of groups.
@@ -56,7 +60,24 @@ julia --project=. scripts/prepare_oos_experiment.jl test `
   --output=OutOfSample/test/experiment_seed101_3trees
 ```
 
-Then prepare and manage an execution queue using `prepare_oos_execution_queue.jl` and `manage_oos_execution_queue.jl`. Queue preparation validates tree checksums, fixed-investment provenance, and configuration compatibility without submitting jobs.
+Then prepare and manage an execution queue using
+`prepare_oos_execution_queue.jl` and `manage_oos_execution_queue.jl`:
+
+```bash
+julia --project=. scripts/prepare_oos_execution_queue.jl test \
+  --experiment=OutOfSample/test/experiment_seed101_3trees \
+  --fixed-investment-dir=results/julia_runs/<investment-run> \
+  --config=config/testrun.yaml --solver=HiGHS
+
+julia --project=. scripts/manage_oos_execution_queue.jl show \
+  --queue=OutOfSample/test/experiment_seed101_3trees/execution.yaml
+```
+
+Queue preparation validates tree checksums, fixed-investment provenance, and
+configuration compatibility without submitting jobs. The controller records
+audited state transitions; `mark` records an externally submitted scheduler
+job and `reconcile` accepts a result only when its manifest, fixed capacities,
+scenario checksums, termination status, and summary meet the queue criteria.
 
 Run a tree with fixed investments using `run_julia_empire.jl --out-of-sample=true`, `--fixed-investment-dir`, and `--scenario-data-root`. Completed runs can be aggregated with:
 
@@ -70,4 +91,18 @@ The aggregator checks manifests, feasibility, fixed capacities, staged configura
 
 ## Full-year evaluation
 
-`prepare_full_year_oos_experiment.jl` creates 24 chronological trees for a complete non-leap year. It validates that the source has exactly 8,760 ordered, gap-free rows and writes a full-year experiment manifest. Full-year OOS is an evaluation workflow; it does not rebuild the investment decision.
+`prepare_full_year_oos_experiment.jl` creates 24 chronological trees for a
+complete non-leap year:
+
+```bash
+julia --project=. scripts/prepare_full_year_oos_experiment.jl europe_v51 \
+  --config=config/run_2045_3sce.yaml --sample-years=2015 \
+  --format=csv --output=OutOfSample/europe_v51/full_year_2015
+```
+
+It validates exactly 8,760 ordered, gap-free rows and writes
+`full_year_config.yaml`, `experiment.yaml`, and checksummed trees. Use the
+generated full-year config for queue preparation. Each tree covers one
+365-hour chunk with a `winter` scenario and a dummy peak hour; aggregation
+drops the dummy peak and concatenates the chunks in chronological order.
+Full-year OOS evaluates fixed investment decisions and does not rebuild them.

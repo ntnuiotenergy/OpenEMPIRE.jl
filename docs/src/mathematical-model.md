@@ -17,6 +17,11 @@ The main JuMP containers are indexed by node, technology, strategic period, and 
 
 Constraints enforce demand balance, generation availability, capacity limits, storage dynamics, transmission limits, investment timing, reserve or reliability requirements represented by the input data, and emissions policies. The offshore wind-farm transmission cap is enabled by default.
 
+The wind-farm cap is created after investment-only constraints and is therefore
+omitted when strategic capacities are fixed for out-of-sample operation. The
+offshore energy-hub converter formulation is not implemented; hubs are read
+and validated but do not yet receive their own capacity limit.
+
 For out-of-sample operation, completed strategic investments are fixed and investment-only constraints are omitted. This leaves the operational dispatch problem for the supplied scenario tree.
 
 ## Objective
@@ -24,6 +29,11 @@ For out-of-sample operation, completed strategic investments are fixed and inves
 The objective minimizes discounted investment and operating costs over the planning horizon. Scenario probabilities and operational duration weights are applied to stochastic operational costs. Emission costs or an emission cap are selected through the run configuration.
 
 The implementation exposes `sol_invest_cost` and `sol_operational_cost` for calculating objective components from a solved JuMP model.
+
+Investment costs are discounted financial costs, while energy-not-served
+metrics from out-of-sample aggregation are physical, probability-weighted
+energy and are not discounted. The annuity/present-value calculation remains a
+documented difference under investigation; see [TODO.md](https://github.com/ntnuiotenergy/OpenEMPIRE.jl/blob/main/TODO.md).
 
 ## Time structure
 
