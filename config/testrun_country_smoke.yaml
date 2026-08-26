@@ -1,0 +1,38 @@
+# Minimal, deterministic configuration for the NUTS2 country-constraint smoke
+# test (data/country_smoke). To be used with scripts/run_julia_empire.jl or
+# OpenEMPIRE.create_model directly (see test/test_country_smoke.jl).
+#
+# Deliberately overrides the defaults in src/scenario.jl's
+# regular_scenario_seasons/scenario_peak_count/scenario_peak_hours so the
+# resulting time structure is the minimum currently supported end-to-end:
+# 1 strategic period x 1 regular season x 1 hour x 0 peak seasons x 1 scenario.
+
+use_temporary_directory: True
+temporary_directory: './'
+forecast_horizon_year: 2025                            # With leap_years_investment=5 below, gives exactly 1 strategic period
+number_of_scenarios: 1
+length_of_regular_season: 1
+regular_seasons: ["winter"]                            # 1 regular season instead of the 4-season default
+n_peak_seasons: 0                                       # No peak seasons (default is 2)
+len_peak_season: 0
+discount_rate: 0.05
+wacc: 0.05
+optimization_solver: "HiGHS"                            # No Gurobi dependency
+use_scenario_generation: False                          # ScenarioData/*.csv are already in generated form
+use_fixed_sample: False
+load_change_module: False
+filter_make: False
+filter_use: False
+copula_clusters_make: False
+copula_clusters_use: False
+copulas_to_use: ["electricload"]
+n_cluster: 10
+moment_matching: False
+n_tree_compare: 20
+use_emission_cap: False                                 # CO2 cap disabled; genCO2TypeFactor is 0 for both generators anyway
+compute_operational_duals: False
+print_in_iamc_format: False
+write_in_lp_format: False
+serialize_instance: False
+leap_years_investment: 5
+time_format: "%d/%m/%Y %H:%M"

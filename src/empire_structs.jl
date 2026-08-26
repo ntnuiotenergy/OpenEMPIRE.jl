@@ -39,6 +39,10 @@ Base.@kwdef mutable struct EmpireParams
     genMaxBuiltCap::Dict{Tuple{String, String}, TimeProfile}     = Dict{Tuple{String, String}, TimeProfile}()
     genMaxInstalledCapRaw::Dict{Tuple{String, String}, Float64}  = Dict{Tuple{String, String}, Float64}()
     genMaxInstalledCap::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
+    genCountryMaxBuiltCap::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
+    genCountryMinBuiltCap::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
+    genCountryMaxInstalledCapRaw::Dict{Tuple{String, String}, Float64} = Dict{Tuple{String, String}, Float64}()
+    genCountryMaxInstalledCap::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
     genMaxBiomethaneAvailability::Dict{String, TimeProfile}      = Dict{String, TimeProfile}()
     genRampUpCap::Dict{String, Float64}                          = Dict{String, Float64}()
     genCapAvailType::Dict{String, Float64}                       = Dict{String, Float64}()
@@ -221,6 +225,12 @@ max_build_cap(par, n, gt, sp) =
     haskey(par.genMaxBuiltCap, (n, gt)) ? par.genMaxBuiltCap[(n, gt)][sp] : DEFAULT_GEN_MAX_BUILD_CAP
 max_inst_cap(par, n, gt, sp) =
     haskey(par.genMaxInstalledCap, (n, gt)) ? par.genMaxInstalledCap[(n, gt)][sp] : DEFAULT_GEN_MAX_INST_CAP_RAW
+country_max_build_cap(par, c, gt, sp) =
+    haskey(par.genCountryMaxBuiltCap, (c, gt)) ? par.genCountryMaxBuiltCap[(c, gt)][sp] : DEFAULT_GEN_MAX_BUILD_CAP
+country_min_build_cap(par, c, gt, sp) =
+    haskey(par.genCountryMinBuiltCap, (c, gt)) ? par.genCountryMinBuiltCap[(c, gt)][sp] : 0.0
+country_max_inst_cap(par, c, gt, sp) =
+    haskey(par.genCountryMaxInstalledCap, (c, gt)) ? par.genCountryMaxInstalledCap[(c, gt)][sp] : DEFAULT_GEN_MAX_INST_CAP_RAW
 gen_lifetime(par, g) = get(par.genLifetime, g, DEFAULT_GEN_LIFETIME)
 gencap_init(par, n, g, sp) = (n, g) in keys(par.genInitCap) ? par.genInitCap[(n, g)][sp] : DEFAULT_GEN_INIT_CAP
 max_hydro_gen(par, n, sc) = haskey(par.maxRegHydroGen, n) ? par.maxRegHydroGen[n][sc] : DEFAULT_MAX_HYDRO_GEN
@@ -435,6 +445,7 @@ function validate(
     _check_float_dict!(errs, "genVariableOMCost", par.genVariableOMCost; min = 0.0)
     _check_float_dict!(errs, "genRefInitCap", par.genRefInitCap; min = 0.0)
     _check_float_dict!(errs, "genMaxInstalledCapRaw", par.genMaxInstalledCapRaw; min = 0.0)
+    _check_float_dict!(errs, "genCountryMaxInstalledCapRaw", par.genCountryMaxInstalledCapRaw; min = 0.0)
     _check_float_dict!(errs, "genCO2Content", par.genCO2Content; min = 0.0)
 
     _check_float_dict!(errs, "genRampUpCap", par.genRampUpCap; min = 0.0, max = 1.0)
@@ -466,6 +477,9 @@ function validate(
             ("genInitCap", par.genInitCap),
             ("genMaxBuiltCap", par.genMaxBuiltCap),
             ("genMaxInstalledCap", par.genMaxInstalledCap),
+            ("genCountryMaxBuiltCap", par.genCountryMaxBuiltCap),
+            ("genCountryMinBuiltCap", par.genCountryMinBuiltCap),
+            ("genCountryMaxInstalledCap", par.genCountryMaxInstalledCap),
             ("genMaxBiomethaneAvailability", par.genMaxBiomethaneAvailability),
             ("transmissionInitCap", par.transmissionInitCap),
             ("transmissionMaxBuiltCap", par.transmissionMaxBuiltCap),
@@ -594,6 +608,18 @@ function validate(
                 ("genMaxInstalledCap", par.genMaxInstalledCap),
             )
             _check_tuple_keys_in_sets!(errs, name, d, nset, "node", Set(techs(sets)), "technology")
+        end
+
+        # Tuple{country, technology} keyed dicts
+        for (name, d) in (
+                ("genCountryMaxBuiltCap", par.genCountryMaxBuiltCap),
+                ("genCountryMinBuiltCap", par.genCountryMinBuiltCap),
+                ("genCountryMaxInstalledCapRaw", par.genCountryMaxInstalledCapRaw),
+                ("genCountryMaxInstalledCap", par.genCountryMaxInstalledCap),
+            )
+            _check_tuple_keys_in_sets!(
+                errs, name, d, Set(countries(sets)), "country", Set(techs(sets)), "technology"
+            )
         end
 
         # Tuple{node, storage} keyed dicts

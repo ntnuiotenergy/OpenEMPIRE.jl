@@ -30,6 +30,7 @@ function preprocess_params(params::EmpireParams, sets, periods)
     preprocess_initcap_gen(params, sets, periods)
     preprocess_stoch_load(params, sets, periods)
     preprocess_max_installed_cap(params, sets, periods)
+    preprocess_country_max_installed_cap(params, sets, periods)
     preprocess_hydro_gen(params, sets, periods)
 end
 
@@ -203,6 +204,24 @@ function preprocess_max_installed_cap(params::EmpireParams, sets, periods)
         end
         params.transmissionMaxInstalledCap[(m, n)] = StrategicProfile(vals)
     end
+end
+
+function preprocess_country_max_installed_cap(params::EmpireParams, sets, periods)
+    params.genCountryMaxInstalledCap = Dict{Tuple{String, String}, TimeProfile}()
+    for ((country, technology), raw_cap) in params.genCountryMaxInstalledCapRaw
+        values = Float64[]
+        for sp in strat_periods(periods)
+            initial_cap = sum(
+                gencap_init(params, node, generator, sp)
+                for node in nodes_of_country(sets, country)
+                for generator in generators_tech(sets, node, technology);
+                init = 0.0,
+            )
+            push!(values, max(raw_cap, initial_cap))
+        end
+        params.genCountryMaxInstalledCap[(country, technology)] = StrategicProfile(values)
+    end
+    return nothing
 end
 
 # Find the marginal cost of generation for each generator and strategic period

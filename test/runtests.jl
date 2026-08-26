@@ -12,6 +12,9 @@ using YAML
 
 include("test_excel.jl")
 include("test_csv.jl")
+include("test_empire_sets.jl")
+include("test_country_constraints.jl")
+include("test_country_smoke.jl")
 include("test_scenario_csv.jl")
 include("test_annuity.jl")
 include("test_out_of_sample.jl")
@@ -28,6 +31,27 @@ include("test_solve.jl")
 @testset "Excel" begin
     test_read_excel_sets()
     test_read_excel_params()
+end
+
+@testset "EmpireSets" begin
+    test_empire_sets_countries_default_empty()
+    test_empire_sets_explicit_empty_country_mapping()
+    test_empire_sets_countries_positional_constructor_unchanged()
+    test_empire_sets_nodes_of_country_accessors()
+    test_empire_sets_country_validation()
+end
+
+@testset "NUTS2 country constraints" begin
+    test_country_generator_capacity_constraints()
+    test_country_generator_constraints_are_data_driven()
+end
+
+@testset "NUTS2 country smoke test" begin
+    test_country_smoke_baseline_solve()
+    test_country_smoke_minbuild_forces_investment()
+    test_country_smoke_maxbuild_limits_investment()
+    test_country_smoke_maxinstalled_limits_capacity()
+    test_country_smoke_non_nuts2_regression()
 end
 
 @testset "CSV" begin

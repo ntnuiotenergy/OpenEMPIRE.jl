@@ -259,6 +259,15 @@ function read_sets_csv(dir::AbstractString)
     @info "Reading CSV sets from $dir"
 
     sets_dir = "Sets"
+    countries_path = _optional_csv(dir, sets_dir, "Countries.csv")
+    nodes_of_country_path = _optional_csv(dir, sets_dir, "NodesOfCountry.csv")
+    if isnothing(countries_path) != isnothing(nodes_of_country_path)
+        throw(
+            ArgumentError(
+                "Sets/Countries.csv and Sets/NodesOfCountry.csv must either both be present or both be absent.",
+            ),
+        )
+    end
     wind_farm_path = _optional_csv(dir, sets_dir, "OffshoreWindFarmNode.csv")
     energy_hub_path = _optional_csv(dir, sets_dir, "OffshoreEnergyHub.csv")
     if isnothing(wind_farm_path)
@@ -286,6 +295,10 @@ function read_sets_csv(dir::AbstractString)
         DependentStorage = _read_vector_csv(_required_csv(dir, sets_dir, "DependentStorage.csv")),
         Technology = _read_vector_csv(_required_csv(dir, sets_dir, "Technology.csv")),
         Node = _read_vector_csv(_required_csv(dir, sets_dir, "Node.csv")),
+        Countries = isnothing(countries_path) ? String[] : _read_vector_csv(countries_path),
+        NodesOfCountry =
+            isnothing(nodes_of_country_path) ? Tuple{String, String}[] :
+            _read_tuple2_csv(nodes_of_country_path),
         OffshoreWindFarmNode = isnothing(wind_farm_path) ? String[] : _read_vector_csv(wind_farm_path),
         OffshoreEnergyHub = isnothing(energy_hub_path) ? String[] : _read_vector_csv(energy_hub_path),
         DirectionalLink = _read_tuple2_csv(_required_csv(dir, sets_dir, "DirectionalLink.csv")),
@@ -326,6 +339,18 @@ function read_params_csv(dir::AbstractString)
     par.genMaxBuiltCap = _read_strategic_profiles_pair_csv(_required_csv(dir, generator, "genMaxBuiltCap.csv"))
     par.genMaxInstalledCapRaw =
         _read_float_by_pair_csv(_required_csv(dir, generator, "genMaxInstalledCapRaw.csv"))
+    country_max_built_path = _optional_csv(dir, generator, "genMaxBuiltCapCountry.csv")
+    if country_max_built_path !== nothing
+        par.genCountryMaxBuiltCap = _read_strategic_profiles_pair_csv(country_max_built_path)
+    end
+    country_min_built_path = _optional_csv(dir, generator, "genMinBuiltCapCountry.csv")
+    if country_min_built_path !== nothing
+        par.genCountryMinBuiltCap = _read_strategic_profiles_pair_csv(country_min_built_path)
+    end
+    country_max_installed_path = _optional_csv(dir, generator, "genMaxInstalledCapCountry.csv")
+    if country_max_installed_path !== nothing
+        par.genCountryMaxInstalledCapRaw = _read_float_by_pair_csv(country_max_installed_path)
+    end
     biomethane_path = _optional_csv(dir, generator, "MaxBiomethaneAvailability.csv")
     if biomethane_path !== nothing
         par.genMaxBiomethaneAvailability = _read_strategic_profiles_csv(biomethane_path)

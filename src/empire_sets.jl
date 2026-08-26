@@ -58,6 +58,11 @@ query memberships in O(1).
   membership pairs.
 - `GeneratorsOfNode::Vector{NodeGen}`: `(node, generator)` membership pairs.
 - `StoragesOfNode::Vector{NodeStor}`: `(node, storage)` membership pairs.
+- `Countries::Vector{String}`: countries used for country-level grouping.
+  Empty by default.
+- `NodesOfCountry::Vector{Tuple{String,String}}`: `(country, node)`
+  membership pairs. Empty by default. Each mapped node may belong to at most
+  one country, and every country must have at least one mapped node.
 
 ## Derived lookups (computed in the constructor)
 - `GeneratorsByNode::Dict{NodeId, Vector{GenId}}`: generators present at
@@ -70,13 +75,17 @@ query memberships in O(1).
   node belonging to a given technology.
 - `Corridors::Vector{Arc}`: undirected corridors, with each pair stored in
   canonical order `(min, max)` (see [`is_bidir`](@ref)).
+- `NodesByCountry::Dict{String, Vector{NodeId}}`: nodes grouped by country.
+- `CountryOfNode::Dict{NodeId, String}`: reverse node-to-country lookup.
 
 # Constructors
 
     EmpireSets(Generator, ThermalGenerators, HydroGenerator, RegHydroGenerator,
-               Storage, DependentStorage, Technology, Node, DirectionalLink,
+               Storage, DependentStorage, Technology, Node,
+               OffshoreWindFarmNode, OffshoreEnergyHub, DirectionalLink,
                TransmissionType, TransmissionTypeOfDirectionalLink,
                GeneratorsOfTechnology, GeneratorsOfNode, StoragesOfNode;
+               Countries = String[], NodesOfCountry = Tuple{String,String}[],
                validate = true)
 
 Positional constructor taking the primary and relational sets. Derived
@@ -84,7 +93,11 @@ lookup dictionaries are computed automatically. When `validate` is `true`
 (the default) [`validate!`](@ref) is called to check internal consistency
 (all referenced ids must exist in their parent sets).
 
+`Countries` and `NodesOfCountry` are keyword-only and default to empty, so
+existing non-NUTS2 calls retain their current behaviour.
+
     EmpireSets(; Generator = String[], ThermalGenerators = String[], ...,
+                 Countries = String[], NodesOfCountry = Tuple{String,String}[],
                  validate = true)
 
 Keyword constructor. All sets default to empty and any `AbstractVector` or
@@ -93,12 +106,13 @@ canonical id types (`GenId`, `StorId`, ...).
 
 # Accessors
 
-Prefer the exported accessor functions over field access:
+Prefer the accessor functions over direct field access:
 [`nodes`](@ref), [`generators`](@ref), [`thermal_generators`](@ref),
 [`hydro_generators`](@ref), [`reg_hydro_generators`](@ref),
 [`storages`](@ref), [`dependent_storages`](@ref), [`techs`](@ref),
 [`transmission_types`](@ref), [`arcs`](@ref), [`bidir_arcs`](@ref),
-[`node_generators`](@ref), as well as the per-node lookups
+[`node_generators`](@ref), [`countries`](@ref), [`nodes_of_country`](@ref),
+[`country_of_node`](@ref), as well as the per-node lookups
 `generators(sets, n)`, `storages(sets, n)` and the predicates
 [`is_thermal`](@ref), [`is_hydro`](@ref), [`is_reg_hydro`](@ref).
 """
@@ -119,11 +133,15 @@ struct EmpireSets
     GeneratorsOfTechnology::Vector{TechGen}
     GeneratorsOfNode::Vector{NodeGen}
     StoragesOfNode::Vector{NodeStor}
+    Countries::Vector{String}
+    NodesOfCountry::Vector{Tuple{String, String}}
     GeneratorsByNode::Dict{NodeId, Vector{GenId}}
     StoragesByNode::Dict{NodeId, Vector{StorId}}
     TechsByNode::Dict{NodeId, Vector{TechId}}
     GeneratorsByNodeTech::Dict{NodeTech, Vector{GenId}}
     Corridors::Vector{Arc}
+    NodesByCountry::Dict{String, Vector{NodeId}}
+    CountryOfNode::Dict{NodeId, String}
 end
 
 function EmpireSets(
@@ -143,6 +161,8 @@ function EmpireSets(
     GeneratorsOfTechnology::Vector{TechGen},
     GeneratorsOfNode::Vector{NodeGen},
     StoragesOfNode::Vector{NodeStor};
+    Countries::Vector{String} = String[],
+    NodesOfCountry::Vector{Tuple{String, String}} = Tuple{String, String}[],
     validate::Bool = true,
 )
     generators_by_node = Dict{NodeId, Vector{GenId}}()
@@ -179,6 +199,13 @@ function EmpireSets(
     end
     corridors = collect(corridor_set)
 
+    nodes_by_country = Dict{String, Vector{NodeId}}()
+    country_of_node = Dict{NodeId, String}()
+    for (country, node) in NodesOfCountry
+        push!(get!(nodes_by_country, country, NodeId[]), node)
+        country_of_node[node] = country
+    end
+
     sets = EmpireSets(
         Generator,
         ThermalGenerators,
@@ -196,11 +223,15 @@ function EmpireSets(
         GeneratorsOfTechnology,
         GeneratorsOfNode,
         StoragesOfNode,
+        Countries,
+        NodesOfCountry,
         generators_by_node,
         storages_by_node,
         techs_by_node_vec,
         generators_by_node_tech_vec,
         corridors,
+        nodes_by_country,
+        country_of_node,
     )
 
     validate && validate!(sets)
@@ -226,6 +257,8 @@ function EmpireSets(
     GeneratorsOfTechnology::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString}} = Tuple{String, String}[],
     GeneratorsOfNode::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString}} = Tuple{String, String}[],
     StoragesOfNode::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString}} = Tuple{String, String}[],
+    Countries::AbstractVector{<:AbstractString} = String[],
+    NodesOfCountry::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString}} = Tuple{String, String}[],
     validate::Bool = true,
 )
     return EmpireSets(
@@ -245,6 +278,8 @@ function EmpireSets(
         TechGen[(String(t), String(g)) for (t, g) in GeneratorsOfTechnology],
         NodeGen[(String(n), String(g)) for (n, g) in GeneratorsOfNode],
         NodeStor[(String(n), String(s)) for (n, s) in StoragesOfNode];
+        Countries = String.(Countries),
+        NodesOfCountry = Tuple{String, String}[(String(c), String(n)) for (c, n) in NodesOfCountry],
         validate = validate,
     )
 end
@@ -275,6 +310,10 @@ storages(sets::EmpireSets, n) = get(sets.StoragesByNode, n, StorId[])
 node_storages(sets::EmpireSets) = sets.StoragesOfNode
 techs(sets::EmpireSets, n) = get(sets.TechsByNode, n, TechId[])
 generators_tech(sets::EmpireSets, n, t) = get(sets.GeneratorsByNodeTech, (n, t), GenId[])
+countries(sets::EmpireSets) = sets.Countries
+nodes_of_country(sets::EmpireSets) = sets.NodesOfCountry
+nodes_of_country(sets::EmpireSets, c) = get(sets.NodesByCountry, c, NodeId[])
+country_of_node(sets::EmpireSets, n) = get(sets.CountryOfNode, n, nothing)
 
 function _check_unique(name::AbstractString, items)
     seen = Set{eltype(items)}()
@@ -302,6 +341,7 @@ function validate!(sets::EmpireSets)
     _check_unique("Technology", techs(sets))
     _check_unique("Node", nodes(sets))
     _check_unique("TransmissionType", transmission_types(sets))
+    _check_unique("Countries", countries(sets))
 
     # No empty-string ids in primary sets
     _check_no_empty("Generator", generators(sets))
@@ -309,6 +349,29 @@ function validate!(sets::EmpireSets)
     _check_no_empty("Technology", techs(sets))
     _check_no_empty("Node", nodes(sets))
     _check_no_empty("TransmissionType", transmission_types(sets))
+    _check_no_empty("Countries", countries(sets))
+
+    # Country grouping is disabled when both sets are empty. If either is
+    # supplied, require a complete and unambiguous mapping.
+    let mapped_nodes = [node for (_, node) in nodes_of_country(sets)]
+        isempty(setdiff(Set(mapped_nodes), node_set)) ||
+            throw(ArgumentError("All NodesOfCountry entries must reference a node in Node"))
+        _check_unique("NodesOfCountry node column", mapped_nodes)
+    end
+    let mapped_countries = Set(country for (country, _) in nodes_of_country(sets))
+        unknown = setdiff(mapped_countries, Set(countries(sets)))
+        isempty(unknown) || throw(ArgumentError(
+            "NodesOfCountry references countries not listed in Countries: $(sort(collect(unknown)))",
+        ))
+    end
+    if !isempty(countries(sets))
+        uncovered = [
+            country for country in countries(sets) if isempty(nodes_of_country(sets, country))
+        ]
+        isempty(uncovered) || throw(ArgumentError(
+            "Countries with no NodesOfCountry mapping: $(sort(uncovered))",
+        ))
+    end
 
     # Subset checks for generator/storage categories
     isempty(setdiff(thermal_generators(sets), gen_set)) ||

@@ -364,11 +364,42 @@ function create_generator_constraints(
     # Constraints on maximum installed capacity for each technology
     @info " - maximum installed capacity constraints: $(length(N) * length(techs(sets)) * length(SP))"
     _report_progress(progress, "Creating generator maximum-installed-capacity constraints ($(length(N) * length(techs(sets)) * length(SP)) constraints)")
-    return @constraint(
+    @constraint(
         emp,
         max_inst_tech[n in N, tc in techs(sets), sp in SP],
         sum(genCap[n, g, sp] for g in generators_tech(sets, n, tc)) <= max_inst_cap(par, n, tc, sp)
     )
+
+    C = countries(sets)
+    @info " - country-level generator capacity constraints"
+    @constraint(
+        emp,
+        max_inv_tech_country[c in C, tc in techs(sets), sp in SP; haskey(par.genCountryMaxBuiltCap, (c, tc))],
+        sum(
+            genInv[n, g, sp]
+            for n in nodes_of_country(sets, c)
+            for g in generators_tech(sets, n, tc)
+        ) <= country_max_build_cap(par, c, tc, sp)
+    )
+    @constraint(
+        emp,
+        min_inv_tech_country[c in C, tc in techs(sets), sp in SP; haskey(par.genCountryMinBuiltCap, (c, tc)) && country_min_build_cap(par, c, tc, sp) > 0.0],
+        sum(
+            genInv[n, g, sp]
+            for n in nodes_of_country(sets, c)
+            for g in generators_tech(sets, n, tc)
+        ) >= country_min_build_cap(par, c, tc, sp)
+    )
+    @constraint(
+        emp,
+        max_inst_tech_country[c in C, tc in techs(sets), sp in SP; haskey(par.genCountryMaxInstalledCap, (c, tc))],
+        sum(
+            genCap[n, g, sp]
+            for n in nodes_of_country(sets, c)
+            for g in generators_tech(sets, n, tc)
+        ) <= country_max_inst_cap(par, c, tc, sp)
+    )
+    return nothing
 end
 
 """

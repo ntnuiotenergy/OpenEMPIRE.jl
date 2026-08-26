@@ -93,11 +93,42 @@ function test_read_csv_dataset()
 
         sets = OpenEMPIRE.read_sets_csv(dataset)
         @test OpenEMPIRE.nodes(sets) == ["A", "B"]
+        @test isempty(OpenEMPIRE.countries(sets))
+        @test isempty(OpenEMPIRE.nodes_of_country(sets))
         @test isempty(OpenEMPIRE.offshore_wind_farm_nodes(sets))
         @test OpenEMPIRE.generators(sets, "A") == ["gas", "wind"]
         @test Set(OpenEMPIRE.arcs(sets)) == Set([("A", "B"), ("B", "A")])
 
+        _write_csv(joinpath(dataset, "Sets", "Countries.csv"), "Country\nCountry A\nCountry B\n")
+        @test_throws ArgumentError OpenEMPIRE.read_sets_csv(dataset)
+
+        _write_csv(
+            joinpath(dataset, "Sets", "NodesOfCountry.csv"),
+            "Country,Node\nCountry A,A\nCountry B,B\n",
+        )
+        nuts2_sets = OpenEMPIRE.read_sets_csv(dataset)
+        @test OpenEMPIRE.countries(nuts2_sets) == ["Country A", "Country B"]
+        @test OpenEMPIRE.nodes_of_country(nuts2_sets, "Country A") == ["A"]
+        @test OpenEMPIRE.country_of_node(nuts2_sets, "B") == "Country B"
+
+        _write_csv(
+            joinpath(dataset, "Generator", "genMaxBuiltCapCountry.csv"),
+            "Country,GeneratorTechnology,Period,generatorMaxBuildCapacity_in_MW\nCountry A,thermal,1,250\n",
+        )
+        _write_csv(
+            joinpath(dataset, "Generator", "genMinBuiltCapCountry.csv"),
+            "Country,GeneratorTechnology,Period,generatorMinBuildCapacity_in_MW\nCountry A,renewable,1,25\n",
+        )
+        _write_csv(
+            joinpath(dataset, "Generator", "genMaxInstalledCapCountry.csv"),
+            "Country,GeneratorTechnology,generatorMaxInstallCapacity__in_MW\nCountry A,thermal,500\n",
+        )
+
         params = OpenEMPIRE.read_params_csv(dataset)
+        @test haskey(params.genCountryMaxBuiltCap, ("Country A", "thermal"))
+        @test haskey(params.genCountryMinBuiltCap, ("Country A", "renewable"))
+        @test params.genCountryMaxInstalledCapRaw[("Country A", "thermal")] == 500.0
+        @test OpenEMPIRE.validate(params; sets = nuts2_sets) === params
         @test params.genVariableOMCost["gas"] == 5.0
         @test params.genRefInitCap[("A", "wind")] == 2.0
         @test params.genCapAvailType["wind"] == 1.0
