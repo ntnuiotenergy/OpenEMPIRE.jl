@@ -17,6 +17,7 @@ include("test_country_constraints.jl")
 include("test_ccs_captured_co2.jl")
 include("test_ccs_cost_mode.jl")
 include("test_biomass_fallback.jl")
+include("test_generation_growth.jl")
 include("test_country_smoke.jl")
 include("test_scenario_csv.jl")
 include("test_annuity.jl")
@@ -85,6 +86,24 @@ end
     test_biomass_limit_flag_true_builds_annual_constraints()
     test_biomass_limit_flag_false_suppresses_annual_constraints()
     test_biomass_limit_flag_ignored_when_no_annual_data()
+end
+
+@testset "Node generation-growth limit" begin
+    test_generation_growth_loader_maps_periods()
+    test_generation_growth_loader_absent_is_nothing()
+    test_generation_growth_loader_reads_northsea_csv()
+    test_generation_growth_flag_false_creates_nothing()
+    test_generation_growth_flag_true_creates_constraints()
+    test_generation_growth_first_period_skipped()
+    test_generation_growth_count_and_indices_match_python()
+    test_generation_growth_uses_period_specific_data_rate()
+    test_generation_growth_uses_config_fallback_when_absent()
+    test_generation_growth_multiplier_scales_with_leap_years()
+    test_generation_growth_exact_coefficients_small_fixture()
+    test_generation_growth_rejects_negative_config_rate()
+    test_generation_growth_partial_profile_per_period_fallback()
+    test_generation_growth_supplied_zero_is_not_fallback()
+    test_generation_growth_trailing_gap_uses_fallback()
 end
 
 @testset "NUTS2 country smoke test" begin

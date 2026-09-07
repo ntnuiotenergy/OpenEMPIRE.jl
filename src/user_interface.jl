@@ -227,6 +227,11 @@ function create_model(
             Float64(get(config, "biomass_system_limit_factor", 1.04)),
         biomass_limit_scope=
             lowercase(string(get(config, "biomass_limit_scope", "country"))),
+        # Node generation-growth limit (Python: generation_growth_limit_flag / _rate)
+        generation_growth_limit_flag=
+            _config_bool(config, "generation_growth_limit_flag", false),
+        generation_growth_limit_rate=
+            Float64(get(config, "generation_growth_limit_rate", 0.04)),
         progress,
     )
     _report_progress(progress, "Build 12/12: creating objective")

@@ -118,6 +118,7 @@ CORE_TABLES: dict[str, list[tuple[str, list[int], str, str]]] = {
         ("CO2Cap", [0, 1], "General", "CO2cap"),
         ("CO2Price", [0, 1], "General", "CO2price"),
         ("AvailableBioEnergy", [0, 1], "General", "AvailableBioEnergy"),
+        ("GenerationGrowthRate", [0, 1], "General", "GenerationGrowthRate"),
     ],
     "Storage.xlsx": [
         ("StorageBleedEfficiency", [0, 1], "Storage", "storageBleedEff"),
@@ -149,6 +150,7 @@ OPTIONAL_CORE_SHEETS: frozenset[tuple[str, str]] = frozenset({
     ("Generator.xlsx", "CapturedCO2Content"),
     ("Node.xlsx", "BiomassMaxAnnualActivity"),
     ("Node.xlsx", "BiomassMaxAnnualActivityCountry"),
+    ("General.xlsx", "GenerationGrowthRate"),
 })
 
 # Set sheets read with ``header=0`` and split per column (``reader.py:read_sets``).

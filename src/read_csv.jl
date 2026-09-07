@@ -447,6 +447,17 @@ function read_params_csv(dir::AbstractString)
     if bioenergy_path !== nothing
         par.availableBioEnergy = _read_strategic_profile_csv(bioenergy_path)
     end
+    # Optional per-period generation-growth rate (General.xlsx 'GenerationGrowthRate').
+    # CSV Period column -> strategic period index; absent CSV leaves the field `nothing`
+    # so the run-config fallback rate is used (Python empire.py Param default semantics).
+    # A NaN sentinel marks a strategic period the CSV does not supply, so the constraint
+    # builder can fall back to generation_growth_limit_rate for that period only - matching
+    # Python's Param(default=GEN_GROWTH_RATE) per-period fallback - while a supplied 0.0
+    # keeps taking precedence.
+    growth_rate_path = _optional_csv(dir, general, "GenerationGrowthRate.csv")
+    if growth_rate_path !== nothing
+        par.generationGrowthRate = _read_strategic_profile_csv(growth_rate_path; default_value = NaN)
+    end
 
     return par
 end

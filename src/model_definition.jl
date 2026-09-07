@@ -188,6 +188,8 @@ function create_constraints(
     biomass_limit_factor::Float64 = 1.2,
     biomass_system_limit_factor::Float64 = 1.04,
     biomass_limit_scope::String = "country",
+    generation_growth_limit_flag::Bool = false,
+    generation_growth_limit_rate::Float64 = 0.04,
     progress = nothing,
 )
     @info "Creating constraints"
@@ -228,6 +230,8 @@ function create_constraints(
         biomass_limit_factor,
         biomass_system_limit_factor,
         biomass_limit_scope,
+        generation_growth_limit_flag,
+        generation_growth_limit_rate,
         progress,
     )
     create_storage_constraints(
@@ -295,6 +299,8 @@ function create_generator_constraints(
     biomass_limit_factor::Float64 = 1.2,
     biomass_system_limit_factor::Float64 = 1.04,
     biomass_limit_scope::String = "country",
+    generation_growth_limit_flag::Bool = false,
+    generation_growth_limit_rate::Float64 = 0.04,
     progress = nothing,
 )
     @info "Creating generator constraints"
@@ -354,6 +360,15 @@ function create_generator_constraints(
         biomass_limit_factor,
         biomass_system_limit_factor,
         biomass_limit_scope,
+        progress,
+    )
+    create_generation_growth_constraints(
+        emp,
+        sets,
+        par,
+        periods;
+        generation_growth_limit_flag,
+        generation_growth_limit_rate,
         progress,
     )
 
@@ -640,6 +655,100 @@ function create_bioenergy_constraints(
         )
     end
 
+    return nothing
+end
+
+"""
+    create_generation_growth_constraints(emp, sets, par, periods;
+        generation_growth_limit_flag=false, generation_growth_limit_rate=0.04, progress=nothing)
+
+Node-level generation-growth cap, the mathematical equivalent of Python
+`empire.py` `node_generation_growth_rule`. For every node `n`, every strategic
+period `sp` that has an active predecessor `prev` (i.e. every period after the
+first), and every operational scenario `sc`:
+
+    sum over that node's generators and over `sc`'s times of
+        multiple_strat(sp, t) * genOp[n, g, t]
+  <=
+    (1 + duration_strat(sp) * rate_sp)
+      * sum over that node's generators and over ALL scenarios of the previous period of
+          multiple_strat(prev, t) * probability(t) * genOp[n, g, t]
+
+The current-period side is that one scenario only (no probability weighting); the
+previous-period side is the scenario-probability-weighted expectation - exactly as
+Python's `currentGen` / `previousAvgGen`. `duration_strat(sp)` is the years per
+strategic period, the semantic equivalent of Python `LeapYearsInvestment`.
+`rate_sp` is the per-year `GenerationGrowthRate` value for `sp` when the dataset
+supplies it, otherwise `generation_growth_limit_rate` (the run-config fallback),
+matching Python's `Param(model.Period, default=GEN_GROWTH_RATE)`.
+
+No constraints are created when `generation_growth_limit_flag` is false, nor for
+the first strategic period, nor when there is only one strategic period.
+"""
+function create_generation_growth_constraints(
+        emp::JuMP.Model,
+        sets,
+        par,
+        periods::TimeStructure;
+        generation_growth_limit_flag::Bool = false,
+        generation_growth_limit_rate::Float64 = 0.04,
+        progress = nothing,
+    )
+    generation_growth_limit_flag || return nothing
+
+    generation_growth_limit_rate >= 0.0 ||
+        throw(ArgumentError(
+            "generation_growth_limit_rate must be >= 0, got $(generation_growth_limit_rate)"
+        ))
+
+    SP = collect(strat_periods(periods))
+    # Python skips a period whose predecessor is not an active period. The active
+    # horizon is contiguous (periods 1..N), so that is exactly the first period;
+    # with fewer than two periods no constraint applies at all.
+    length(SP) < 2 && return nothing
+
+    N = nodes(sets)
+    genOp = emp[:genOperational]
+
+    _report_progress(progress, "Creating node generation-growth constraints")
+
+    # Per-year growth rate for strategic period SP[k]: the dataset value where the sheet
+    # supplies it, otherwise the run-config fallback - matching Python's
+    # Param(model.Period, default=GEN_GROWTH_RATE) per-period semantics:
+    #   - no sheet/CSV at all            -> generationGrowthRate === nothing
+    #   - sheet omits a trailing period  -> k beyond the supplied profile length
+    #   - sheet omits an interior period -> NaN sentinel from the loader
+    # A supplied 0.0 is a real value and still takes precedence.
+    function rate_for(k)
+        prof = par.generationGrowthRate
+        prof === nothing && return generation_growth_limit_rate
+        k > length(prof.vals) && return generation_growth_limit_rate
+        r = generation_growth_rate(par, SP[k])
+        (r === nothing || !isfinite(r)) ? generation_growth_limit_rate : r
+    end
+
+    @constraint(
+        emp,
+        node_generation_growth[
+            n in N, k in 2:length(SP), sc in 1:_opscenario_count(SP[k])
+        ],
+        sum(
+            multiple_strat(SP[k], t) * genOp[n, g, t]
+            for g in generators(sets, n)
+            for rp in repr_periods(SP[k])
+            for (scenario_index, scenario) in enumerate(opscenarios(rp))
+            if scenario_index == sc
+            for t in scenario;
+            init = AffExpr(0.0)
+        )
+        -
+        (1 + duration_strat(SP[k]) * rate_for(k)) * sum(
+            multiple_strat(SP[k - 1], t) * probability(t) * genOp[n, g, t]
+            for g in generators(sets, n)
+            for t in SP[k - 1];
+            init = AffExpr(0.0)
+        ) <= 0
+    )
     return nothing
 end
 

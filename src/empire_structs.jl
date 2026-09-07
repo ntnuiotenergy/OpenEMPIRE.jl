@@ -102,6 +102,11 @@ Base.@kwdef mutable struct EmpireParams
     CO2cap::Union{Nothing, TimeProfile}   = nothing
     CO2price::Union{Nothing, TimeProfile} = nothing
     availableBioEnergy::Union{Nothing, TimeProfile} = nothing
+    # Per-year allowed growth of a node's total generation, per strategic period, from the
+    # optional General.xlsx 'GenerationGrowthRate' sheet. `nothing` means the sheet was
+    # absent, in which case the run-config fallback rate is used for every period (mirrors
+    # Python empire.py `model.generationGrowthRate = Param(model.Period, default=GEN_GROWTH_RATE)`).
+    generationGrowthRate::Union{Nothing, TimeProfile} = nothing
     seasonNames::Vector{String}           = String[]
     regularSeasonCount::Int               = 0
 
@@ -234,6 +239,10 @@ ccs_cost_fixed(par) =
     par.CCSCostTSFixed === nothing ? DEFAULT_CCS_COST_FIXED : par.CCSCostTSFixed
 available_bioenergy(par, sp) =
     par.availableBioEnergy === nothing ? nothing : par.availableBioEnergy[sp]
+# Per-year generation-growth rate for a strategic period, or `nothing` when the optional
+# sheet was absent (caller then applies the run-config fallback rate).
+generation_growth_rate(par, sp) =
+    par.generationGrowthRate === nothing ? nothing : par.generationGrowthRate[sp]
 max_biomethane_availability(par, n, sp) =
     haskey(par.genMaxBiomethaneAvailability, n) ?
     par.genMaxBiomethaneAvailability[n][sp] : DEFAULT_MAX_BIOMETHANE_AVAILABILITY
@@ -563,6 +572,9 @@ function validate(
     _check_profile_scalar!(errs, "CO2cap", par.CO2cap, periods; min = 0.0)
     _check_profile_scalar!(errs, "CO2price", par.CO2price, periods; min = 0.0)
     _check_profile_scalar!(errs, "availableBioEnergy", par.availableBioEnergy, periods; min = 0.0)
+    # Narrowest Python-compatible rule: Python config.validate() rejects a negative
+    # generation_growth_limit_rate; the per-period sheet values are not otherwise bounded.
+    _check_profile_scalar!(errs, "generationGrowthRate", par.generationGrowthRate, periods; min = 0.0)
 
     # Index checks (only if a set is provided)
     if sets !== nothing
