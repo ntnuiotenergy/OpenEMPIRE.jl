@@ -184,6 +184,10 @@ function create_constraints(
     periods::TimeStructure;
     offshore_transmission_cap::Bool = true,
     include_investment_constraints::Bool = true,
+    biomass_limit_flag::Bool = true,
+    biomass_limit_factor::Float64 = 1.2,
+    biomass_system_limit_factor::Float64 = 1.04,
+    biomass_limit_scope::String = "country",
     progress = nothing,
 )
     @info "Creating constraints"
@@ -220,6 +224,10 @@ function create_constraints(
         par,
         periods;
         include_investment_constraints,
+        biomass_limit_flag,
+        biomass_limit_factor,
+        biomass_system_limit_factor,
+        biomass_limit_scope,
         progress,
     )
     create_storage_constraints(
@@ -283,6 +291,10 @@ function create_generator_constraints(
     par,
     periods::TimeStructure;
     include_investment_constraints::Bool = true,
+    biomass_limit_flag::Bool = true,
+    biomass_limit_factor::Float64 = 1.2,
+    biomass_system_limit_factor::Float64 = 1.04,
+    biomass_limit_scope::String = "country",
     progress = nothing,
 )
     @info "Creating generator constraints"
@@ -333,7 +345,17 @@ function create_generator_constraints(
         ) <= max_hydro_node(par, n)
     )
 
-    create_bioenergy_constraints(emp, sets, par, periods; progress)
+    create_bioenergy_constraints(
+        emp,
+        sets,
+        par,
+        periods;
+        biomass_limit_flag,
+        biomass_limit_factor,
+        biomass_system_limit_factor,
+        biomass_limit_scope,
+        progress,
+    )
 
     include_investment_constraints || return nothing
 
@@ -417,23 +439,68 @@ end
 
 Add InternalEMPIRE's scenario-wise biomass and node-wise biomethane limits.
 The source tables use GJ for biomass and TJ for biomethane.
+
+The annual biomass usage limit (`maxBiomassNode` / `maxBiomassCountry`) is gated
+exactly as in Python (`empire.py`: `if BIOMASS_LIMIT and <tab present>`): it is
+built only when `biomass_limit_flag` is `true` (the neutral default, matching
+Python's `biomass_limit_flag = True`) *and* the dataset provides annual biomass
+data. Setting the flag to `false` builds none of `biomass_country_usage_limit`,
+`biomass_node_usage_limit` or `biomass_system_usage_limit`. The legacy
+InternalEMPIRE fuel-based limit (`availableBioEnergy`) and the biomethane limit
+have no Python counterpart and are not affected by the flag.
+
+Under `biomass_limit_scope` `"country"` or `"both"` the annual biomass limit is
+enforced per country over `NodesOfCountry`, and, matching the Python NUTS
+formulation (`empire.py`, biomass "country"/"both" scope), additionally per
+individual node for every node that carries `maxBiomassNode` data but is not
+mapped in `NodesOfCountry`. Without the per-node rows such nodes' Bio/BioCCS
+output is left completely unconstrained under scope `"country"` (there is no
+system row) and under the national half of scope `"both"`. Scope `"system"` is
+unaffected.
 """
 function create_bioenergy_constraints(
         emp::JuMP.Model,
         sets,
         par,
         periods::TimeStructure;
+        biomass_limit_flag::Bool=true,
+        biomass_limit_factor::Float64=1.2,
+        biomass_system_limit_factor::Float64=1.04,
+        biomass_limit_scope::String="country",
         progress = nothing,
     )
+    # Check if the dataset has any biomass or biomethane limits. If not, skip the constraints.
+    has_annual_biomass =
+        !isempty(par.maxBiomassNode) || !isempty(par.maxBiomassCountry)
+
+    # Python parity (empire.py): the annual biomass usage limit needs both the explicit
+    # config flag and the presence of data. The legacy fuel-based limit and the biomethane
+    # limit below are independent of the flag.
+    build_annual_biomass = biomass_limit_flag && has_annual_biomass
+
     par.availableBioEnergy === nothing &&
-        isempty(par.genMaxBiomethaneAvailability) && return nothing
+        isempty(par.genMaxBiomethaneAvailability) &&
+        !has_annual_biomass && return nothing
+
+    biomass_limit_factor >= 0.0 ||
+        throw(ArgumentError("biomass_limit_factor must be non-negative"))
+
+    biomass_system_limit_factor >= 0.0 ||
+        throw(ArgumentError("biomass_system_limit_factor must be non-negative"))
+
+    biomass_limit_scope in ("country", "system", "both") ||
+        throw(
+            ArgumentError(
+                "biomass_limit_scope must be \"country\", \"system\", or \"both\"",
+            ),
+        )
 
     _report_progress(progress, "Creating biomass and biomethane availability constraints")
     N = nodes(sets)
     SP = strat_periods(periods)
     genOp = emp[:genOperational]
-
-    if par.availableBioEnergy !== nothing
+    # Use the legacy fuel-based limit only when annual biomass data is absent.
+    if !has_annual_biomass && par.availableBioEnergy !== nothing
         @constraint(
             emp,
             max_bio_availability[sp in SP, sc in 1:_opscenario_count(sp)],
@@ -451,7 +518,112 @@ function create_bioenergy_constraints(
             ) <= available_bioenergy(par, sp)
         )
     end
+    # Use the annual biomass limit when it is present and enabled, and apply it at the country level if requested.
+    if build_annual_biomass && biomass_limit_scope in ("country", "both")
+        C = countries(sets)
 
+        @constraint(
+            emp,
+            biomass_country_usage_limit[c in C, sp in SP],
+            sum(
+                multiple_strat(sp, t) *
+                probability(t) *
+                genOp[n, g, t]
+                for n in nodes_of_country(sets, c)
+                for g in generators(sets, n)
+                    if startswith(lowercase(strip(g)), "bio")
+                for t in sp;
+                init=0.0
+            ) <= biomass_limit_factor * (
+                max_biomass_country(par, c, sp) === nothing ?
+                sum(
+                    max_biomass_node(par, n, sp)
+                    for n in nodes_of_country(sets, c);
+                    init=0.0
+                ) :
+                max_biomass_country(par, c, sp)
+            )
+        )
+
+        # Python parity (empire.py biomass "country"/"both" scope): a node that carries
+        # nodal biomass data but is not mapped in NodesOfCountry forms its own single-node
+        # group and is bounded individually at biomass_limit_factor * maxBiomassNode[n, sp]
+        # (the national factor, not the system factor). Mapped nodes are already covered by
+        # biomass_country_usage_limit above and are excluded here, so no row is duplicated.
+        # This is deliberately NOT a pooled system row.
+        unmapped_biomass_nodes = [
+            n for n in N
+            if haskey(par.maxBiomassNode, n) && country_of_node(sets, n) === nothing
+        ]
+
+        # A zero nodal reference silently forbids all Bio/BioCCS production at the node,
+        # which surfaces only as an opaque infeasibility once the solve is running. Warn at
+        # build time instead. Diagnostic only: the constraint below is emitted regardless,
+        # exactly as in the Python formulation, so model mathematics are unchanged.
+        for n in unmapped_biomass_nodes
+            any(startswith(lowercase(strip(g)), "bio") for g in generators(sets, n)) || continue
+            zero_periods = [sp for sp in SP if max_biomass_node(par, n, sp) <= 0.0]
+            isempty(zero_periods) && continue
+            @warn "Nodal biomass availability for unmapped node '$n' is zero in strategic " *
+                  "period(s) $(join(string.(zero_periods), ", ")); the biomass usage limit forbids " *
+                  "all Bio/BioCCS production there. Check Node/maxBiomassNode.csv (per node), or map " *
+                  "the node in Sets/NodesOfCountry.csv with Node/maxBiomassCountry.csv (per country)."
+        end
+
+        @constraint(
+            emp,
+            biomass_node_usage_limit[n in unmapped_biomass_nodes, sp in SP],
+            sum(
+                multiple_strat(sp, t) *
+                probability(t) *
+                genOp[n, g, t]
+                for g in generators(sets, n)
+                    if startswith(lowercase(strip(g)), "bio")
+                for t in sp;
+                init=AffExpr(0.0)
+            ) <= biomass_limit_factor * max_biomass_node(par, n, sp)
+        )
+    end
+    # Use the annual biomass limit when it is present and enabled, and apply it at the system level if requested.
+    if build_annual_biomass && biomass_limit_scope in ("system", "both")
+        system_factor =
+            biomass_limit_scope == "both" ?
+            biomass_system_limit_factor :
+            biomass_limit_factor
+
+        @constraint(
+            emp,
+            biomass_system_usage_limit[sp in SP],
+            sum(
+                multiple_strat(sp, t) *
+                probability(t) *
+                genOp[n, g, t]
+                for n in N
+                for g in generators(sets, n)
+                    if startswith(lowercase(strip(g)), "bio")
+                for t in sp;
+                init=0.0
+            ) <= system_factor * (
+                sum(
+                    max_biomass_country(par, c, sp) === nothing ?
+                    sum(
+                        max_biomass_node(par, n, sp)
+                        for n in nodes_of_country(sets, c);
+                        init=0.0
+                    ) :
+                    max_biomass_country(par, c, sp)
+                    for c in countries(sets);
+                    init=0.0
+                ) +
+                sum(
+                    max_biomass_node(par, n, sp)
+                    for n in N
+                    if country_of_node(sets, n) === nothing;
+                    init=0.0
+                )
+            )
+        )
+    end
     if !isempty(par.genMaxBiomethaneAvailability)
         @constraint(
             emp,

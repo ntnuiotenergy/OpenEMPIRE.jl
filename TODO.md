@@ -29,3 +29,10 @@ costperperiodPW=costperyearPW*1000*(1-(1+model.discountrate)**-(min(value((len(m
 ## Missing in Julia version
 - [ ] North Sea extensions
 - [ ] Implementation of emission limits
+
+## NUTS2 model-validation follow-ups
+- [ ] Review annual biomass handling for unmapped nodes:
+  Python constrains every unmapped node and assigns zero biomass availability
+  when nodal data are absent, while Julia currently constrains only unmapped
+  nodes present in `maxBiomassNode`. Confirm the intended behavior and add a
+  regression test before changing the implementation.

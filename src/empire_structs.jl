@@ -95,6 +95,8 @@ Base.@kwdef mutable struct EmpireParams
     nodeLostLoadCost::Dict{String, TimeProfile}  = Dict{String, TimeProfile}()
     sloadAnnualDemand::Dict{String, TimeProfile} = Dict{String, TimeProfile}()
     maxHydroNode::Dict{String, Float64}          = Dict{String, Float64}()
+    maxBiomassNode::Dict{String, TimeProfile}    = Dict{String, TimeProfile}()
+    maxBiomassCountry::Dict{String, TimeProfile} = Dict{String, TimeProfile}()
 
     # General parameters from file
     CO2cap::Union{Nothing, TimeProfile}   = nothing
@@ -235,6 +237,13 @@ available_bioenergy(par, sp) =
 max_biomethane_availability(par, n, sp) =
     haskey(par.genMaxBiomethaneAvailability, n) ?
     par.genMaxBiomethaneAvailability[n][sp] : DEFAULT_MAX_BIOMETHANE_AVAILABILITY
+
+# Maximum biomass availability is a node-level parameter, but some datasets (e.g. europe_v51) also carry a country-level limit.
+max_biomass_node(par, n, sp) =
+    haskey(par.maxBiomassNode, n) ? par.maxBiomassNode[n][sp] : 0.0
+
+max_biomass_country(par, c, sp) =
+    haskey(par.maxBiomassCountry, c) ? par.maxBiomassCountry[c][sp] : nothing
 
 # General properties
 load(par, n, t) = haskey(par.sload, n) ? par.sload[n][t] : DEFAULT_LOAD
@@ -527,6 +536,8 @@ function validate(
             ("storPWMaxBuiltCap", par.storPWMaxBuiltCap),
             ("nodeLostLoadCost", par.nodeLostLoadCost),
             ("sloadAnnualDemand", par.sloadAnnualDemand),
+            ("maxBiomassNode", par.maxBiomassNode),
+            ("maxBiomassCountry", par.maxBiomassCountry),
             ("sloadRaw", par.sloadRaw),
             ("sload", par.sload),
             ("maxRegHydroGenRaw", par.maxRegHydroGenRaw),
@@ -605,6 +616,7 @@ function validate(
                 ("nodeLostLoadCost", par.nodeLostLoadCost),
                 ("sloadAnnualDemand", par.sloadAnnualDemand),
                 ("maxHydroNode", par.maxHydroNode),
+                ("maxBiomassNode", par.maxBiomassNode),
                 ("genMaxBiomethaneAvailability", par.genMaxBiomethaneAvailability),
                 ("sloadRaw", par.sloadRaw),
                 ("sload", par.sload),
@@ -613,6 +625,15 @@ function validate(
             )
             _check_keys_in_set!(errs, name, d, nset, "node")
         end
+
+        # String-keyed dict indexed by country
+        _check_keys_in_set!(
+            errs,
+            "maxBiomassCountry",
+            par.maxBiomassCountry,
+            Set(countries(sets)),
+            "country",
+        )
 
         # String-keyed dicts indexed by transmission type
         for (name, d) in (

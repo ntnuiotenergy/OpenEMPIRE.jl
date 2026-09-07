@@ -16,6 +16,7 @@ include("test_empire_sets.jl")
 include("test_country_constraints.jl")
 include("test_ccs_captured_co2.jl")
 include("test_ccs_cost_mode.jl")
+include("test_biomass_fallback.jl")
 include("test_country_smoke.jl")
 include("test_scenario_csv.jl")
 include("test_annuity.jl")
@@ -69,6 +70,21 @@ end
     test_ccs_realized_coefficients_match_python_in_python_nuts_mode()
     test_ccs_cost_mode_leaves_non_ccs_unchanged()
     test_ccs_fixed_cost_explicit_user_value_not_overwritten()
+end
+
+@testset "Biomass country/both per-node fallback" begin
+    test_biomass_fallback_country_scope_covers_unmapped_nodes()
+    test_biomass_fallback_no_duplicate_rows_for_mapped_nodes()
+    test_biomass_fallback_zero_availability_node_is_constrained_and_warns()
+    test_biomass_fallback_system_scope_unchanged()
+    test_biomass_fallback_both_scope_builds_all_three_row_families()
+    test_biomass_fallback_absent_when_no_unmapped_nodal_data()
+end
+
+@testset "Biomass limit flag gate" begin
+    test_biomass_limit_flag_true_builds_annual_constraints()
+    test_biomass_limit_flag_false_suppresses_annual_constraints()
+    test_biomass_limit_flag_ignored_when_no_annual_data()
 end
 
 @testset "NUTS2 country smoke test" begin

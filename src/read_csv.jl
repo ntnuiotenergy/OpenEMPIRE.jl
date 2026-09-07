@@ -429,6 +429,17 @@ function read_params_csv(dir::AbstractString)
     par.sloadAnnualDemand = _read_strategic_profiles_csv(_required_csv(dir, node, "sloadAnnualDemand.csv"))
     par.maxHydroNode = _read_float_by_string_csv(_required_csv(dir, node, "maxHydroNode.csv"))
 
+    biomass_node_path = _optional_csv(dir, node, "maxBiomassNode.csv")
+    # Optional: only datasets with biomass carry maxBiomassNode and maxBiomassCountry.
+    if biomass_node_path !== nothing
+        par.maxBiomassNode = _read_strategic_profiles_csv(biomass_node_path)
+    end
+
+    biomass_country_path = _optional_csv(dir, node, "maxBiomassCountry.csv")
+    if biomass_country_path !== nothing
+        par.maxBiomassCountry = _read_strategic_profiles_csv(biomass_country_path)
+    end
+
     general = "General"
     par.CO2cap = _read_strategic_profile_csv(_required_csv(dir, general, "CO2cap.csv"))
     par.CO2price = _read_strategic_profile_csv(_required_csv(dir, general, "CO2price.csv"))

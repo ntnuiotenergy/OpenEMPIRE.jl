@@ -110,6 +110,8 @@ CORE_TABLES: dict[str, list[tuple[str, list[int], str, str]]] = {
         ("ElectricAnnualDemand", [0, 1, 2], "Node", "sloadAnnualDemand"),
         ("NodeLostLoadCost", [0, 1, 2], "Node", "nodeLostLoadCost"),
         ("HydroGenMaxAnnualProduction", [0, 1], "Node", "maxHydroNode"),
+        ("BiomassMaxAnnualActivity", [0, 1, 2], "Node", "maxBiomassNode"),
+        ("BiomassMaxAnnualActivityCountry", [0, 1, 2], "Node", "maxBiomassCountry"),
     ],
     "General.xlsx": [
         ("seasonScale", [0, 1], "General", "seasScale"),
@@ -145,6 +147,8 @@ OPTIONAL_CORE_SHEETS: frozenset[tuple[str, str]] = frozenset({
     ("Generator.xlsx", "MinBuiltCapacity"),
     ("Generator.xlsx", "YearlyAvailability"),
     ("Generator.xlsx", "CapturedCO2Content"),
+    ("Node.xlsx", "BiomassMaxAnnualActivity"),
+    ("Node.xlsx", "BiomassMaxAnnualActivityCountry"),
 })
 
 # Set sheets read with ``header=0`` and split per column (``reader.py:read_sets``).

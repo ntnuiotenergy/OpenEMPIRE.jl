@@ -218,6 +218,15 @@ function create_model(
         periods;
         offshore_transmission_cap = _offshore_transmission_cap_setting(config),
         include_investment_constraints,
+        # Biomass constraints
+        biomass_limit_flag=
+            _config_bool(config, "biomass_limit_flag", true),
+        biomass_limit_factor=
+            Float64(get(config, "biomass_limit_factor", 1.2)),
+        biomass_system_limit_factor=
+            Float64(get(config, "biomass_system_limit_factor", 1.04)),
+        biomass_limit_scope=
+            lowercase(string(get(config, "biomass_limit_scope", "country"))),
         progress,
     )
     _report_progress(progress, "Build 12/12: creating objective")
