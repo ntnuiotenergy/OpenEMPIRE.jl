@@ -24,6 +24,83 @@ function present_value(cost, discount_rate, years; at_start = true)
     return pv
 end
 
+# --- CCS captured-CO2 resolution (port of Python empire.core.generator_costs) ----------
+
+"""
+    resolve_captured_co2_factor(net_co2_factor, capture_rate;
+        explicit_captured_co2_factor = nothing, gross_co2_factor = nothing) -> Float64
+
+Non-negative captured-CO2 factor in tCO2/GJ. Direct port of
+`empire.core.generator_costs.resolve_captured_co2_factor` (EMPIER_Python_NUTS
+@ e9031e4d). Sources, in decreasing accuracy:
+
+ 1. `explicit_captured_co2_factor` when supplied (rejected if negative);
+ 2. `gross_co2_factor - net_co2_factor` when the non-CCS counterpart's fuel
+    factor is supplied (rejected if that difference is negative);
+ 3. the `capture_rate` assumption: `abs(net)` for a net removal, `0.0` for a
+    zero net factor, otherwise `net / (1 - capture_rate) * capture_rate`.
+"""
+function resolve_captured_co2_factor(
+        net_co2_factor::Real,
+        capture_rate::Real;
+        explicit_captured_co2_factor::Union{Nothing, Real} = nothing,
+        gross_co2_factor::Union{Nothing, Real} = nothing,
+    )
+    if explicit_captured_co2_factor !== nothing
+        explicit_captured_co2_factor < 0 &&
+            throw(ArgumentError("Captured CO2 factors must be non-negative."))
+        return Float64(explicit_captured_co2_factor)
+    end
+
+    if gross_co2_factor !== nothing
+        captured = gross_co2_factor - net_co2_factor
+        captured < 0 && throw(ArgumentError(
+            "The non-CCS counterpart's CO2 factor is below the CCS generator's, " *
+            "which would imply negative capture."))
+        return Float64(captured)
+    end
+
+    (0 <= capture_rate <= 1) ||
+        throw(ArgumentError("The CCS capture rate must be between zero and one."))
+    net_co2_factor < 0 && return abs(Float64(net_co2_factor))
+    net_co2_factor == 0 && return 0.0
+    capture_rate == 1 && throw(ArgumentError(
+        "A positive residual CO2 factor is inconsistent with a 100% capture rate."))
+    return Float64(net_co2_factor / (1 - capture_rate) * capture_rate)
+end
+
+"""
+    _gross_co2_factor_of_ccs_generator(sets, params, generator) -> Union{Float64, Nothing}
+
+The fuel's gross CO2 content for a CCS generator, read from its non-CCS
+counterpart, or `nothing` when no counterpart is identifiable. Port of
+`empire.py` `_gross_co2_factor_of_ccs_generator`: the counterpart name is the
+CCS name without the `"CCS"` suffix (`"CoalCCS"` -> `"Coal"`), except
+`"GasCCS"` -> `"GasCCGT"`.
+"""
+function _gross_co2_factor_of_ccs_generator(sets, params, generator)
+    name = string(generator)
+    endswith(name, "CCS") || return nothing
+    twin = chopsuffix(name, "CCS")
+    twin == "Gas" && (twin = "GasCCGT")
+    twin in sets.Generator || return nothing
+    return co2_content(params, twin)
+end
+
+"""
+    ccs_captured_co2_factor(sets, params, g) -> Float64
+
+Resolved captured-CO2 factor for CCS generator `g` (explicit -> counterpart ->
+capture-rate fallback), with the fixed 0.9 capture-rate assumption Python uses
+(`model.CCSRemFrac`).
+"""
+ccs_captured_co2_factor(sets, params, g) = resolve_captured_co2_factor(
+    co2_content(params, g),
+    0.9;
+    explicit_captured_co2_factor = explicit_captured_co2_factor(params, g),
+    gross_co2_factor = _gross_co2_factor_of_ccs_generator(sets, params, g),
+)
+
 function preprocess_params(params::EmpireParams, sets, periods)
     preprocess_invest_cost(params, sets, periods)
     preprocess_operational_cost(params, sets, periods)
@@ -47,7 +124,6 @@ function preprocess_invest_cost(params::EmpireParams, sets, periods)
     # Generator investment costs
 
     ccs_cost_fix = ccs_cost_fixed(params)
-    ccs_rem_frac = 0.9
 
     params.genInvCost = Dict{String, StrategicProfile}()
     for g in sets.Generator
@@ -55,6 +131,11 @@ function preprocess_invest_cost(params::EmpireParams, sets, periods)
             cap_cost = params.genCapitalCost[g] # in €/kW
             life = gen_lifetime(params, g)
             om_cost = get(params.genFixedOMCost, g, 0.0) # in €/kW/year
+            # CCS transport & storage fixed cost uses the resolved captured-CO2 factor
+            # (explicit -> non-CCS counterpart -> capture-rate fallback), matching Python
+            # empire.py prepInvCost_rule. Resolved once per generator, as Python does.
+            is_ccs_g = ("CCS", g) in sets.GeneratorsOfTechnology
+            captured_g = is_ccs_g ? ccs_captured_co2_factor(sets, params, g) : 0.0
             inv_cost = Float64[]
             for sp in SP
                 # Cost for each year of its lifetime using annuity factor
@@ -67,8 +148,8 @@ function preprocess_invest_cost(params::EmpireParams, sets, periods)
                 # assuming investments are made at the start of the strategic period
                 tot_invest_cost = present_value(cost_per_year * 1000, ρ, y; at_start = true) # in €/MW
 
-                if ("CCS", g) in sets.GeneratorsOfTechnology
-                    tot_invest_cost += ccs_cost_fix * ccs_rem_frac * params.genCO2Content[g] * (3.6 / params.genEfficiency[g][sp])
+                if is_ccs_g
+                    tot_invest_cost += ccs_cost_fix * captured_g * (3.6 / params.genEfficiency[g][sp])
                 end
 
                 push!(inv_cost, tot_invest_cost)
@@ -245,14 +326,20 @@ function preprocess_operational_cost(params::EmpireParams, sets, periods)
             "genFuelCost.",
         ))
 
+        # CCS transport & storage variable cost uses the resolved captured-CO2 factor;
+        # the carbon-price term keeps the full signed net factor, matching Python
+        # empire.core.generator_costs.generator_marginal_cost_eur_per_mwh. Resolved once
+        # per generator, as Python does. (co2_content(params, g) here is €/GJ-basis, the
+        # bracketed term is multiplied by 3.6/efficiency below exactly as in Python.)
+        is_ccs_g = ("CCS", g) in sets.GeneratorsOfTechnology
+        captured_g = is_ccs_g ? ccs_captured_co2_factor(sets, params, g) : 0.0
+
         values = Float64[]
         for sp in strat_periods(periods)
             # Variable cost in €/MWh
-            ccs_remove_frac = 0.9
-
-            if ("CCS", g) in sets.GeneratorsOfTechnology
-                carbon_cost = (1 - ccs_remove_frac) * co2_price(params, sp) * co2_content(params, g) +
-                 ccs_remove_frac * co2_content(params, g) * ccs_cost_variable(params, sp)
+            if is_ccs_g
+                carbon_cost = co2_price(params, sp) * co2_content(params, g) +
+                    captured_g * ccs_cost_variable(params, sp)
             else
                 carbon_cost = co2_price(params, sp) * co2_content(params, g)
             end

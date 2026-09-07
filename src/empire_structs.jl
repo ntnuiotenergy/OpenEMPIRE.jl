@@ -49,6 +49,10 @@ Base.@kwdef mutable struct EmpireParams
     genCapAvailType::Dict{String, Float64}                       = Dict{String, Float64}()
     genYearlyAvailability::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
     genCO2Content::Dict{String, Float64}                         = Dict{String, Float64}()
+    # Explicit captured-CO2 factor (tCO2/GJ) from the optional 'CapturedCO2Content' sheet.
+    # A generator absent from this dict has no explicit value, mirroring Python's negative
+    # sentinel on `model.genCapturedCO2Factor`; the counterpart / capture-rate path is used.
+    genCapturedCO2Factor::Dict{String, Float64}                  = Dict{String, Float64}()
     genLifetime::Dict{String, Float64}                           = Dict{String, Float64}()
 
     # Transmission inputs from file
@@ -199,11 +203,31 @@ discount_rate(par) = par.discountRate
 co2_price(par, sp) = par.CO2price === nothing ? 0.0 : par.CO2price[sp]
 co2_cap(par, sp) = par.CO2cap === nothing ? nothing : par.CO2cap[sp]
 co2_content(par, g) = get(par.genCO2Content, g, 0.0)
+# Explicit captured-CO2 factor for `g`, or `nothing` when the dataset supplies none
+# (Python: `None if value(model.genCapturedCO2Factor[g]) < 0 else …`, sentinel -1.0).
+explicit_captured_co2_factor(par, g) =
+    (f = get(par.genCapturedCO2Factor, g, -1.0); f < 0 ? nothing : f)
 ccs_cost_variable(par, sp) = par.CCSCostTSVariable === nothing ? 0.0 : par.CCSCostTSVariable[sp]
 
-"""Historical fixed CCS transport-and-storage charge, in EUR/tCO2."""
+"""
+    DEFAULT_CCS_COST_FIXED
+
+Fixed (capacity-related) CCS transport-and-storage cost coefficient, EUR per
+(tCO2/MWh). `CCSCostTSFix` is **not an Excel field** in any EMPIRE dataset: it is
+the hard-coded constant `1149873.72` in the Python model (`empire.py:291`,
+`#NB! Hard-coded`). This is the Julia counterpart of that constant and follows
+the same provenance - it is the model default used when the optional
+`Generator/CCSCostTSFixed.csv` is absent (the `--ccs-cost-mode python-nuts`
+converter output). Selecting InternalEMPIRE compatibility
+(`--ccs-cost-mode internalempire`) writes `CCSCostTSFixed.csv = 0.0`, which
+`ccs_cost_fixed` then returns instead.
+"""
 const DEFAULT_CCS_COST_FIXED = 1149873.72
 
+# Resolution order (no silent override of a user-supplied value):
+#   * `par.CCSCostTSFixed` when the dataset provides one (explicit CSV / caller) -
+#     including an InternalEMPIRE-compatible 0.0;
+#   * otherwise `DEFAULT_CCS_COST_FIXED` (the Python-NUTS hard-coded constant).
 ccs_cost_fixed(par) =
     par.CCSCostTSFixed === nothing ? DEFAULT_CCS_COST_FIXED : par.CCSCostTSFixed
 available_bioenergy(par, sp) =

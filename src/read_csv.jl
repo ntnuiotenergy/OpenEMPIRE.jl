@@ -367,6 +367,16 @@ function read_params_csv(dir::AbstractString)
             _read_strategic_profiles_pair_csv(yearly_availability_path; default_value = 1.0)
     end
     par.genCO2Content = _read_float_by_string_csv(_required_csv(dir, generator, "genCO2TypeFactor.csv"))
+    # Optional explicit captured-CO2 factor (Python 'CapturedCO2Content' sheet). Absent for
+    # datasets that rely on the non-CCS counterpart or the capture-rate fallback. A negative
+    # value is rejected here, matching Python's reader.py load-time guard.
+    captured_co2_path = _optional_csv(dir, generator, "CapturedCO2Content.csv")
+    if captured_co2_path !== nothing
+        captured = _read_float_by_string_csv(captured_co2_path)
+        any(v < 0 for v in values(captured)) && throw(ArgumentError(
+            "CapturedCO2Content.csv contains a negative captured-CO2 factor."))
+        par.genCapturedCO2Factor = captured
+    end
     par.genLifetime = _read_float_by_string_csv(_required_csv(dir, generator, "genLifetime.csv"))
 
     transmission = "Transmission"

@@ -14,6 +14,8 @@ include("test_excel.jl")
 include("test_csv.jl")
 include("test_empire_sets.jl")
 include("test_country_constraints.jl")
+include("test_ccs_captured_co2.jl")
+include("test_ccs_cost_mode.jl")
 include("test_country_smoke.jl")
 include("test_scenario_csv.jl")
 include("test_annuity.jl")
@@ -44,6 +46,29 @@ end
 @testset "NUTS2 country constraints" begin
     test_country_generator_capacity_constraints()
     test_country_generator_constraints_are_data_driven()
+end
+
+@testset "CCS captured-CO2 and cost accounting" begin
+    test_ccs_explicit_captured_co2_takes_precedence()
+    test_ccs_counterpart_gross_minus_net()
+    test_ccs_capture_rate_fallback_only_as_last_resort()
+    test_ccs_gasccs_counterpart_resolution()
+    test_ccs_ligniteccs_counterpart_resolution()
+    test_ccs_negative_emission_and_bioccs()
+    test_ccs_invalid_values_rejected()
+    test_ccs_explicit_captured_co2_loaded_and_used()
+    test_ccs_non_ccs_costs_unchanged()
+    test_ccs_fixed_cost_matches_python()
+    test_ccs_marginal_cost_matches_python()
+    test_ccs_residual_co2_price_matches_python()
+end
+
+@testset "CCS T&S cost provenance / mode" begin
+    test_ccs_fixed_cost_provenance_and_modes()
+    test_ccs_variable_cost_seven_periods_excel_to_param()
+    test_ccs_realized_coefficients_match_python_in_python_nuts_mode()
+    test_ccs_cost_mode_leaves_non_ccs_unchanged()
+    test_ccs_fixed_cost_explicit_user_value_not_overwritten()
 end
 
 @testset "NUTS2 country smoke test" begin

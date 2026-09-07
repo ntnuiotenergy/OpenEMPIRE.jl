@@ -91,6 +91,7 @@ CORE_TABLES: dict[str, list[tuple[str, list[int], str, str]]] = {
         ("GeneratorTypeAvailability", [0, 1], "Generator", "genCapAvailTypeRaw"),
         ("YearlyAvailability", [0, 1, 2, 3], "Generator", "genYearlyAvailability"),
         ("CO2Content", [0, 1], "Generator", "genCO2TypeFactor"),
+        ("CapturedCO2Content", [0, 1], "Generator", "CapturedCO2Content"),
         ("Lifetime", [0, 1], "Generator", "genLifetime"),
     ],
     "Transmission.xlsx": [
@@ -138,10 +139,12 @@ CORE_TABLES: dict[str, list[tuple[str, list[int], str, str]]] = {
 
 # Core sheets that some source workbooks omit. When one of these is missing the
 # conversion skips it instead of failing; the model treats the corresponding CSV
-# as optional (``genMinBuiltCap`` -> 0.0, ``genYearlyAvailability`` -> 1.0).
+# as optional (``genMinBuiltCap`` -> 0.0, ``genYearlyAvailability`` -> 1.0,
+# ``CapturedCO2Content`` -> non-CCS counterpart / capture-rate fallback).
 OPTIONAL_CORE_SHEETS: frozenset[tuple[str, str]] = frozenset({
     ("Generator.xlsx", "MinBuiltCapacity"),
     ("Generator.xlsx", "YearlyAvailability"),
+    ("Generator.xlsx", "CapturedCO2Content"),
 })
 
 # Set sheets read with ``header=0`` and split per column (``reader.py:read_sets``).
@@ -569,6 +572,22 @@ FUEL_COST_FALLBACK_DATASET = "europe_v51"
 # compatibility switch when the reference starts charging those inputs.
 INTERNALEMPIRE_OMITS_CCS_TRANSPORT_AND_STORAGE_COST = True
 
+# CCS transport-and-storage cost provenance mode (--ccs-cost-mode):
+#
+#   "internalempire" (default): mirror InternalEMPIRE, whose declarations, input
+#       load, and both objective uses of CCS T&S cost are commented out -> the
+#       generated Generator/CCSCostTSVariable.csv is zeroed and a
+#       Generator/CCSCostTSFixed.csv = 0.0 is written.
+#
+#   "python-nuts": match the EMPIER_Python_NUTS validation model, which charges
+#       both terms. CCSCostTSVariable keeps its genuine Excel values (ZEP), and NO
+#       CCSCostTSFixed.csv is written -- CCSCostTSFix is not an Excel field in any
+#       EMPIRE dataset; it is the hard-coded constant 1149873.72 (empire.py:291),
+#       which the Julia port supplies via DEFAULT_CCS_COST_FIXED when the optional
+#       CSV is absent.
+CCS_COST_MODES = ("internalempire", "python-nuts")
+DEFAULT_CCS_COST_MODE = "internalempire"
+
 
 def fill_missing_gas_fuel_costs(out: Path, periods: int) -> None:
     target = out / "Generator" / "genFuelCost.csv"
@@ -615,7 +634,17 @@ def fill_missing_gas_fuel_costs(out: Path, periods: int) -> None:
                 len(added), ", ".join(missing_techs), FUEL_COST_FALLBACK_DATASET)
 
 
-def mirror_internalempire_ccs_cost_omission(out: Path) -> None:
+def mirror_internalempire_ccs_cost_omission(
+    out: Path, ccs_cost_mode: str = DEFAULT_CCS_COST_MODE
+) -> None:
+    if ccs_cost_mode != "internalempire":
+        # "python-nuts": keep the genuine Excel CCSCostTSVariable values and write no
+        # CCSCostTSFixed.csv (the Julia port then uses DEFAULT_CCS_COST_FIXED).
+        logger.info(
+            "CCS T&S cost mode 'python-nuts': keeping Excel CCSCostTSVariable values; "
+            "no CCSCostTSFixed.csv written (hard-coded constant supplied by the model)"
+        )
+        return
     if not INTERNALEMPIRE_OMITS_CCS_TRANSPORT_AND_STORAGE_COST:
         return
 
@@ -1191,6 +1220,12 @@ def main() -> None:
                         help="where the non-core tables are written")
     parser.add_argument("--periods", type=int, default=7,
                         help="investment periods to keep (default: 7)")
+    parser.add_argument("--ccs-cost-mode", choices=CCS_COST_MODES,
+                        default=DEFAULT_CCS_COST_MODE,
+                        help="CCS transport-and-storage cost provenance "
+                             f"(default: {DEFAULT_CCS_COST_MODE}). 'python-nuts' keeps "
+                             "the Excel CCSCostTSVariable values and writes no "
+                             "CCSCostTSFixed.csv; 'internalempire' zeroes both.")
     parser.add_argument("--skip-modules", action="store_true",
                         help="only build the core dataset")
     args = parser.parse_args()
@@ -1213,7 +1248,7 @@ def main() -> None:
     convert_core_tables(source, out, extra_out, args.periods)
     materialize_pyomo_period_defaults(out, args.periods)
     fill_missing_gas_fuel_costs(out, args.periods)
-    mirror_internalempire_ccs_cost_omission(out)
+    mirror_internalempire_ccs_cost_omission(out, args.ccs_cost_mode)
     copy_scenario_data(source, out, extra_out)
     convert_extra_tables(source, extra_out, args.periods)
     if not args.skip_modules:
