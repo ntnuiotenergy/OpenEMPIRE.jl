@@ -300,7 +300,8 @@ function create_generator_constraints(
     @constraint(
         emp,
         gen_max_prod[n in N, g in generators(sets, n), sp in SP, t in sp],
-        genOp[n, g, t] <= gencap_avail(par, n, g, t) * genCap[n, g, sp]
+        # Apply strategic yearly availability together with operational availability.
+        genOp[n, g, t] <= gen_yearly_avail(par, n, g, sp) * gencap_avail(par, n, g, t) * genCap[n, g, sp]
     )
 
     # Ramping Constraints (thermal generators only)
@@ -359,6 +360,15 @@ function create_generator_constraints(
         emp,
         max_inv_tech[n in N, tc in techs(sets), sp in SP],
         sum(genInv[n, g, sp] for g in generators_tech(sets, n, tc)) <= max_build_cap(par, n, tc, sp)
+    )
+
+    # Minimum generator investment required for each node and technology. Mirrors
+    # Python's nodal minimum (empire.py investment_gen_min_rule): a plain sum of genInvCap.
+    @info " - minimum investment constraints"
+    @constraint(
+        emp,
+        min_inv_tech[n in N, tc in techs(sets), sp in SP; min_build_cap(par, n, tc, sp) > 0.0],
+        sum(genInv[n, g, sp] for g in generators_tech(sets, n, tc)) >= min_build_cap(par, n, tc, sp)
     )
 
     # Constraints on maximum installed capacity for each technology

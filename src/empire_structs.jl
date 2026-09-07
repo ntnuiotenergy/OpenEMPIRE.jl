@@ -37,6 +37,7 @@ Base.@kwdef mutable struct EmpireParams
     genScaleInitCap::Dict{String, TimeProfile}                   = Dict{String, TimeProfile}()
     genInitCap::Dict{Tuple{String, String}, TimeProfile}         = Dict{Tuple{String, String}, TimeProfile}()
     genMaxBuiltCap::Dict{Tuple{String, String}, TimeProfile}     = Dict{Tuple{String, String}, TimeProfile}()
+    genMinBuiltCap::Dict{Tuple{String, String}, TimeProfile}     = Dict{Tuple{String, String}, TimeProfile}()
     genMaxInstalledCapRaw::Dict{Tuple{String, String}, Float64}  = Dict{Tuple{String, String}, Float64}()
     genMaxInstalledCap::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
     genCountryMaxBuiltCap::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
@@ -46,6 +47,7 @@ Base.@kwdef mutable struct EmpireParams
     genMaxBiomethaneAvailability::Dict{String, TimeProfile}      = Dict{String, TimeProfile}()
     genRampUpCap::Dict{String, Float64}                          = Dict{String, Float64}()
     genCapAvailType::Dict{String, Float64}                       = Dict{String, Float64}()
+    genYearlyAvailability::Dict{Tuple{String, String}, TimeProfile} = Dict{Tuple{String, String}, TimeProfile}()
     genCO2Content::Dict{String, Float64}                         = Dict{String, Float64}()
     genLifetime::Dict{String, Float64}                           = Dict{String, Float64}()
 
@@ -220,9 +222,13 @@ regular_season_count(par, representative_count::Integer) =
 # Generator properties
 gencap_avail(par, n, g, t) =
     haskey(par.genCapAvail, (n, g)) ? par.genCapAvail[(n, g)][t] : par.genCapAvailType[g]
+gen_yearly_avail(par, n, g, sp) =
+    haskey(par.genYearlyAvailability, (n, g)) ? par.genYearlyAvailability[(n, g)][sp] : 1.0
 rampup_cap(par, g) = get(par.genRampUpCap, g, DEFAULT_RAMPUP_CAP)
 max_build_cap(par, n, gt, sp) =
     haskey(par.genMaxBuiltCap, (n, gt)) ? par.genMaxBuiltCap[(n, gt)][sp] : DEFAULT_GEN_MAX_BUILD_CAP
+min_build_cap(par, n, gt, sp) =
+    haskey(par.genMinBuiltCap, (n, gt)) ? par.genMinBuiltCap[(n, gt)][sp] : 0.0
 max_inst_cap(par, n, gt, sp) =
     haskey(par.genMaxInstalledCap, (n, gt)) ? par.genMaxInstalledCap[(n, gt)][sp] : DEFAULT_GEN_MAX_INST_CAP_RAW
 country_max_build_cap(par, c, gt, sp) =
@@ -476,6 +482,7 @@ function validate(
             ("genScaleInitCap", par.genScaleInitCap),
             ("genInitCap", par.genInitCap),
             ("genMaxBuiltCap", par.genMaxBuiltCap),
+            ("genMinBuiltCap", par.genMinBuiltCap),
             ("genMaxInstalledCap", par.genMaxInstalledCap),
             ("genCountryMaxBuiltCap", par.genCountryMaxBuiltCap),
             ("genCountryMinBuiltCap", par.genCountryMinBuiltCap),
@@ -509,6 +516,8 @@ function validate(
         _check_profile_dict!(errs, name, d, periods; min = 0.0)
     end
 
+    # genYearlyAvailability: profile values in [0, 1]
+    _check_profile_dict!(errs, "genYearlyAvailability", par.genYearlyAvailability, periods; min = 0.0, max = 1.0)
     # genEfficiency: profile values in [0, 1]
     _check_profile_dict!(errs, "genEfficiency", par.genEfficiency, periods; min = 0.0, max = 1.0)
     # genCapAvail: profile values in [0, 1]

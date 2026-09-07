@@ -337,6 +337,10 @@ function read_params_csv(dir::AbstractString)
     par.genScaleInitCap = _read_strategic_profiles_csv(_required_csv(dir, generator, "genScaleInitCap.csv"))
     par.genInitCap = _read_strategic_profiles_pair_csv(_required_csv(dir, generator, "genInitCap.csv"))
     par.genMaxBuiltCap = _read_strategic_profiles_pair_csv(_required_csv(dir, generator, "genMaxBuiltCap.csv"))
+    min_built_path = _optional_csv(dir, generator, "genMinBuiltCap.csv")
+    if min_built_path !== nothing
+        par.genMinBuiltCap = _read_strategic_profiles_pair_csv(min_built_path)
+    end
     par.genMaxInstalledCapRaw =
         _read_float_by_pair_csv(_required_csv(dir, generator, "genMaxInstalledCapRaw.csv"))
     country_max_built_path = _optional_csv(dir, generator, "genMaxBuiltCapCountry.csv")
@@ -357,6 +361,11 @@ function read_params_csv(dir::AbstractString)
     end
     par.genRampUpCap = _read_float_by_string_csv(_required_csv(dir, generator, "genRampUpCap.csv"))
     par.genCapAvailType = _read_float_by_string_csv(_required_csv(dir, generator, "genCapAvailTypeRaw.csv"))
+    yearly_availability_path = _optional_csv(dir, generator, "genYearlyAvailability.csv")
+    if yearly_availability_path !== nothing
+        par.genYearlyAvailability =
+            _read_strategic_profiles_pair_csv(yearly_availability_path; default_value = 1.0)
+    end
     par.genCO2Content = _read_float_by_string_csv(_required_csv(dir, generator, "genCO2TypeFactor.csv"))
     par.genLifetime = _read_float_by_string_csv(_required_csv(dir, generator, "genLifetime.csv"))
 

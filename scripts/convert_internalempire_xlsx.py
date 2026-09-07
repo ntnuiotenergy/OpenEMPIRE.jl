@@ -84,10 +84,12 @@ CORE_TABLES: dict[str, list[tuple[str, list[int], str, str]]] = {
         ("ScaleFactorInitialCap", [0, 1, 2], "Generator", "genScaleInitCap"),
         ("InitialCapacity", [0, 1, 2, 3], "Generator", "genInitCap"),
         ("MaxBuiltCapacity", [0, 1, 2, 3], "Generator", "genMaxBuiltCap"),
+        ("MinBuiltCapacity", [0, 1, 2, 3], "Generator", "genMinBuiltCap"),
         ("MaxInstalledCapacity", [0, 1, 2], "Generator", "genMaxInstalledCapRaw"),
         ("MaxBiomethaneAvailability", [0, 1, 2], "Generator", "MaxBiomethaneAvailability"),
         ("RampRate", [0, 1], "Generator", "genRampUpCap"),
         ("GeneratorTypeAvailability", [0, 1], "Generator", "genCapAvailTypeRaw"),
+        ("YearlyAvailability", [0, 1, 2, 3], "Generator", "genYearlyAvailability"),
         ("CO2Content", [0, 1], "Generator", "genCO2TypeFactor"),
         ("Lifetime", [0, 1], "Generator", "genLifetime"),
     ],
@@ -133,6 +135,14 @@ CORE_TABLES: dict[str, list[tuple[str, list[int], str, str]]] = {
         ("Lifetime", [0, 1], "Storage", "storageLifetime"),
     ],
 }
+
+# Core sheets that some source workbooks omit. When one of these is missing the
+# conversion skips it instead of failing; the model treats the corresponding CSV
+# as optional (``genMinBuiltCap`` -> 0.0, ``genYearlyAvailability`` -> 1.0).
+OPTIONAL_CORE_SHEETS: frozenset[tuple[str, str]] = frozenset({
+    ("Generator.xlsx", "MinBuiltCapacity"),
+    ("Generator.xlsx", "YearlyAvailability"),
+})
 
 # Set sheets read with ``header=0`` and split per column (``reader.py:read_sets``).
 # ``{sheet: {excel column: (output filename, output header)}}``
@@ -500,6 +510,9 @@ def convert_core_tables(source: Path, out: Path, extra_out: Path, periods: int) 
         excel = pd.ExcelFile(path)
         for sheet, usecols, component, filename in sheets:
             if sheet not in excel.sheet_names:
+                if (workbook, sheet) in OPTIONAL_CORE_SHEETS:
+                    logger.info("%s has no optional sheet %r (skipped)", workbook, sheet)
+                    continue
                 raise KeyError(f"{workbook} has no sheet {sheet!r}")
             raw = read_sheet(excel, sheet, skiprows=2)
             selected, dropped = select_table(raw, usecols, periods)
