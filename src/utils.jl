@@ -126,12 +126,12 @@ function preprocess_invest_cost(params::EmpireParams, sets, periods)
             continue
         end
         cap_cost = params.transmissionTypeCapitalCost[tt] # in €/(MW * km)
-        om_cost = get(params.transmissionTypeFixedOMCost, tt, 0.0) # in €/(MW * km * year)
+        om_cost = get(params.transmissionTypeFixedOMCost, tt, 0.0) # in €/(MW * year)
         profiles = FixedProfile[]
         for sp in SP
-            # InternalEMPIRE multiplies both capex and fixed O&M by corridor length.
+            # Corridor length applies to capex only; fixed O&M is specified in €/MW/year.
             cost_per_year =
-                trans_length * (cap_cost[sp] / annuity_factor(wacc, life) + om_cost[sp])
+                trans_length * cap_cost[sp] / annuity_factor(wacc, life) + om_cost[sp]
             y = min(life, sum(duration_strat(spp) for spp in SP if spp >= sp))
             invest_cost = present_value(cost_per_year, ρ, y; at_start = true) # in €/MW
             push!(profiles, FixedProfile(invest_cost))
