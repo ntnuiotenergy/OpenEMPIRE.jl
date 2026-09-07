@@ -190,6 +190,7 @@ function create_constraints(
     biomass_limit_scope::String = "country",
     generation_growth_limit_flag::Bool = false,
     generation_growth_limit_rate::Float64 = 0.04,
+    bioccs_capacity_limit_factor::Float64 = 1.0,
     progress = nothing,
 )
     @info "Creating constraints"
@@ -232,6 +233,7 @@ function create_constraints(
         biomass_limit_scope,
         generation_growth_limit_flag,
         generation_growth_limit_rate,
+        bioccs_capacity_limit_factor,
         progress,
     )
     create_storage_constraints(
@@ -289,6 +291,16 @@ function duration_aggr(sp, spp, strat_periods)
     return sum(duration_strat(p) for p in strat_periods if p >= sp && p < spp; init = 0)
 end
 
+# Python parity (empire.py `_capacity_limit_contribution`): the share of a technology
+# capacity budget that one generator's capacity term consumes on the constraint's
+# left-hand side. A generator named exactly "BioCCS" (case-insensitive, whitespace
+# stripped) consumes `capacity / bioccs_capacity_limit_factor`, so an all-BioCCS build
+# may reach `factor` x the supplied limit; every other generator is accounted 1:1.
+# `factor == 1.0` returns the capacity unchanged (x / 1.0 is exact in Float64).
+_capacity_limit_contribution(capacity, generator, bioccs_capacity_limit_factor) =
+    lowercase(strip(string(generator))) == "bioccs" ?
+        capacity / bioccs_capacity_limit_factor : capacity
+
 function create_generator_constraints(
     emp::JuMP.Model,
     sets,
@@ -301,10 +313,18 @@ function create_generator_constraints(
     biomass_limit_scope::String = "country",
     generation_growth_limit_flag::Bool = false,
     generation_growth_limit_rate::Float64 = 0.04,
+    bioccs_capacity_limit_factor::Float64 = 1.0,
     progress = nothing,
 )
     @info "Creating generator constraints"
     _report_progress(progress, "Creating generator constraints")
+
+    # Python parity (empire.py / config.py): bioccs_capacity_limit_factor must be > 0.
+    bioccs_capacity_limit_factor > 0.0 ||
+        throw(ArgumentError(
+            "bioccs_capacity_limit_factor must be > 0, got $(bioccs_capacity_limit_factor)"
+        ))
+
     N = nodes(sets)
     SP = strat_periods(periods)
 
@@ -396,11 +416,13 @@ function create_generator_constraints(
     @constraint(
         emp,
         max_inv_tech[n in N, tc in techs(sets), sp in SP],
-        sum(genInv[n, g, sp] for g in generators_tech(sets, n, tc)) <= max_build_cap(par, n, tc, sp)
+        sum(_capacity_limit_contribution(genInv[n, g, sp], g, bioccs_capacity_limit_factor)
+            for g in generators_tech(sets, n, tc)) <= max_build_cap(par, n, tc, sp)
     )
 
-    # Minimum generator investment required for each node and technology. Mirrors
-    # Python's nodal minimum (empire.py investment_gen_min_rule): a plain sum of genInvCap.
+    # Minimum generator investment required for each node and technology.
+    # NB: Python's nodal minimum (empire.py investment_gen_min_rule) uses a plain sum of
+    # genInvCap, NOT _capacity_limit_contribution - the BioCCS headroom does not apply here.
     @info " - minimum investment constraints"
     @constraint(
         emp,
@@ -414,7 +436,8 @@ function create_generator_constraints(
     @constraint(
         emp,
         max_inst_tech[n in N, tc in techs(sets), sp in SP],
-        sum(genCap[n, g, sp] for g in generators_tech(sets, n, tc)) <= max_inst_cap(par, n, tc, sp)
+        sum(_capacity_limit_contribution(genCap[n, g, sp], g, bioccs_capacity_limit_factor)
+            for g in generators_tech(sets, n, tc)) <= max_inst_cap(par, n, tc, sp)
     )
 
     C = countries(sets)
@@ -423,16 +446,18 @@ function create_generator_constraints(
         emp,
         max_inv_tech_country[c in C, tc in techs(sets), sp in SP; haskey(par.genCountryMaxBuiltCap, (c, tc))],
         sum(
-            genInv[n, g, sp]
+            _capacity_limit_contribution(genInv[n, g, sp], g, bioccs_capacity_limit_factor)
             for n in nodes_of_country(sets, c)
             for g in generators_tech(sets, n, tc)
         ) <= country_max_build_cap(par, c, tc, sp)
     )
+    # Python's country minimum (empire.py investment_country_gen_min_rule) DOES use
+    # _countryTechSum, so unlike the nodal minimum the BioCCS headroom applies here.
     @constraint(
         emp,
         min_inv_tech_country[c in C, tc in techs(sets), sp in SP; haskey(par.genCountryMinBuiltCap, (c, tc)) && country_min_build_cap(par, c, tc, sp) > 0.0],
         sum(
-            genInv[n, g, sp]
+            _capacity_limit_contribution(genInv[n, g, sp], g, bioccs_capacity_limit_factor)
             for n in nodes_of_country(sets, c)
             for g in generators_tech(sets, n, tc)
         ) >= country_min_build_cap(par, c, tc, sp)
@@ -441,7 +466,7 @@ function create_generator_constraints(
         emp,
         max_inst_tech_country[c in C, tc in techs(sets), sp in SP; haskey(par.genCountryMaxInstalledCap, (c, tc))],
         sum(
-            genCap[n, g, sp]
+            _capacity_limit_contribution(genCap[n, g, sp], g, bioccs_capacity_limit_factor)
             for n in nodes_of_country(sets, c)
             for g in generators_tech(sets, n, tc)
         ) <= country_max_inst_cap(par, c, tc, sp)

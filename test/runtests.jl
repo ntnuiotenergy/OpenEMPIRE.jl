@@ -18,6 +18,7 @@ include("test_ccs_captured_co2.jl")
 include("test_ccs_cost_mode.jl")
 include("test_biomass_fallback.jl")
 include("test_generation_growth.jl")
+include("test_bioccs_headroom.jl")
 include("test_country_smoke.jl")
 include("test_scenario_csv.jl")
 include("test_annuity.jl")
@@ -104,6 +105,15 @@ end
     test_generation_growth_partial_profile_per_period_fallback()
     test_generation_growth_supplied_zero_is_not_fallback()
     test_generation_growth_trailing_gap_uses_fallback()
+end
+
+@testset "BioCCS capacity headroom" begin
+    test_bioccs_factor_one_is_identity()
+    test_bioccs_factor_gt_one_changes_only_bioccs()
+    test_bioccs_non_bioccs_generators_unchanged()
+    test_bioccs_affects_only_python_equivalent_constraints()
+    test_bioccs_nodal_minimum_matches_python_plain_sum()
+    test_bioccs_invalid_factor_rejected()
 end
 
 @testset "NUTS2 country smoke test" begin

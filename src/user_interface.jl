@@ -232,6 +232,9 @@ function create_model(
             _config_bool(config, "generation_growth_limit_flag", false),
         generation_growth_limit_rate=
             Float64(get(config, "generation_growth_limit_rate", 0.04)),
+        # BioCCS capacity headroom (Python: bioccs_capacity_limit_factor, default 1.0)
+        bioccs_capacity_limit_factor=
+            Float64(get(config, "bioccs_capacity_limit_factor", 1.0)),
         progress,
     )
     _report_progress(progress, "Build 12/12: creating objective")
