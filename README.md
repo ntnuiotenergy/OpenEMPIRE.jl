@@ -431,6 +431,19 @@ Python values are as printed by the solver log. Baseline north-sea-*off* parity
 is closed for matched configs at the same scale, and north-sea-on 2045/3sce/168h
 agrees to solver tolerance as well.
 
+## NUTS2 power extension
+
+The `feature/nuts2-power` branch adds opt-in country-level capacity
+constraints, generator minimum-build and yearly-availability inputs, annual
+biomass limits, node-level generation-growth limits, a BioCCS
+capacity-headroom factor, explicit CCS captured-CO2 factors, a transmission
+fixed O&M cost correction, optional input-based season scaling, and an
+Excel-driven offshore-node conversion mode. Every feature is disabled by
+default, so the base model is unchanged when the new flags and inputs are
+absent. Datasets are not stored in this branch. See
+[docs/nuts2_power.md](docs/nuts2_power.md) for the inputs, run-config keys,
+conversion command, tests, and the North Sea cap-off parity result.
+
 ## Running on Solstorm
 
 The repository includes a small Julia runner and a Solstorm SGE wrapper for a
