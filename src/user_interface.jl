@@ -5,6 +5,25 @@ function _optimizer_with_attributes(optimizer, optimizer_attributes)
     return optimizer_with_attributes(_optimizer_constructor(optimizer), optimizer_attributes...)
 end
 
+# Read the dataset's General/seasScale.csv and return (regular_value, peak_value) for
+# the opt-in `use_input_season_scale` parity path. Requires every regular season to
+# carry the same weight and every peak the same weight (the Python validation setup:
+# 12.96428571 / 1.0).
+function _input_season_scale(data_folder, regular_seasons, peak_count)
+    path = joinpath(OpenEMPIRE.input_path(data_folder), "General", "seasScale.csv")
+    isfile(path) || throw(ArgumentError(
+        "use_input_season_scale is true but $(path) does not exist"))
+    scale = OpenEMPIRE._read_float_by_string_csv(path)      # Dict{String,Float64}
+    reg = unique(getindex.(Ref(scale), collect(String.(regular_seasons))))
+    length(reg) == 1 || throw(ArgumentError(
+        "use_input_season_scale needs one shared regular-season weight in seasScale.csv, got $(reg)"))
+    peak_keys = ["peak$(i)" for i in 1:peak_count]
+    pk = unique(get.(Ref(scale), peak_keys, 1.0))
+    length(pk) == 1 || throw(ArgumentError(
+        "use_input_season_scale needs one shared peak weight in seasScale.csv, got $(pk)"))
+    return (reg[1], pk[1])
+end
+
 function _config_bool(config, key::AbstractString, default::Bool)
     value = get(config, key, default)
     value isa Bool && return value
@@ -90,6 +109,18 @@ function _prepare_model_inputs(
     scenarios = config["number_of_scenarios"]
     operational_hours_per_year = Int(get(config, "operational_hours_per_year", 8760))
 
+    # Opt-in parity path: use the dataset's own General/seasScale.csv per-hour weights
+    # (as the Python validation run does, reading General.xlsx!seasonScale verbatim)
+    # instead of deriving them from operational_hours_per_year. For reproducing the
+    # current Python validation, NOT the final full-year scientific setup.
+    regular_season_scale = nothing
+    peak_season_scale = nothing
+    if _config_bool(config, "use_input_season_scale", false)
+        regular_season_scale, peak_season_scale =
+            _input_season_scale(data_folder, regular_seasons, peak_count)
+        _report_progress(progress, "Using input seasScale.csv: regular=$(regular_season_scale) peak=$(peak_season_scale)")
+    end
+
     periods = OpenEMPIRE.create_timestruct(
         strat_pers,
         sp_dur_years,
@@ -100,6 +131,8 @@ function _prepare_model_inputs(
         scenarios,
         ;
         operational_hours_per_year,
+        regular_season_scale,
+        peak_season_scale,
     )
 
 

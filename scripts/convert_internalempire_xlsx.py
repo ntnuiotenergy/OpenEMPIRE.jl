@@ -235,6 +235,22 @@ ENERGY_HUB_NODES: frozenset[str] = frozenset({
     "EnergyhubGreatBritain", "EnergyhubNorway", "EnergyhubEU",
 })
 
+# Offshore-node classification mode (--offshore-node-mode):
+#
+#   "internalempire" (default): split Node-minus-OnshoreNode into wind farms /
+#       energy hubs / other with the hardcoded WIND_FARM_NODES / ENERGY_HUB_NODES
+#       lists above (mirrors run_EMPIRE_int.py, which keeps the split out of the
+#       workbooks).
+#
+#   "excel": the workbook's own Sets.xlsx!OffshoreNodes sheet is authoritative --
+#       every listed offshore node becomes an OffshoreWindFarmNode (matching the
+#       Python NUTS model, whose north_sea path applies the same
+#       wind_farm_transmission_cap rule to every member of OffshoreNode) and
+#       OffshoreEnergyHub is empty. Use this whenever Sets.xlsx!OffshoreNodes
+#       exists, so no hardcoded list is consulted.
+OFFSHORE_NODE_MODES = ("internalempire", "excel")
+DEFAULT_OFFSHORE_NODE_MODE = "internalempire"
+
 # Set-style sheets of the core workbooks that belong to the internal modules.
 EXTRA_CORE_SET_SHEETS: dict[str, list[str]] = {
     "Sets.xlsx": [
@@ -730,7 +746,8 @@ def materialize_pyomo_period_defaults(out: Path, periods: int) -> None:
         )
 
 
-def convert_core_sets(source: Path, out: Path, extra_out: Path, periods: int) -> None:
+def convert_core_sets(source: Path, out: Path, extra_out: Path, periods: int,
+                      offshore_node_mode: str = DEFAULT_OFFSHORE_NODE_MODE) -> None:
     excel = pd.ExcelFile(source / "Sets.xlsx")
     nodes: list[str] | None = None
     onshore: list[str] | None = None
@@ -771,8 +788,25 @@ def convert_core_sets(source: Path, out: Path, extra_out: Path, periods: int) ->
             write_csv(finalize(raw[leftover].dropna(how="all")),
                       extra_out / "Sets" / f"{sheet}_extra.csv")
 
-    if nodes is None or onshore is None:
-        raise ValueError("Sets.xlsx!Nodes must have both a Node and an OnshoreNode column")
+    if nodes is None:
+        raise ValueError("Sets.xlsx!Nodes must have a Node column")
+    if onshore is None:
+        # Legacy electricity workbooks (including ES_NECPEssentials) do not carry
+        # InternalEMPIRE's OnshoreNode helper column.  In those datasets every node is
+        # an ordinary electricity node unless an explicit OffshoreNodes sheet says
+        # otherwise.
+        offshore_explicit: set[str] = set()
+        if "OffshoreNodes" in excel.sheet_names:
+            raw_offshore = read_sheet(excel, "OffshoreNodes", skiprows=0)
+            offshore_explicit = set(
+                strip_cell_whitespace(raw_offshore.iloc[:, [0]].dropna()).iloc[:, 0]
+            )
+        onshore = [node for node in nodes if node not in offshore_explicit]
+        logger.info(
+            "Sets.xlsx!Nodes has no OnshoreNode column; derived %d onshore nodes "
+            "from %d explicit offshore nodes",
+            len(onshore), len(offshore_explicit),
+        )
 
     unknown = [n for n in onshore if n not in set(nodes)]
     if unknown:
@@ -781,11 +815,20 @@ def convert_core_sets(source: Path, out: Path, extra_out: Path, periods: int) ->
 
     # "Node minus OnshoreNode" is not a usable offshore classification: it mixes wind
     # farms, energy hubs and gas platforms, and the three are modelled differently.
-    # InternalEMPIRE keeps the split in two hardcoded lists in run_EMPIRE_int.py rather
-    # than in the workbooks, so they are mirrored here. Anything offshore that is in
-    # neither list (Sleipner, Draupner - GasOCGT platforms) is an ordinary node.
-    wind_farms = [n for n in offshore if n in WIND_FARM_NODES]
-    hubs = [n for n in offshore if n in ENERGY_HUB_NODES]
+    if offshore_node_mode == "excel" and "OffshoreNodes" in excel.sheet_names:
+        # The workbook's Sets.xlsx!OffshoreNodes sheet is authoritative -- every listed
+        # node is a wind farm (Python's north_sea path caps every OffshoreNode member
+        # the same way); no hardcoded list is consulted.
+        wind_farms = list(offshore)
+        hubs: list[str] = []
+        logger.info("Offshore-node mode 'excel': %d wind farms taken verbatim from "
+                    "Sets.xlsx!OffshoreNodes; no energy hubs", len(wind_farms))
+    else:
+        # InternalEMPIRE keeps the split in two hardcoded lists in run_EMPIRE_int.py
+        # rather than in the workbooks, so they are mirrored here. Anything offshore in
+        # neither list (Sleipner, Draupner - GasOCGT platforms) is an ordinary node.
+        wind_farms = [n for n in offshore if n in WIND_FARM_NODES]
+        hubs = [n for n in offshore if n in ENERGY_HUB_NODES]
 
     # Read GeneratorsOfNode straight from the workbook: convert_core_tables, which writes
     # the CSV, has not run yet at this point.
@@ -1076,6 +1119,7 @@ def write_conversion_manifest(
     periods: int,
     duplicate_audit: list[dict[str, object]],
     reserve_duplicate_audit: list[dict[str, object]],
+    offshore_node_mode: str = DEFAULT_OFFSHORE_NODE_MODE,
 ) -> None:
     files = sorted(
         path for path in out.rglob("*")
@@ -1090,6 +1134,7 @@ def write_conversion_manifest(
         "dataset": dataset,
         "source_dataset": source.name,
         "periods": periods,
+        "offshore_node_mode": offshore_node_mode,
         "converter": "scripts/convert_internalempire_xlsx.py",
         "terminal_cost_duplicate_keys_by_table": duplicate_counts,
         "terminal_cost_duplicate_keys_total": len(duplicate_audit),
@@ -1232,6 +1277,13 @@ def main() -> None:
                              f"(default: {DEFAULT_CCS_COST_MODE}). 'python-nuts' keeps "
                              "the Excel CCSCostTSVariable values and writes no "
                              "CCSCostTSFixed.csv; 'internalempire' zeroes both.")
+    parser.add_argument("--offshore-node-mode", choices=OFFSHORE_NODE_MODES,
+                        default=DEFAULT_OFFSHORE_NODE_MODE,
+                        help="offshore-node classification "
+                             f"(default: {DEFAULT_OFFSHORE_NODE_MODE}). 'excel' takes "
+                             "OffshoreWindFarmNode verbatim from Sets.xlsx!OffshoreNodes "
+                             "(no hardcoded list); 'internalempire' uses the hardcoded "
+                             "wind-farm / energy-hub split.")
     parser.add_argument("--skip-modules", action="store_true",
                         help="only build the core dataset")
     args = parser.parse_args()
@@ -1250,7 +1302,7 @@ def main() -> None:
             shutil.rmtree(folder)
 
     logger.info("Converting %s -> %s", source, out)
-    convert_core_sets(source, out, extra_out, args.periods)
+    convert_core_sets(source, out, extra_out, args.periods, args.offshore_node_mode)
     convert_core_tables(source, out, extra_out, args.periods)
     materialize_pyomo_period_defaults(out, args.periods)
     fill_missing_gas_fuel_costs(out, args.periods)
@@ -1274,6 +1326,7 @@ def main() -> None:
         args.periods,
         duplicate_audit,
         reserve_duplicate_audit,
+        args.offshore_node_mode,
     )
     write_readme(source, extra_out, args.dataset, args.periods)
     logger.info("Done. Core: %s | Extra: %s", out, extra_out)

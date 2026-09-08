@@ -19,6 +19,7 @@ include("test_ccs_cost_mode.jl")
 include("test_biomass_fallback.jl")
 include("test_generation_growth.jl")
 include("test_bioccs_headroom.jl")
+include("test_stage1_parity.jl")
 include("test_country_smoke.jl")
 include("test_scenario_csv.jl")
 include("test_annuity.jl")
@@ -114,6 +115,14 @@ end
     test_bioccs_affects_only_python_equivalent_constraints()
     test_bioccs_nodal_minimum_matches_python_plain_sum()
     test_bioccs_invalid_factor_rejected()
+end
+
+@testset "Stage-1 parity (season scale + offshore)" begin
+    test_input_season_scale_multiplier()
+    test_default_time_structure_unchanged()
+    test_season_scale_requires_both_or_neither()
+    test_input_season_scale_reads_northsea_csv()
+    test_northsea_offshore_windfarm_set_matches_excel()
 end
 
 @testset "NUTS2 country smoke test" begin

@@ -8,6 +8,8 @@
         hours_peak,
         nscens = 1;
         operational_hours_per_year = 8760,
+        regular_season_scale = nothing,
+        peak_season_scale = nothing,
     )
 
 Create EMPIRE's strategic and operational time structure.
@@ -17,6 +19,14 @@ strategic year. It defaults to 8760 for the existing representative-period
 formulation. A chronological fixture can set it to the fixture length; a
 full-year chronological run uses one regular season of length 8760 and keeps
 the default, which gives every modeled hour a multiplicity of one.
+
+`regular_season_scale` / `peak_season_scale` (both `nothing` by default) are an
+opt-in parity path: when supplied, each regular-season operational hour gets
+multiplicity exactly `regular_season_scale` and each peak hour exactly
+`peak_season_scale`, instead of the 8760-derived shares. Used to reproduce the
+Python validation run, which reads `General.xlsx!seasonScale` verbatim
+(12.96428571 for regular seasons, 1.0 for peak) rather than deriving it. This is
+for that reproduction only, not the final full-year scientific setup.
 """
 function create_timestruct(
     npers,
@@ -27,6 +37,8 @@ function create_timestruct(
     hours_peak,
     nscens = 1;
     operational_hours_per_year = 8760,
+    regular_season_scale = nothing,
+    peak_season_scale = nothing,
 )
     annual_hours = Int(operational_hours_per_year)
     annual_hours > 0 || throw(ArgumentError("operational_hours_per_year must be positive"))
@@ -51,11 +63,24 @@ function create_timestruct(
         "Modeled peak hours ($peak_hours) exceed operational_hours_per_year ($annual_hours)",
     ))
 
-    # Give each season an equal share of each year outside peak periods
-    seasons_share = [(annual_hours - peak_hours) / (annual_hours * nseasons) for _ in seasons]
-
-    # Count each modeled peak hour once per year.
-    peaks_share = [hours_peak / annual_hours for _ in peaks]
+    if regular_season_scale === nothing && peak_season_scale === nothing
+        # Give each season an equal share of each year outside peak periods.
+        seasons_share = [(annual_hours - peak_hours) / (annual_hours * nseasons) for _ in seasons]
+        # Count each modeled peak hour once per year.
+        peaks_share = [hours_peak / annual_hours for _ in peaks]
+    else
+        # Opt-in: reproduce a supplied per-hour multiplicity. The share is chosen so that
+        # `share * annual_hours / hours_per_period == scale`; TimeStruct's internal
+        # RepresentativePeriods share->multiple arithmetic can still leave the realized
+        # `multiple_strat` up to 1 ULP (~1.1e-16 relative) from `regular_season_scale`
+        # (peak lands exactly on `peak_season_scale`). That is far below the objective's
+        # own summation rounding and is documented in the parity report.
+        (regular_season_scale !== nothing && peak_season_scale !== nothing) || throw(ArgumentError(
+            "regular_season_scale and peak_season_scale must both be supplied or both be nothing",
+        ))
+        seasons_share = [regular_season_scale * hours_season / annual_hours for _ in seasons]
+        peaks_share = [peak_season_scale * hours_peak / annual_hours for _ in peaks]
+    end
 
     # Create representative periods for each year
     repr_periods = RepresentativePeriods(
