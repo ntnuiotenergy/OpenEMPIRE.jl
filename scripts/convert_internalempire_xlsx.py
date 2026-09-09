@@ -67,6 +67,7 @@ TIME_FORMAT = "%d/%m/%Y %H:%M"
 
 CORE_TABLES: dict[str, list[tuple[str, list[int], str, str]]] = {
     "Sets.xlsx": [
+        ("NodesOfCountry", [0, 1], "Sets", "NodesOfCountry"),
         ("StorageOfNodes", [0, 1], "Sets", "StoragesOfNode"),
         ("GeneratorsOfNode", [0, 1], "Sets", "GeneratorsOfNode"),
         ("GeneratorsOfTechnology", [0, 1], "Sets", "GeneratorsOfTechnology"),
@@ -84,8 +85,11 @@ CORE_TABLES: dict[str, list[tuple[str, list[int], str, str]]] = {
         ("ScaleFactorInitialCap", [0, 1, 2], "Generator", "genScaleInitCap"),
         ("InitialCapacity", [0, 1, 2, 3], "Generator", "genInitCap"),
         ("MaxBuiltCapacity", [0, 1, 2, 3], "Generator", "genMaxBuiltCap"),
+        ("MaxBuiltCapacityCountry", [0, 1, 2, 3], "Generator", "genMaxBuiltCapCountry"),
         ("MinBuiltCapacity", [0, 1, 2, 3], "Generator", "genMinBuiltCap"),
+        ("MinBuiltCapacityCountry", [0, 1, 2, 3], "Generator", "genMinBuiltCapCountry"),
         ("MaxInstalledCapacity", [0, 1, 2], "Generator", "genMaxInstalledCapRaw"),
+        ("MaxInstalledCapacityCountry", [0, 1, 2], "Generator", "genMaxInstalledCapCountry"),
         ("MaxBiomethaneAvailability", [0, 1, 2], "Generator", "MaxBiomethaneAvailability"),
         ("RampRate", [0, 1], "Generator", "genRampUpCap"),
         ("GeneratorTypeAvailability", [0, 1], "Generator", "genCapAvailTypeRaw"),
@@ -143,7 +147,9 @@ CORE_TABLES: dict[str, list[tuple[str, list[int], str, str]]] = {
 # Core sheets that some source workbooks omit. When one of these is missing the
 # conversion skips it instead of failing; the model treats the corresponding CSV
 # as optional (``genMinBuiltCap`` -> 0.0, ``genYearlyAvailability`` -> 1.0,
-# ``CapturedCO2Content`` -> non-CCS counterpart / capture-rate fallback).
+# ``CapturedCO2Content`` -> non-CCS counterpart / capture-rate fallback). The
+# country-level sheets are only present in NUTS2 datasets; legacy electricity
+# workbooks omit them and their national constraints are simply not built.
 OPTIONAL_CORE_SHEETS: frozenset[tuple[str, str]] = frozenset({
     ("Generator.xlsx", "MinBuiltCapacity"),
     ("Generator.xlsx", "YearlyAvailability"),
@@ -151,12 +157,17 @@ OPTIONAL_CORE_SHEETS: frozenset[tuple[str, str]] = frozenset({
     ("Node.xlsx", "BiomassMaxAnnualActivity"),
     ("Node.xlsx", "BiomassMaxAnnualActivityCountry"),
     ("General.xlsx", "GenerationGrowthRate"),
+    ("Sets.xlsx", "NodesOfCountry"),
+    ("Generator.xlsx", "MaxBuiltCapacityCountry"),
+    ("Generator.xlsx", "MinBuiltCapacityCountry"),
+    ("Generator.xlsx", "MaxInstalledCapacityCountry"),
 })
 
 # Set sheets read with ``header=0`` and split per column (``reader.py:read_sets``).
 # ``{sheet: {excel column: (output filename, output header)}}``
 CORE_SET_COLUMNS: dict[str, dict[str, tuple[str, str]]] = {
     "Nodes": {"Node": ("Node", "Node")},
+    "Countries": {"Country": ("Countries", "Country")},
     "Generators": {
         "Generator": ("Generator", "Generator"),
         "HydroGenerator": ("HydroGenerator", "HydroGenerator"),
@@ -173,6 +184,10 @@ CORE_SET_COLUMNS: dict[str, dict[str, tuple[str, str]]] = {
     "Technology": {"Technology": ("Technology", "Technology")},
     "LineType": {"LineType": ("TransmissionType", "LineType")},
 }
+
+# Set sheets that only NUTS2 datasets carry. A workbook without them is converted
+# without the corresponding CSV instead of failing.
+OPTIONAL_CORE_SET_SHEETS: frozenset[str] = frozenset({"Countries"})
 
 SCENARIO_FILES = (
     "electricload.csv",
@@ -754,6 +769,9 @@ def convert_core_sets(source: Path, out: Path, extra_out: Path, periods: int,
 
     for sheet, mapping in CORE_SET_COLUMNS.items():
         if sheet not in excel.sheet_names:
+            if sheet in OPTIONAL_CORE_SET_SHEETS:
+                logger.info("Sets.xlsx has no optional sheet %r (skipped)", sheet)
+                continue
             raise KeyError(f"Sets.xlsx has no sheet {sheet!r}")
         raw = read_sheet(excel, sheet, skiprows=0)
         handled: list[str] = []
