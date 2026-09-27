@@ -14,6 +14,9 @@ using Statistics
 using Unicode
 using YAML
 
+#SA testing
+using Plasmo
+
 include("empire_sets.jl")
 include("empire_structs.jl")
 include("scenario.jl")
@@ -26,5 +29,8 @@ include("results.jl")
 include("out_of_sample.jl")
 include("oos_full_year.jl")
 include("oos_aggregation.jl")
+
+#SA testing
+include("optigraph.jl")
 
 end # module OpenEMPIRE
