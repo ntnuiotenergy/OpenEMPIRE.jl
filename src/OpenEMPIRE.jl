@@ -31,6 +31,6 @@ include("oos_full_year.jl")
 include("oos_aggregation.jl")
 
 #SA testing
-include("optigraph.jl")
+include("benders_impl.jl") #Changed from optigraph.jl to benders_impl.jl
 
 end # module OpenEMPIRE
