@@ -1,0 +1,22 @@
+Table,SourceRow,Key,Reason
+H2TerminalCapitalCost,16,Greece|PipelineH2Import|1,terminal-node pair is absent from H2TerminalsOfNode
+H2TerminalCapitalCost,17,Greece|PipelineH2Import|2,terminal-node pair is absent from H2TerminalsOfNode
+H2TerminalCapitalCost,18,Greece|PipelineH2Import|3,terminal-node pair is absent from H2TerminalsOfNode
+H2TerminalCapitalCost,19,Greece|PipelineH2Import|4,terminal-node pair is absent from H2TerminalsOfNode
+H2TerminalCapitalCost,20,Greece|PipelineH2Import|5,terminal-node pair is absent from H2TerminalsOfNode
+H2TerminalCapitalCost,21,Greece|PipelineH2Import|6,terminal-node pair is absent from H2TerminalsOfNode
+H2TerminalCapitalCost,22,Greece|PipelineH2Import|7,terminal-node pair is absent from H2TerminalsOfNode
+H2TerminalFixedOM,16,Greece|PipelineH2Import|1,terminal-node pair is absent from H2TerminalsOfNode
+H2TerminalFixedOM,17,Greece|PipelineH2Import|2,terminal-node pair is absent from H2TerminalsOfNode
+H2TerminalFixedOM,18,Greece|PipelineH2Import|3,terminal-node pair is absent from H2TerminalsOfNode
+H2TerminalFixedOM,19,Greece|PipelineH2Import|4,terminal-node pair is absent from H2TerminalsOfNode
+H2TerminalFixedOM,20,Greece|PipelineH2Import|5,terminal-node pair is absent from H2TerminalsOfNode
+H2TerminalFixedOM,21,Greece|PipelineH2Import|6,terminal-node pair is absent from H2TerminalsOfNode
+H2TerminalFixedOM,22,Greece|PipelineH2Import|7,terminal-node pair is absent from H2TerminalsOfNode
+H2TerminalPrice,16,Greece|PipelineH2Import|1,terminal-node pair is absent from H2TerminalsOfNode
+H2TerminalPrice,17,Greece|PipelineH2Import|2,terminal-node pair is absent from H2TerminalsOfNode
+H2TerminalPrice,18,Greece|PipelineH2Import|3,terminal-node pair is absent from H2TerminalsOfNode
+H2TerminalPrice,19,Greece|PipelineH2Import|4,terminal-node pair is absent from H2TerminalsOfNode
+H2TerminalPrice,20,Greece|PipelineH2Import|5,terminal-node pair is absent from H2TerminalsOfNode
+H2TerminalPrice,21,Greece|PipelineH2Import|6,terminal-node pair is absent from H2TerminalsOfNode
+H2TerminalPrice,22,Greece|PipelineH2Import|7,terminal-node pair is absent from H2TerminalsOfNode

@@ -14,9 +14,11 @@ Create EMPIRE's strategic and operational time structure.
 
 `operational_hours_per_year` is the physical duration represented by each
 strategic year. It defaults to 8760 for the existing representative-period
-formulation. A chronological fixture can set it to the fixture length; a
-full-year chronological run uses one regular season of length 8760 and keeps
-the default, which gives every modeled hour a multiplicity of one.
+formulation. The InternalEMPIRE-equivalent full-year OOS formulation keeps the
+default while solving each 365-hour chunk with one regular season and one
+one-hour dummy peak. This gives each regular hour multiplicity
+`(8760 - 1) / 365` and the dummy peak multiplicity one. A chronological fixture
+can instead set the physical duration to the fixture length.
 """
 function create_timestruct(
     npers,
@@ -75,7 +77,16 @@ function _report_progress(progress, message)
     return nothing
 end
 
-function create_variables(emp::JuMP.Model, sets, periods::TimeStruct.TimeStructure; progress = nothing)
+function create_variables(
+    emp::JuMP.Model,
+    sets,
+    periods::TimeStruct.TimeStructure;
+    natural_gas::Bool = false,
+    hydrogen::Bool = false,
+    gas_transport_demand::Bool = natural_gas,
+    industry::Bool = false,
+    progress = nothing,
+)
 
     # Index sets
     N = nodes(sets)
@@ -164,10 +175,25 @@ function create_variables(emp::JuMP.Model, sets, periods::TimeStruct.TimeStructu
     for n in N, t in T
         unsafe_insertvar!(loadShed, n, t)
     end
+    natural_gas && create_natural_gas_variables!(
+        emp, sets, periods; transport_demand = gas_transport_demand,
+    )
+    hydrogen && create_hydrogen_variables!(emp, sets, periods)
+    industry && create_industry_variables!(emp, sets, periods)
     return
 end
 
-function create_objective(emp::JuMP.Model, sets, par, periods::TimeStructure, discounter::Discounter; progress = nothing)
+function create_objective(
+    emp::JuMP.Model,
+    sets,
+    par,
+    periods::TimeStructure,
+    discounter::Discounter;
+    natural_gas::Bool = false,
+    hydrogen::Bool = false,
+    industry::Bool = false,
+    progress = nothing,
+)
     @info "Creating objective function"
     _report_progress(progress, "Creating objective function")
 
@@ -176,6 +202,10 @@ function create_objective(emp::JuMP.Model, sets, par, periods::TimeStructure, di
     return @objective(emp, Min, sum(values(components)))
 end
 
+# `include_investment_constraints` gates the investment-linking constraints. The
+# controlled parity fixtures pin every investment variable to zero and set installed
+# capacity exogenously; the linking constraints make that infeasible. Defaults to
+# true, so ordinary model building is unchanged.
 # Create all constraints in the model
 function create_constraints(
     emp::JuMP.Model,
@@ -184,6 +214,11 @@ function create_constraints(
     periods::TimeStructure;
     offshore_transmission_cap::Bool = true,
     include_investment_constraints::Bool = true,
+    natural_gas::Bool = false,
+    hydrogen::Bool = false,
+    # InternalEMPIRE declares natural-gas transport demand in its Hydrogen block.
+    gas_transport_demand::Bool = natural_gas,
+    industry::Bool = false,
     progress = nothing,
 )
     @info "Creating constraints"
@@ -198,6 +233,12 @@ function create_constraints(
     storDischarge = emp[:storDischarge]
     trOp = emp[:transmissionOperational]
     shed = emp[:loadShed]
+    if hydrogen || industry
+        _sector_period_context(emp, periods, par.NaturalGas.gasScenarioCount)
+    end
+    if hydrogen
+        _hydrogen_electricity_context!(emp, sets, par)
+    end
 
     @info "Flow balance constraints: $((length(N)) * length(T))"
     _report_progress(progress, "Creating flow-balance constraints ($(length(N) * length(T)) constraints)")
@@ -206,7 +247,15 @@ function create_constraints(
         flow_balance[n in N, t in T],
         sum(genOp[n, g, t] for g in G) + sum(discharge_eff(par, s) * storDischarge[n, s, t] - storCharge[n, s, t] for s in storages(sets, n)) +
             sum(line_eff(par, m, n) * trOp[m, n, t] for (m, n, t) in SparseVariables.select(trOp, :, n, t)) - sum(trOp[n, :, t]) +
-            shed[n, t] == load(par, n, t)
+            shed[n, t] -
+            (
+                natural_gas ?
+                natural_gas_pipeline_electricity_demand(emp, sets, par, n, t) :
+                0.0
+            ) -
+            (hydrogen ? hydrogen_electricity_demand(emp, sets, par, n, t) : 0.0) -
+            (industry ? industry_electricity_demand(emp, sets, par, n, t) : 0.0) ==
+            load(par, n, t)
     )
 
     if !include_investment_constraints
@@ -239,7 +288,20 @@ function create_constraints(
         include_investment_constraints,
         progress,
     )
-    create_emission_constraints(emp, sets, par, periods; progress)
+    create_emission_constraints(emp, sets, par, periods; hydrogen, industry, progress)
+    natural_gas && create_natural_gas_constraints!(
+        emp, sets, par, periods; transport_demand = gas_transport_demand,
+    )
+    hydrogen && create_hydrogen_constraints!(
+        emp,
+        sets,
+        par,
+        periods;
+        include_investment_constraints,
+    )
+    industry && create_industry_constraints!(
+        emp, sets, par, periods; include_investment_constraints,
+    )
     return nothing
 
 end
@@ -374,8 +436,9 @@ end
 """
     create_bioenergy_constraints(emp, sets, par, periods; progress=nothing)
 
-Add InternalEMPIRE's scenario-wise biomass and node-wise biomethane limits.
-The source tables use GJ for biomass and TJ for biomethane.
+Add InternalEMPIRE's scenario-wise biomass and node-wise biomethane availability
+limits. The biomass table is in GJ and the biomethane table in TJ, matching the
+units of the source workbook and Pyomo formulation.
 """
 function create_bioenergy_constraints(
         emp::JuMP.Model,
@@ -680,7 +743,15 @@ function _opscenario_count(sp)
     return length(opscenarios(first_rp))
 end
 
-function create_emission_constraints(emp::JuMP.Model, sets, par, periods::TimeStructure; progress = nothing)
+function create_emission_constraints(
+    emp::JuMP.Model,
+    sets,
+    par,
+    periods::TimeStructure;
+    hydrogen::Bool = false,
+    industry::Bool = false,
+    progress = nothing,
+)
     par.CO2cap === nothing && return nothing
 
     @info "Creating emission constraints"
@@ -690,6 +761,7 @@ function create_emission_constraints(emp::JuMP.Model, sets, par, periods::TimeSt
 
     N = nodes(sets)
     genOp = emp[:genOperational]
+    strategic_index = Dict(period => index for (index, period) in enumerate(SP))
 
     @variable(emp, nodeEmission[N, sp in SP, sc in 1:_opscenario_count(sp)])
 
@@ -708,7 +780,28 @@ function create_emission_constraints(emp::JuMP.Model, sets, par, periods::TimeSt
                 if scenario_index == sc
                 for t in scenario;
                 init = 0.0
-            )
+            ) +
+            (hydrogen && n in hydrogen_sets(sets).ReformerLocation ?
+                sum(
+                    multiple_strat(sp, t) *
+                    par.Hydrogen.reformerEmissionFactor[(plant, strategic_index[sp])] *
+                    emp[:reformerHydrogenTon][n, plant, t]
+                    for plant in hydrogen_sets(sets).ReformerPlant
+                    for rp in repr_periods(sp)
+                    for (scenario_index, scenario) in enumerate(opscenarios(rp))
+                    if scenario_index == sc
+                    for t in scenario;
+                    init = 0.0,
+                ) : 0.0) +
+            (industry ?
+                sum(
+                    multiple_strat(sp, t) * industry_emissions(emp, sets, par, n, t)
+                    for rp in repr_periods(sp)
+                    for (scenario_index, scenario) in enumerate(opscenarios(rp))
+                    if scenario_index == sc
+                    for t in scenario;
+                    init = JuMP.AffExpr(0.0),
+                ) : 0.0)
     )
 
     return @constraint(
@@ -728,11 +821,32 @@ function objective_component_expressions(emp::JuMP.Model, sets, par, periods::Ti
     storInvCapEn = emp[:storENInvCap]
     shed = emp[:loadShed]
     genOp = emp[:genOperational]
+    gas_costs = natural_gas_objective_expressions(emp, sets, par, periods, discounter)
+    hydrogen_costs = has_hydrogen(sets) ?
+                     hydrogen_objective_expressions(emp, sets, par, periods, discounter) :
+                     (
+        investment = JuMP.AffExpr(0.0),
+        terminal_import = JuMP.AffExpr(0.0),
+        reformer_operation = JuMP.AffExpr(0.0),
+        transport_shedding = JuMP.AffExpr(0.0),
+    )
+    industry_costs = has_industry(sets) ?
+                     industry_objective_expressions(emp, sets, par, periods, discounter) :
+                     (
+        investment = JuMP.AffExpr(0.0),
+        steel_operation = JuMP.AffExpr(0.0),
+        cement_operation = JuMP.AffExpr(0.0),
+        ammonia_operation = JuMP.AffExpr(0.0),
+        refinery_shedding = JuMP.AffExpr(0.0),
+    )
 
+    # `total += coef * var` rebuilds the whole expression each iteration, making an
+    # n-term sum O(n^2) in both time and allocation. `add_to_expression!` appends in
+    # place. Measured on 432 terms: 465 us / 9.74 MiB versus 9.5 us / 25.7 KiB.
     function generator_investment_expr(sp)
         total = JuMP.AffExpr(0.0)
         for n in N, g in generators(sets, n)
-            total += gen_invest_cost(par, g, sp) * genInvCap[n, g, sp]
+            JuMP.add_to_expression!(total, gen_invest_cost(par, g, sp), genInvCap[n, g, sp])
         end
         return total
     end
@@ -740,8 +854,8 @@ function objective_component_expressions(emp::JuMP.Model, sets, par, periods::Ti
     function storage_investment_expr(sp)
         total = JuMP.AffExpr(0.0)
         for n in N, s in storages(sets, n)
-            total += stor_pw_invest_cost(par, s, sp) * storInvCapPow[n, s, sp]
-            total += stor_en_invest_cost(par, s, sp) * storInvCapEn[n, s, sp]
+            JuMP.add_to_expression!(total, stor_pw_invest_cost(par, s, sp), storInvCapPow[n, s, sp])
+            JuMP.add_to_expression!(total, stor_en_invest_cost(par, s, sp), storInvCapEn[n, s, sp])
         end
         return total
     end
@@ -749,37 +863,70 @@ function objective_component_expressions(emp::JuMP.Model, sets, par, periods::Ti
     function generator_operation_expr(t)
         total = JuMP.AffExpr(0.0)
         for n in N, g in generators(sets, n)
-            total += gen_marginal_cost(par, g, t) * genOp[n, g, t]
+            JuMP.add_to_expression!(total, gen_marginal_cost(par, g, t), genOp[n, g, t])
+        end
+        return total
+    end
+
+    # The same O(n^2) trap applies to the outer sums. `sum` over a generator folds
+    # left, so every step copies the accumulated expression; over all operational
+    # periods that dominated the post-solve diagnostics. Accumulate in place.
+    function accumulate_strategic(term)
+        total = JuMP.AffExpr(0.0)
+        for sp in SP
+            JuMP.add_to_expression!(total, objective_weight(sp, discounter), term(sp))
+        end
+        return total
+    end
+
+    function accumulate_operational(term)
+        total = JuMP.AffExpr(0.0)
+        for t in periods
+            JuMP.add_to_expression!(
+                total,
+                objective_weight(t, discounter; type = "avg_year"),
+                term(t),
+            )
+        end
+        return total
+    end
+
+    function transmission_investment_expr(sp)
+        total = JuMP.AffExpr(0.0)
+        for (m, n) in bidir_arcs(sets)
+            JuMP.add_to_expression!(total, trans_invest_cost(par, m, n, sp), transInvCap[m, n, sp])
+        end
+        return total
+    end
+
+    function load_shedding_expr(t)
+        total = JuMP.AffExpr(0.0)
+        for n in N
+            JuMP.add_to_expression!(total, lost_load_cost(par, n, t), shed[n, t])
         end
         return total
     end
 
     return (
-        generator_investment = sum(
-            objective_weight(sp, discounter) * generator_investment_expr(sp)
-            for sp in SP
+        generator_investment = accumulate_strategic(generator_investment_expr),
+        storage_investment = accumulate_strategic(storage_investment_expr),
+        transmission_investment = accumulate_strategic(transmission_investment_expr),
+        offshore_converter_investment = accumulate_strategic(
+            sp -> offshore_conv_investment_expr(emp, sets, par, sp),
         ),
-        storage_investment = sum(
-            objective_weight(sp, discounter) * storage_investment_expr(sp) for sp in SP
-        ),
-        transmission_investment = sum(
-            objective_weight(sp, discounter) *
-            sum(trans_invest_cost(par, m, n, sp) * transInvCap[m, n, sp] for (m, n) in bidir_arcs(sets); init = 0)
-            for sp in SP
-        ),
-        offshore_converter_investment = sum(
-            objective_weight(sp, discounter) * offshore_conv_investment_expr(emp, sets, par, sp)
-            for sp in SP
-        ),
-        load_shedding = sum(
-            objective_weight(t, discounter; type = "avg_year") *
-            sum(lost_load_cost(par, n, t) * shed[n, t] for n in N; init = 0)
-            for t in periods
-        ),
-        generator_operation = sum(
-            objective_weight(t, discounter; type = "avg_year") * generator_operation_expr(t)
-            for t in periods
-        ),
+        load_shedding = accumulate_operational(load_shedding_expr),
+        generator_operation = accumulate_operational(generator_operation_expr),
+        natural_gas_terminal_import = gas_costs.terminal_import,
+        natural_gas_transport_shedding = gas_costs.transport_shedding,
+        hydrogen_investment = hydrogen_costs.investment,
+        hydrogen_terminal_import = hydrogen_costs.terminal_import,
+        hydrogen_reformer_operation = hydrogen_costs.reformer_operation,
+        hydrogen_transport_shedding = hydrogen_costs.transport_shedding,
+        industry_investment = industry_costs.investment,
+        industry_steel_operation = industry_costs.steel_operation,
+        industry_cement_operation = industry_costs.cement_operation,
+        industry_ammonia_operation = industry_costs.ammonia_operation,
+        industry_refinery_shedding = industry_costs.refinery_shedding,
     )
 end
 

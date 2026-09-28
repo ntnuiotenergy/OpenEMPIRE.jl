@@ -1,0 +1,5 @@
+Parameter,Value,Unit,Source
+ramp_fraction_per_hour,0.1,fraction/hour,empire.py hard-coded
+maximum_scrap_share,0.45,fraction,empire.py hard-coded
+hours_per_year,8760.0,hour/year,empire.py hard-coded
+oil_shed_cost,1000000.0,EUR/kbbl,empire.py hard-coded

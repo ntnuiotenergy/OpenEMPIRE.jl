@@ -67,11 +67,38 @@ struct RawScenarioTable
 end
 
 regular_scenario_seasons(config) = Tuple(String.(get(config, "regular_seasons", collect(REGULAR_SCENARIO_SEASONS))))
+
+function _positive_config_int(config, key::AbstractString, default::Int)::Int
+    value = get(config, key, default)
+    parsed = value isa Integer ? Int(value) : try
+        parse(Int, strip(string(value)))
+    catch
+        throw(ArgumentError("$key must be a positive integer; got $(repr(value))"))
+    end
+    parsed > 0 || throw(ArgumentError("$key must be a positive integer; got $parsed"))
+    return parsed
+end
+
+natural_gas_enabled(config)::Bool = _config_bool(config, "natural_gas", false)
+hydrogen_enabled(config)::Bool = _config_bool(config, "hydrogen", false)
+industry_enabled(config)::Bool = _config_bool(config, "industry", false)
+weather_scenario_count(config)::Int =
+    _positive_config_int(config, "number_of_scenarios", 1)
+gas_scenario_count(config)::Int =
+    natural_gas_enabled(config) ?
+    _positive_config_int(config, "number_of_gas_scenarios", 1) : 1
+combined_scenario_count(config)::Int =
+    Base.checked_mul(weather_scenario_count(config), gas_scenario_count(config))
+weather_scenario_index(combined::Integer, gas_count::Integer) =
+    fld(Int(combined) - 1, Int(gas_count)) + 1
+gas_scenario_index(combined::Integer, gas_count::Integer) =
+    mod(Int(combined) - 1, Int(gas_count)) + 1
 scenario_peak_count(config) = Int(get(config, "n_peak_seasons", 2))
 scenario_peak_hours(config) = Int(get(config, "len_peak_season", 24))
 
 # Bug-for-bug compatibility with InternalEMPIRE's Pyomo Param(default=1.0) for
-# absent seasonal-hydro samples. Remove when the reference uses explicit input.
+# missing seasonal-hydro samples. Remove this key and compatibility path when the
+# reference replaces that silent default with explicit scenario input.
 const INTERNALEMPIRE_MISSING_HYDRO_RAW_DEFAULT_KEY =
     "internalempire_missing_hydro_raw_default_mw"
 
@@ -174,6 +201,23 @@ function _python_dateformat(time_format::AbstractString)
     return DateFormat(julia_format)
 end
 
+"""
+Months belonging to each regular season.
+
+These match `season_month` in `OpenEMPIRE-csv/empire/core/scenario_utils.py:21-29`,
+which is the implementation this port targets.
+
+InternalEMPIRE used to disagree here -- winter (1, 2, 12), spring (3, 4, 5), summer
+(6, 7, 8), fall (9, 10, 11), wrapping winter around the turn of the year -- so the
+two could not be driven from a shared sampling key and be expected to draw the same
+weather. That divergence was **resolved upstream** in InternalEMPIRE commit
+`219034c` ("Update sampling frame to match OpenEMPIRE", 2026-08-03), which adopted
+exactly the split below. All three implementations now agree.
+
+The old difference was easy to miss in testing because both implementations preserve
+chronological order when filtering, so the two winter pools were identical for their
+first 1,416 rows (January plus February) and diverged only beyond that.
+"""
 function _season_months(season::AbstractString)
     season == "winter" && return (1, 2, 3)
     season == "spring" && return (4, 5, 6)
@@ -1301,6 +1345,8 @@ function generate_scenario_csv!(data_folder, periods, params::EmpireParams, sets
     filter_make = get(config, "filter_make", false)
     filter_use = get(config, "filter_use", false)
     n_cluster = Int(get(config, "n_cluster", 10))
+    weather_scenarios = weather_scenario_count(config)
+    gas_scenarios = gas_scenario_count(config)
 
     load_table = _read_raw_scenario_table(_required_scenario_csv(data_folder, "electricload.csv"), dateformat)
     hydro_table = _read_raw_scenario_table(_required_scenario_csv(data_folder, "hydroseasonal.csv"), dateformat)
@@ -1377,11 +1423,21 @@ function generate_scenario_csv!(data_folder, periods, params::EmpireParams, sets
 
     for (strategic_index, strategic_period) in enumerate(strat_periods(periods))
         representative_periods = collect(repr_periods(strategic_period))
-        for (scenario_index, _) in enumerate(opscenarios(first(representative_periods)))
+        operational_scenario_count = length(opscenarios(first(representative_periods)))
+        operational_scenario_count == Base.checked_mul(weather_scenarios, gas_scenarios) ||
+            throw(ArgumentError(
+                "Time structure has $operational_scenario_count operational scenarios, " *
+                "but configuration requires $weather_scenarios weather × " *
+                "$gas_scenarios gas scenarios",
+            ))
+        for weather_scenario in 1:weather_scenarios
+            combined_scenarios =
+                ((weather_scenario - 1) * gas_scenarios + 1):(weather_scenario * gas_scenarios)
             for (season_index, season) in enumerate(regular_seasons)
                 season_index > length(representative_periods) && break
                 if fixed_sample
-                    year, sample_hour = _get_fixed_sample(sample_key, strategic_index, scenario_index, season)
+                    year, sample_hour =
+                        _get_fixed_sample(sample_key, strategic_index, weather_scenario, season)
                 elseif filter_groups !== nothing
                     filter_cluster = filter_cluster == n_cluster - 1 ? 0 : filter_cluster + 1
                     year, sample_hour = _sample_filter_candidate(
@@ -1399,62 +1455,71 @@ function generate_scenario_csv!(data_folder, periods, params::EmpireParams, sets
                 hydro_indices = _sample_regular_indices(hydro_table, year, season, sample_hour, regular_hours)
                 !fixed_sample && push!(sampling_rows, (
                     Period = strategic_index,
-                    Scenario = scenario_index,
+                    Scenario = weather_scenario,
                     Season = String(season),
                     Year = year,
                     Month = _sample_month(load_table, load_indices),
                     Hour = sample_hour,
                 ))
                 first_operational_hour = (season_index - 1) * regular_hours + 1
-                _fill_load_values!(
-                    load_profiles,
-                    load_rows,
-                    load_table,
-                    load_columns,
-                    load_indices,
-                    strategic_index,
-                    season_index,
-                    scenario_index,
-                    first_operational_hour,
-                )
-                _fill_hydro_values!(
-                    hydro_profiles,
-                    hydro_rows,
-                    hydro_table,
-                    hydro_columns,
-                    hydro_indices,
-                    strategic_index,
-                    season_index,
-                    scenario_index,
-                    season,
-                    first_operational_hour,
-                )
-                for (generator, table) in generator_sources
-                    indices = _sample_regular_indices(table, year, season, sample_hour, regular_hours)
-                    _fill_generator_values!(
-                        gen_profiles,
-                        generator_rows,
-                        table,
-                        generator_columns[generator],
-                        indices,
+                for combined_scenario in combined_scenarios
+                    _fill_load_values!(
+                        load_profiles,
+                        load_rows,
+                        load_table,
+                        load_columns,
+                        load_indices,
                         strategic_index,
                         season_index,
-                        scenario_index,
+                        combined_scenario,
                         first_operational_hour,
                     )
+                    _fill_hydro_values!(
+                        hydro_profiles,
+                        hydro_rows,
+                        hydro_table,
+                        hydro_columns,
+                        hydro_indices,
+                        strategic_index,
+                        season_index,
+                        combined_scenario,
+                        season,
+                        first_operational_hour,
+                    )
+                    for (generator, table) in generator_sources
+                        indices = _sample_regular_indices(
+                            table,
+                            year,
+                            season,
+                            sample_hour,
+                            regular_hours,
+                        )
+                        _fill_generator_values!(
+                            gen_profiles,
+                            generator_rows,
+                            table,
+                            generator_columns[generator],
+                            indices,
+                            strategic_index,
+                            season_index,
+                            combined_scenario,
+                            first_operational_hour,
+                        )
+                    end
                 end
             end
 
             peak_start = length(regular_seasons) + 1
             if peak_count > 0 && peak_start <= length(representative_periods)
                 if fixed_sample
-                    peak_year, _ = _get_fixed_sample(sample_key, strategic_index, scenario_index, "peak")
+                    peak_year, _ =
+                        _get_fixed_sample(sample_key, strategic_index, weather_scenario, "peak")
                 else
                     peak_year = rand(rng, sample_years)
                 end
                 !fixed_sample && push!(sampling_rows, (
                     Period = strategic_index,
-                    Scenario = scenario_index,
+                    Scenario = weather_scenario,
                     Season = "peak",
                     Year = peak_year,
                     Month = 0,
@@ -1471,42 +1536,45 @@ function generate_scenario_csv!(data_folder, periods, params::EmpireParams, sets
                     first_operational_hour = length(regular_seasons) * regular_hours + peak_offset * peak_hours + 1
                     load_indices = _sample_peak_indices(load_table, peak_year, center, peak_hours)
                     hydro_indices = _sample_peak_indices(hydro_table, peak_year, center, peak_hours)
-                    _fill_load_values!(
-                        load_profiles,
-                        load_rows,
-                        load_table,
-                        load_columns,
-                        load_indices,
-                        strategic_index,
-                        representative_index,
-                        scenario_index,
-                        first_operational_hour,
-                    )
-                    _fill_hydro_values!(
-                        hydro_profiles,
-                        hydro_rows,
-                        hydro_table,
-                        hydro_columns,
-                        hydro_indices,
-                        strategic_index,
-                        representative_index,
-                        scenario_index,
-                        season,
-                        first_operational_hour,
-                    )
-                    for (generator, table) in generator_sources
-                        indices = _sample_peak_indices(table, peak_year, center, peak_hours)
-                        _fill_generator_values!(
-                            gen_profiles,
-                            generator_rows,
-                            table,
-                            generator_columns[generator],
-                            indices,
+                    for combined_scenario in combined_scenarios
+                        _fill_load_values!(
+                            load_profiles,
+                            load_rows,
+                            load_table,
+                            load_columns,
+                            load_indices,
                             strategic_index,
                             representative_index,
-                            scenario_index,
+                            combined_scenario,
                             first_operational_hour,
                         )
+                        _fill_hydro_values!(
+                            hydro_profiles,
+                            hydro_rows,
+                            hydro_table,
+                            hydro_columns,
+                            hydro_indices,
+                            strategic_index,
+                            representative_index,
+                            combined_scenario,
+                            season,
+                            first_operational_hour,
+                        )
+                        for (generator, table) in generator_sources
+                            indices =
+                                _sample_peak_indices(table, peak_year, center, peak_hours)
+                            _fill_generator_values!(
+                                gen_profiles,
+                                generator_rows,
+                                table,
+                                generator_columns[generator],
+                                indices,
+                                strategic_index,
+                                representative_index,
+                                combined_scenario,
+                                first_operational_hour,
+                            )
+                        end
                     end
                 end
             end
@@ -1641,7 +1709,7 @@ function read_generated_scenario_csv!(
     params::EmpireParams,
     sets,
     season_for_hour::Dict{Int, Int},
-    config = Dict{String, Any}(),
+    config,
 )
     sload_file, hydro_file, availability_file = _generated_scenario_csv_files(data_folder)
 
