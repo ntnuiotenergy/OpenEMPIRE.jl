@@ -14,8 +14,6 @@
 # same values are patched into the InternalEMPIRE tab file, so both sides price
 # gas identically.
 
-use_temporary_directory: True                          # Specifies whether to use a temporary directory for operations
-temporary_directory: './'                              # Path to the temporary directory used for certain operations
 forecast_horizon_year: 2055                             # 2020 + 7 periods x 5 years (the dataset ships 7)
 number_of_scenarios: 5                                 # Number of scenarios in every investment period
 natural_gas: False                                     # Enable the natural-gas operational module
@@ -33,13 +31,7 @@ copula_clusters_make: False                            # Make copula clusters (f
 copula_clusters_use: False                             # Copula-based scenario generation (strata/filter approach)
 copulas_to_use: ["electricload"]                       # Emprical copula construction of ["electricload", "hydroror", "hydroseasonal", "solar", "windoffshore", "windonshore"]
 n_cluster : 10                                         #
-moment_matching : False                                #
-n_tree_compare : 20                                    # Number of trees to compare for moment matching and copula-sampling
 use_emission_cap: True                                 # Indicates if there's a cap on CO2 emissions
-compute_operational_duals: False                       # Resolve empire with fixed investment variables and write new duals
-print_in_iamc_format: False                            # Output should be printed in a IAMC-compatible format
-write_in_lp_format: False                              # Problem should be written in Linear Programming format
-serialize_instance: False                              # Serialize the data structure or model for later use
 # Offshore: no module flag. The offshore wind-farm transmission cap is on by
 # default (offshore_transmission_cap), matching InternalEMPIRE, which has no
 # north-sea module and always caps wind-farm corridors.

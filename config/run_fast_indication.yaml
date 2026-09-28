@@ -1,7 +1,5 @@
 # Reduced europe_v51 config for a FAST indication of the transmission-cap patch.
 # Keeps all 49 nodes but shrinks scenarios/horizon/hours ~37x for quick turnaround.
-use_temporary_directory: True
-temporary_directory: './'
 forecast_horizon_year: 2030                             # 2 strategic periods (vs 5)
 number_of_scenarios: 1                                  # 1 scenario (vs 3)
 length_of_regular_season: 24                            # 24 h per season (vs 168)
@@ -17,13 +15,7 @@ copula_clusters_make: False
 copula_clusters_use: False
 copulas_to_use: ["electricload"]
 n_cluster : 10
-moment_matching : False
-n_tree_compare : 20
 use_emission_cap: True
-compute_operational_duals: False
-print_in_iamc_format: False
-write_in_lp_format: False
-serialize_instance: False
 offshore_transmission_cap: False                       # Off to match this config's Python baseline run
 leap_years_investment: 5
 time_format: "%d/%m/%Y %H:%M"
