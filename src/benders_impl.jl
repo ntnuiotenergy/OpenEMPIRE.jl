@@ -779,17 +779,6 @@ function create_benders_graph(sets, par, periods, discounter)
     subproblem_nodes = Dict() #Save nodes so that function can return them 
 
     for sp in SP
-        println("\n=== Inspecting sp ===")
-        println("typeof(sp) = ", typeof(sp))
-        println("first(sp) = ", first(sp))
-
-        prev_pairs = collect(withprev(sp))
-
-        println("First 5 withprev pairs:")
-        for pair in prev_pairs[1:min(5, length(prev_pairs))]
-            println("  ", pair)
-        end
-
         sp_graph = OptiGraph()
         node = add_node(sp_graph)
         set_name(node, :subproblem)
