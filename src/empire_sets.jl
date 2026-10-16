@@ -10,6 +10,203 @@ const NodeGen = Tuple{NodeId, GenId}
 const NodeStor = Tuple{NodeId, StorId}
 const NodeTech = Tuple{NodeId, TechId}
 const TechGen = Tuple{TechId, GenId}
+const NaturalGasTerminalNode = Tuple{NodeId, String}
+const HydrogenTerminalNode = Tuple{NodeId, String}
+
+"""Typed Industry sets, including the technology subset active for this run."""
+struct IndustrySets
+    SteelProducer::Vector{NodeId}
+    CementProducer::Vector{NodeId}
+    AmmoniaProducer::Vector{NodeId}
+    OilProducer::Vector{NodeId}
+    SteelPlant::Vector{String}
+    CementPlant::Vector{String}
+    AmmoniaPlant::Vector{String}
+    ActiveSteelPlant::Vector{String}
+    ActiveCementPlant::Vector{String}
+    ActiveAmmoniaPlant::Vector{String}
+    FinalSteelPlant::Set{String}
+    InactivePathways::Dict{String, String}
+    RefineryActive::Bool
+end
+
+function IndustrySets(
+    ;
+    SteelProducer::AbstractVector{<:AbstractString} = String[],
+    CementProducer::AbstractVector{<:AbstractString} = String[],
+    AmmoniaProducer::AbstractVector{<:AbstractString} = String[],
+    OilProducer::AbstractVector{<:AbstractString} = String[],
+    SteelPlant::AbstractVector{<:AbstractString} = String[],
+    CementPlant::AbstractVector{<:AbstractString} = String[],
+    AmmoniaPlant::AbstractVector{<:AbstractString} = String[],
+    hydrogen::Bool = false,
+)
+    steel = String.(SteelPlant)
+    cement = String.(CementPlant)
+    ammonia = String.(AmmoniaPlant)
+    inactive = Dict{String, String}()
+    if !hydrogen
+        for plant in ("H2-DRI", "BF-BOF-CCS", "H2-Cement", "NG-CCS-Cement", "H2-Ammonia")
+            inactive[plant] = "requires the Hydrogen/CO2 module"
+        end
+        inactive["OilRefinery"] = "requires Hydrogen; Heat demand is deferred"
+    end
+    active_steel = [plant for plant in steel if !haskey(inactive, plant)]
+    active_cement = [plant for plant in cement if !haskey(inactive, plant)]
+    active_ammonia = [plant for plant in ammonia if !haskey(inactive, plant)]
+    final_steel = Set(
+        plant for plant in active_steel
+        if occursin("eaf", lowercase(plant)) || occursin("bof", lowercase(plant))
+    )
+    return IndustrySets(
+        String.(SteelProducer), String.(CementProducer), String.(AmmoniaProducer),
+        String.(OilProducer), steel, cement, ammonia, active_steel, active_cement,
+        active_ammonia, final_steel, inactive, hydrogen,
+    )
+end
+
+"""
+    NaturalGasSets
+
+Natural-gas index sets and precomputed adjacency lookups. An empty instance
+represents a disabled natural-gas module without introducing abstract fields.
+"""
+struct NaturalGasSets
+    Node::Vector{NodeId}
+    DirectionalLink::Vector{Arc}
+    Terminal::Vector{String}
+    TerminalsOfNode::Vector{NaturalGasTerminalNode}
+    OnshoreNode::Set{NodeId}
+    Generator::Set{GenId}
+    Incoming::Dict{NodeId, Vector{NodeId}}
+    Outgoing::Dict{NodeId, Vector{NodeId}}
+    TerminalsByNode::Dict{NodeId, Vector{String}}
+end
+
+"""
+    HydrogenSets
+
+Hydrogen and CO₂ index sets plus sparse network lookups. An empty instance
+represents a disabled module and keeps the electricity-only data model unchanged.
+"""
+struct HydrogenSets
+    ProductionNode::Vector{NodeId}
+    Generator::Set{GenId}
+    ReformerLocation::Vector{NodeId}
+    ReformerPlant::Vector{String}
+    Storage::Vector{String}
+    StoragesOfNode::Vector{Tuple{NodeId, String}}
+    TerminalNode::Vector{NodeId}
+    Terminal::Vector{String}
+    TerminalsOfNode::Vector{HydrogenTerminalNode}
+    CO2SequestrationNode::Vector{NodeId}
+    DirectionalLink::Vector{Arc}
+    Corridor::Vector{Arc}
+    CO2DirectionalLink::Vector{Arc}
+    RepurposableGasCorridor::Vector{Arc}
+    Incoming::Dict{NodeId, Vector{NodeId}}
+    Outgoing::Dict{NodeId, Vector{NodeId}}
+    TerminalsByNode::Dict{NodeId, Vector{String}}
+end
+
+function HydrogenSets(
+    ;
+    ProductionNode::AbstractVector{<:AbstractString} = String[],
+    Generator::Union{AbstractVector{<:AbstractString}, AbstractSet{<:AbstractString}} = String[],
+    ReformerLocation::AbstractVector{<:AbstractString} = String[],
+    ReformerPlant::AbstractVector{<:AbstractString} = String[],
+    Storage::AbstractVector{<:AbstractString} = String[],
+    StoragesOfNode::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString}} =
+        Tuple{String, String}[],
+    TerminalNode::AbstractVector{<:AbstractString} = String[],
+    Terminal::AbstractVector{<:AbstractString} = String[],
+    TerminalsOfNode::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString}} =
+        Tuple{String, String}[],
+    CO2SequestrationNode::AbstractVector{<:AbstractString} = String[],
+    DirectionalLink::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString}} =
+        Tuple{String, String}[],
+    CO2DirectionalLink::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString}} =
+        Tuple{String, String}[],
+    RepurposableGasCorridor::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString}} =
+        Tuple{String, String}[],
+)
+    links = Arc[(String(from), String(to)) for (from, to) in DirectionalLink]
+    corridors = unique(Arc[minmax(from, to) for (from, to) in links])
+    incoming = Dict{NodeId, Vector{NodeId}}()
+    outgoing = Dict{NodeId, Vector{NodeId}}()
+    for (from, to) in links
+        push!(get!(outgoing, from, NodeId[]), to)
+        push!(get!(incoming, to, NodeId[]), from)
+    end
+    terminal_pairs = HydrogenTerminalNode[
+        (String(node), String(terminal)) for (node, terminal) in TerminalsOfNode
+    ]
+    terminals_by_node = Dict{NodeId, Vector{String}}()
+    for (node, terminal) in terminal_pairs
+        push!(get!(terminals_by_node, node, String[]), terminal)
+    end
+    return HydrogenSets(
+        String.(ProductionNode),
+        Set(String.(collect(Generator))),
+        String.(ReformerLocation),
+        String.(ReformerPlant),
+        String.(Storage),
+        Tuple{NodeId, String}[(String(node), String(storage)) for (node, storage) in StoragesOfNode],
+        String.(TerminalNode),
+        String.(Terminal),
+        terminal_pairs,
+        String.(CO2SequestrationNode),
+        links,
+        corridors,
+        Arc[(String(from), String(to)) for (from, to) in CO2DirectionalLink],
+        unique(Arc[(String(from), String(to)) for (from, to) in RepurposableGasCorridor]),
+        incoming,
+        outgoing,
+        terminals_by_node,
+    )
+end
+
+function NaturalGasSets(
+    ;
+    Node::AbstractVector{<:AbstractString} = String[],
+    DirectionalLink::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString}} =
+        Tuple{String, String}[],
+    Terminal::AbstractVector{<:AbstractString} = String[],
+    TerminalsOfNode::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString}} =
+        Tuple{String, String}[],
+    OnshoreNode::Union{AbstractVector{<:AbstractString}, AbstractSet{<:AbstractString}} =
+        String[],
+    Generator::Union{AbstractVector{<:AbstractString}, AbstractSet{<:AbstractString}} =
+        String[],
+)
+    nodes = String.(Node)
+    links = Arc[(String(from), String(to)) for (from, to) in DirectionalLink]
+    terminals = String.(Terminal)
+    terminal_nodes =
+        NaturalGasTerminalNode[(String(node), String(terminal)) for
+                               (node, terminal) in TerminalsOfNode]
+    incoming = Dict{NodeId, Vector{NodeId}}()
+    outgoing = Dict{NodeId, Vector{NodeId}}()
+    for (from, to) in links
+        push!(get!(outgoing, from, NodeId[]), to)
+        push!(get!(incoming, to, NodeId[]), from)
+    end
+    terminals_by_node = Dict{NodeId, Vector{String}}()
+    for (node, terminal) in terminal_nodes
+        push!(get!(terminals_by_node, node, String[]), terminal)
+    end
+    return NaturalGasSets(
+        nodes,
+        links,
+        terminals,
+        terminal_nodes,
+        Set(String.(collect(OnshoreNode))),
+        Set(String.(collect(Generator))),
+        incoming,
+        outgoing,
+        terminals_by_node,
+    )
+end
 
 """
     EmpireSets
@@ -124,6 +321,9 @@ struct EmpireSets
     TechsByNode::Dict{NodeId, Vector{TechId}}
     GeneratorsByNodeTech::Dict{NodeTech, Vector{GenId}}
     Corridors::Vector{Arc}
+    NaturalGas::NaturalGasSets
+    Hydrogen::HydrogenSets
+    Industry::IndustrySets
 end
 
 function EmpireSets(
@@ -143,6 +343,9 @@ function EmpireSets(
     GeneratorsOfTechnology::Vector{TechGen},
     GeneratorsOfNode::Vector{NodeGen},
     StoragesOfNode::Vector{NodeStor};
+    NaturalGas::NaturalGasSets = NaturalGasSets(),
+    Hydrogen::HydrogenSets = HydrogenSets(),
+    Industry::IndustrySets = IndustrySets(),
     validate::Bool = true,
 )
     generators_by_node = Dict{NodeId, Vector{GenId}}()
@@ -201,6 +404,9 @@ function EmpireSets(
         techs_by_node_vec,
         generators_by_node_tech_vec,
         corridors,
+        NaturalGas,
+        Hydrogen,
+        Industry,
     )
 
     validate && validate!(sets)
@@ -226,6 +432,9 @@ function EmpireSets(
     GeneratorsOfTechnology::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString}} = Tuple{String, String}[],
     GeneratorsOfNode::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString}} = Tuple{String, String}[],
     StoragesOfNode::AbstractVector{<:Tuple{<:AbstractString, <:AbstractString}} = Tuple{String, String}[],
+    NaturalGas::NaturalGasSets = NaturalGasSets(),
+    Hydrogen::HydrogenSets = HydrogenSets(),
+    Industry::IndustrySets = IndustrySets(),
     validate::Bool = true,
 )
     return EmpireSets(
@@ -245,6 +454,9 @@ function EmpireSets(
         TechGen[(String(t), String(g)) for (t, g) in GeneratorsOfTechnology],
         NodeGen[(String(n), String(g)) for (n, g) in GeneratorsOfNode],
         NodeStor[(String(n), String(s)) for (n, s) in StoragesOfNode];
+        NaturalGas,
+        Hydrogen,
+        Industry,
         validate = validate,
     )
 end
@@ -275,6 +487,26 @@ storages(sets::EmpireSets, n) = get(sets.StoragesByNode, n, StorId[])
 node_storages(sets::EmpireSets) = sets.StoragesOfNode
 techs(sets::EmpireSets, n) = get(sets.TechsByNode, n, TechId[])
 generators_tech(sets::EmpireSets, n, t) = get(sets.GeneratorsByNodeTech, (n, t), GenId[])
+natural_gas_sets(sets::EmpireSets) = sets.NaturalGas
+natural_gas_nodes(sets::EmpireSets) = sets.NaturalGas.Node
+natural_gas_links(sets::EmpireSets) = sets.NaturalGas.DirectionalLink
+natural_gas_terminals(sets::EmpireSets) = sets.NaturalGas.Terminal
+natural_gas_terminal_nodes(sets::EmpireSets) = sets.NaturalGas.TerminalsOfNode
+natural_gas_onshore_nodes(sets::EmpireSets) = sets.NaturalGas.OnshoreNode
+natural_gas_generators(sets::EmpireSets) = sets.NaturalGas.Generator
+natural_gas_incoming(sets::EmpireSets, node) =
+    get(sets.NaturalGas.Incoming, node, NodeId[])
+natural_gas_outgoing(sets::EmpireSets, node) =
+    get(sets.NaturalGas.Outgoing, node, NodeId[])
+natural_gas_terminals(sets::EmpireSets, node) =
+    get(sets.NaturalGas.TerminalsByNode, node, String[])
+has_natural_gas(sets::EmpireSets) = !isempty(natural_gas_nodes(sets))
+hydrogen_sets(sets::EmpireSets) = sets.Hydrogen
+hydrogen_nodes(sets::EmpireSets) = sets.Hydrogen.ProductionNode
+hydrogen_generators(sets::EmpireSets) = sets.Hydrogen.Generator
+has_hydrogen(sets::EmpireSets) = !isempty(hydrogen_nodes(sets))
+industry_sets(sets::EmpireSets) = sets.Industry
+has_industry(sets::EmpireSets) = !isempty(sets.Industry.SteelProducer)
 
 function _check_unique(name::AbstractString, items)
     seen = Set{eltype(items)}()
@@ -385,6 +617,150 @@ function validate!(sets::EmpireSets)
     _check_unique("GeneratorsOfTechnology", sets.GeneratorsOfTechnology)
     _check_unique("DirectionalLink", arcs(sets))
     _check_unique("TransmissionTypeOfDirectionalLink", sets.TransmissionTypeOfDirectionalLink)
+
+    gas = natural_gas_sets(sets)
+    _check_unique("NaturalGas.Node", gas.Node)
+    _check_unique("NaturalGas.DirectionalLink", gas.DirectionalLink)
+    _check_unique("NaturalGas.Terminal", gas.Terminal)
+    _check_unique("NaturalGas.TerminalsOfNode", gas.TerminalsOfNode)
+    _check_no_empty("NaturalGas.Node", gas.Node)
+    _check_no_empty("NaturalGas.Terminal", gas.Terminal)
+    isempty(setdiff(Set(gas.Node), node_set)) ||
+        throw(ArgumentError("All natural-gas nodes must exist in Node"))
+    isempty(setdiff(gas.OnshoreNode, node_set)) ||
+        throw(ArgumentError("All natural-gas onshore nodes must exist in Node"))
+    isempty(setdiff(gas.Generator, gen_set)) ||
+        throw(ArgumentError("All natural-gas generators must exist in Generator"))
+    gas_node_set = Set(gas.Node)
+    gas_terminal_set = Set(gas.Terminal)
+    for (from, to) in gas.DirectionalLink
+        from in gas_node_set ||
+            throw(ArgumentError("Unknown from-node in NaturalGas.DirectionalLink: $from"))
+        to in gas_node_set ||
+            throw(ArgumentError("Unknown to-node in NaturalGas.DirectionalLink: $to"))
+        from == to &&
+            throw(ArgumentError("Self-loop in NaturalGas.DirectionalLink: ($from, $to)"))
+    end
+    for (node, terminal) in gas.TerminalsOfNode
+        node in gas_node_set ||
+            throw(ArgumentError("Unknown node in NaturalGas.TerminalsOfNode: $node"))
+        terminal in gas_terminal_set ||
+            throw(ArgumentError("Unknown terminal in NaturalGas.TerminalsOfNode: $terminal"))
+    end
+    for (node, generator) in node_generators(sets)
+        generator in gas.Generator || continue
+        node in gas_node_set || throw(ArgumentError(
+            "Natural-gas generator $generator is assigned to non-gas node $node",
+        ))
+    end
+
+    hydrogen = hydrogen_sets(sets)
+    for (name, values) in (
+        ("Hydrogen.ProductionNode", hydrogen.ProductionNode),
+        ("Hydrogen.ReformerLocation", hydrogen.ReformerLocation),
+        ("Hydrogen.ReformerPlant", hydrogen.ReformerPlant),
+        ("Hydrogen.Storage", hydrogen.Storage),
+        ("Hydrogen.StoragesOfNode", hydrogen.StoragesOfNode),
+        ("Hydrogen.TerminalNode", hydrogen.TerminalNode),
+        ("Hydrogen.Terminal", hydrogen.Terminal),
+        ("Hydrogen.TerminalsOfNode", hydrogen.TerminalsOfNode),
+        ("Hydrogen.CO2SequestrationNode", hydrogen.CO2SequestrationNode),
+        ("Hydrogen.DirectionalLink", hydrogen.DirectionalLink),
+        ("Hydrogen.CO2DirectionalLink", hydrogen.CO2DirectionalLink),
+        ("Hydrogen.RepurposableGasCorridor", hydrogen.RepurposableGasCorridor),
+    )
+        _check_unique(name, values)
+    end
+    isempty(setdiff(Set(hydrogen.ProductionNode), node_set)) ||
+        throw(ArgumentError("All Hydrogen production nodes must exist in Node"))
+    isempty(setdiff(Set(hydrogen.ReformerLocation), node_set)) ||
+        throw(ArgumentError("All Hydrogen reformer locations must exist in Node"))
+    isempty(setdiff(Set(hydrogen.TerminalNode), node_set)) ||
+        throw(ArgumentError("All Hydrogen terminal nodes must exist in Node"))
+    isempty(setdiff(Set(hydrogen.CO2SequestrationNode), node_set)) ||
+        throw(ArgumentError("All CO2 sequestration nodes must exist in Node"))
+    isempty(setdiff(hydrogen.Generator, gen_set)) ||
+        throw(ArgumentError("All Hydrogen generators must exist in Generator"))
+    hydrogen_node_set = Set(hydrogen.ProductionNode)
+    for (from, to) in hydrogen.DirectionalLink
+        from in hydrogen_node_set && to in hydrogen_node_set ||
+            throw(ArgumentError("Hydrogen link ($from, $to) references a non-production node"))
+        from == to && throw(ArgumentError("Self-loop in Hydrogen.DirectionalLink: ($from, $to)"))
+    end
+    terminal_node_set = Set(hydrogen.TerminalNode)
+    terminal_set = Set(hydrogen.Terminal)
+    for (node, terminal) in hydrogen.TerminalsOfNode
+        node in terminal_node_set ||
+            throw(ArgumentError("Unknown node in Hydrogen.TerminalsOfNode: $node"))
+        terminal in terminal_set ||
+            throw(ArgumentError("Unknown terminal in Hydrogen.TerminalsOfNode: $terminal"))
+    end
+    hydrogen_storage_set = Set(hydrogen.Storage)
+    for (node, storage) in hydrogen.StoragesOfNode
+        node in hydrogen_node_set ||
+            throw(ArgumentError("Unknown node in Hydrogen.StoragesOfNode: $node"))
+        storage in hydrogen_storage_set ||
+            throw(ArgumentError("Unknown storage in Hydrogen.StoragesOfNode: $storage"))
+    end
+    if !isempty(hydrogen.ProductionNode)
+        isempty(setdiff(gas.OnshoreNode, hydrogen_node_set)) || throw(ArgumentError(
+            "All natural-gas onshore nodes must be Hydrogen production nodes when Hydrogen is enabled",
+        ))
+        isempty(setdiff(Set(hydrogen.ReformerLocation), gas_node_set)) ||
+            throw(ArgumentError("All Hydrogen reformer locations must be natural-gas nodes"))
+        isempty(setdiff(Set(hydrogen.CO2SequestrationNode), gas.OnshoreNode)) ||
+            throw(ArgumentError("All CO2 sequestration nodes must be onshore nodes"))
+        isempty(setdiff(Set(hydrogen.TerminalNode), hydrogen_node_set)) ||
+            throw(ArgumentError("All Hydrogen terminal nodes must be production nodes"))
+    end
+
+    industry = industry_sets(sets)
+    for (name, values) in (
+        ("Industry.SteelProducer", industry.SteelProducer),
+        ("Industry.CementProducer", industry.CementProducer),
+        ("Industry.AmmoniaProducer", industry.AmmoniaProducer),
+        ("Industry.OilProducer", industry.OilProducer),
+        ("Industry.SteelPlant", industry.SteelPlant),
+        ("Industry.CementPlant", industry.CementPlant),
+        ("Industry.AmmoniaPlant", industry.AmmoniaPlant),
+    )
+        _check_unique(name, values)
+        _check_no_empty(name, values)
+    end
+    for (name, producers) in (
+        ("steel", industry.SteelProducer),
+        ("cement", industry.CementProducer),
+        ("ammonia", industry.AmmoniaProducer),
+        ("oil", industry.OilProducer),
+    )
+        isempty(setdiff(Set(producers), node_set)) || throw(ArgumentError(
+            "All $name producer nodes must exist in Node",
+        ))
+    end
+    isempty(setdiff(Set(industry.ActiveSteelPlant), Set(industry.SteelPlant))) ||
+        throw(ArgumentError("Active steel plants must exist in Industry.SteelPlant"))
+    isempty(setdiff(Set(industry.ActiveCementPlant), Set(industry.CementPlant))) ||
+        throw(ArgumentError("Active cement plants must exist in Industry.CementPlant"))
+    isempty(setdiff(Set(industry.ActiveAmmoniaPlant), Set(industry.AmmoniaPlant))) ||
+        throw(ArgumentError("Active ammonia plants must exist in Industry.AmmoniaPlant"))
+    isempty(setdiff(industry.FinalSteelPlant, Set(industry.ActiveSteelPlant))) ||
+        throw(ArgumentError("Final steel plants must be active Industry steel plants"))
+    industry_producers = Set(vcat(
+        industry.SteelProducer,
+        industry.CementProducer,
+        industry.AmmoniaProducer,
+        industry.OilProducer,
+    ))
+    if !isempty(industry_producers)
+        isempty(setdiff(industry_producers, gas_node_set)) || throw(ArgumentError(
+            "All Industry producer nodes must be natural-gas nodes",
+        ))
+        if industry.RefineryActive
+            isempty(setdiff(industry_producers, hydrogen_node_set)) || throw(ArgumentError(
+                "All active Hydrogen-dependent Industry producer nodes must be Hydrogen nodes",
+            ))
+        end
+    end
 
     # Every generator belongs to at least one technology
     let gen_tech_counts = Dict{GenId, Int}()

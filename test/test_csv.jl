@@ -42,6 +42,7 @@ function _write_toy_csv_dataset(root)
     _write_csv(joinpath(dataset, "Generator", "genInitCap.csv"), "Node,Generator,Period,Value\nA,gas,1,1\nA,wind,1,2\n")
     _write_csv(joinpath(dataset, "Generator", "genMaxBuiltCap.csv"), "Node,Technology,Period,Value\nA,thermal,1,1000\nA,renewable,1,1000\n")
     _write_csv(joinpath(dataset, "Generator", "genMaxInstalledCapRaw.csv"), "Node,Technology,Value\nA,thermal,1000\nA,renewable,1000\n")
+    _write_csv(joinpath(dataset, "Generator", "MaxInstalledCapacityByPeriod.csv"), "Node,Technology,Period,Value\nA,renewable,1,50\n")
     _write_csv(joinpath(dataset, "Generator", "genRampUpCap.csv"), "Generator,Value\ngas,1\nwind,1\n")
     _write_csv(joinpath(dataset, "Generator", "genCapAvailTypeRaw.csv"), "Generator,Value\ngas,1\nwind,1\n")
     _write_csv(joinpath(dataset, "Generator", "genCO2TypeFactor.csv"), "Generator,Value\ngas,0.2\nwind,0\n")
@@ -102,6 +103,8 @@ function test_read_csv_dataset()
         @test params.genRefInitCap[("A", "wind")] == 2.0
         @test params.genCapAvailType["wind"] == 1.0
         @test params.genCO2Content["gas"] == 0.2
+        period_profile = params.genMaxInstalledCapByPeriod[("A", "renewable")]
+        @test only(period_profile.vals).val == 50.0
         @test params.transmissionLength[("A", "B")] == 10.0
         @test params.storageChargeEff["battery"] == 0.9
         @test params.maxHydroNode["A"] == 0.0
@@ -113,6 +116,32 @@ function test_read_csv_dataset()
         sets3, _ = OpenEMPIRE.read_data(csv_dataset)
         @test OpenEMPIRE.generators(sets3) == ["gas", "wind"]
     end
+end
+
+function test_internalempire_generator_max_installed_cap_by_period()
+    periods = OpenEMPIRE.create_timestruct(
+        2, 5, 1, 1, 0, 0, 1; operational_hours_per_year = 1,
+    )
+    sets = OpenEMPIRE.EmpireSets(
+        Node = ["A"],
+        Generator = ["wind"],
+        Technology = ["renewable"],
+        GeneratorsOfTechnology = [("renewable", "wind")],
+        GeneratorsOfNode = [("A", "wind")],
+    )
+    params = OpenEMPIRE.EmpireParams(
+        genInitCap = Dict(("A", "wind") => StrategicProfile([10.0, 10.0])),
+        genMaxInstalledCapRaw = Dict(("A", "renewable") => 100.0),
+        genMaxInstalledCapByPeriod = Dict(
+            ("A", "renewable") => StrategicProfile([80.0, 0.0]),
+        ),
+    )
+
+    OpenEMPIRE.preprocess_max_installed_cap(params, sets, periods)
+
+    strategic_periods = collect(strat_periods(periods))
+    @test params.genMaxInstalledCap[("A", "renewable")][strategic_periods[1]] == 80.0
+    @test params.genMaxInstalledCap[("A", "renewable")][strategic_periods[2]] == 100.0
 end
 
 function test_read_bundled_csv_datasets()
@@ -171,10 +200,10 @@ function test_read_full_model_int_dataset()
     @test params.genMaxBiomethaneAvailability["Germany"][first_period] ≈
           210231.42290671438
     @test OpenEMPIRE.ccs_cost_fixed(params) == 0.0
-    @test all(
-        OpenEMPIRE.ccs_cost_variable(params, period) == 0.0
-        for period in strat_periods(periods)
-    )
+    @test all(OpenEMPIRE.ccs_cost_variable(params, period) == 0.0 for period in strat_periods(periods))
+
+    # InternalEMPIRE applies its default=0 maximum-installed-capacity parameter
+    # to every corridor, including NO2-France, even though the workbook omits it.
     @test OpenEMPIRE.trans_max_inst_cap(params, "NO2", "France", first_period) == 0.0
 
     # Module off: gas is priced from its fuel cost like any other thermal unit.
@@ -292,17 +321,31 @@ function test_internalempire_missing_hydro_default()
     )
 end
 
-function test_ccs_fixed_cost_is_data_driven()
-    params = OpenEMPIRE.EmpireParams()
-    @test OpenEMPIRE.ccs_cost_fixed(params) == OpenEMPIRE.DEFAULT_CCS_COST_FIXED
-    params.CCSCostTSFixed = 0.0
-    @test OpenEMPIRE.ccs_cost_fixed(params) == 0.0
+function test_internalempire_missing_line_efficiency_default()
+    sets = OpenEMPIRE.EmpireSets(
+        Node = ["A", "B", "C"],
+        DirectionalLink = [("A", "B"), ("B", "A"), ("B", "C")],
+    )
+    params = OpenEMPIRE.EmpireParams(
+        lineEfficiency = Dict(("A", "B") => 0.95),
+    )
+    config = Dict("internalempire_missing_line_efficiency_default" => 0.97)
 
-    mktempdir() do root
-        path = joinpath(root, "CCSCostTSFixed.csv")
-        write(path, "CCSCostTSFixed\n1234.5\n")
-        @test OpenEMPIRE._read_scalar_csv(path) == 1234.5
-    end
+    OpenEMPIRE._fill_internalempire_missing_line_efficiency!(params, sets, config)
+
+    @test params.lineEfficiency[("A", "B")] == 0.95
+    @test params.lineEfficiency[("B", "A")] == 0.97
+    @test params.lineEfficiency[("B", "C")] == 0.97
+
+    unchanged = OpenEMPIRE.EmpireParams()
+    OpenEMPIRE._fill_internalempire_missing_line_efficiency!(unchanged, sets, Dict())
+    @test isempty(unchanged.lineEfficiency)
+
+    @test_throws ArgumentError OpenEMPIRE._fill_internalempire_missing_line_efficiency!(
+        OpenEMPIRE.EmpireParams(),
+        sets,
+        Dict("internalempire_missing_line_efficiency_default" => 1.01),
+    )
 end
 
 function test_native_timestruct_operational_weights()
@@ -432,6 +475,20 @@ function test_write_solution_csv_tables()
 
         @test sort(readdir(output_dir)) == sort(expected_files)
         @test all(endswith(file, ".csv") for file in readdir(output_dir))
+
+        offshore_inv = collect(CSV.File(joinpath(output_dir, "offshoreConvInvCap.csv")))
+        @test propertynames(first(offshore_inv)) == [:Node, :Period, :offshoreConvInvCap]
+        @test length(offshore_inv) == 1
+        @test offshore_inv[1].Node == "B"
+        @test offshore_inv[1].Period == 1
+        @test offshore_inv[1].offshoreConvInvCap ≈ 17.0
+
+        offshore_cap = collect(CSV.File(joinpath(output_dir, "offshoreConvInstalledCap.csv")))
+        @test propertynames(first(offshore_cap)) == [:Node, :Period, :offshoreConvInstalledCap]
+        @test length(offshore_cap) == 1
+        @test offshore_cap[1].Node == "B"
+        @test offshore_cap[1].Period == 1
+        @test offshore_cap[1].offshoreConvInstalledCap ≈ 18.0
 
         gen_inv = collect(CSV.File(joinpath(output_dir, "genInvCap.csv")))
         @test propertynames(first(gen_inv)) == [:Node, :Generator, :Period, :genInvCap]
@@ -563,5 +620,34 @@ function test_europe_summary_uses_per_scenario_totals()
         scenario_two = only(row for row in europe_summary if row.Scenario == "scenario2")
         @test scenario_one.AnnualGeneration_GWh ≈ annual_multiple * (4.0 + 6.0) / 1000
         @test scenario_two.AnnualGeneration_GWh ≈ annual_multiple * (10.0 + 14.0) / 1000
+    end
+end
+
+"""
+The CCS fixed transport-and-storage cost is data-driven, and its default is the
+historical hardcoded constant.
+
+`ccs_cost_fix` used to be a literal `1149873.72` in `utils.jl` (with a standing TODO
+to remove the hardcoding). It is now read from an optional
+`Generator/CCSCostTSFixed.csv`. Datasets without that file must behave exactly as
+before, or every existing CCS investment cost silently changes.
+"""
+function test_ccs_fixed_cost_is_data_driven()
+    par = OpenEMPIRE.EmpireParams()
+    @test par.CCSCostTSFixed === nothing
+    @test OpenEMPIRE.ccs_cost_fixed(par) == OpenEMPIRE.DEFAULT_CCS_COST_FIXED
+    @test OpenEMPIRE.DEFAULT_CCS_COST_FIXED == 1149873.72
+
+    par.CCSCostTSFixed = 0.0
+    @test OpenEMPIRE.ccs_cost_fixed(par) == 0.0
+    par.CCSCostTSFixed = 42.5
+    @test OpenEMPIRE.ccs_cost_fixed(par) == 42.5
+
+    mktempdir() do root
+        path = joinpath(root, "CCSCostTSFixed.csv")
+        write(path, "CCS_TSfixed_cost_in_euro_per_tCO2\n1234.5\n")
+        @test OpenEMPIRE._read_scalar_csv(path) == 1234.5
+        write(path, "header\n")
+        @test_throws ArgumentError OpenEMPIRE._read_scalar_csv(path)
     end
 end

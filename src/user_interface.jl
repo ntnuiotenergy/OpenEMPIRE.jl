@@ -1,11 +1,28 @@
 _optimizer_constructor(optimizer) =
     optimizer isa DataType ? (() -> Base.invokelatest(optimizer)) : optimizer
 
+# InternalEMPIRE's Pyomo parameter defaults missing directional-link efficiency
+# cells to 0.97. Keep this reference-compatibility rule explicit and removable.
+const INTERNALEMPIRE_MISSING_LINE_EFFICIENCY_DEFAULT_KEY =
+    "internalempire_missing_line_efficiency_default"
+
+function _fill_internalempire_missing_line_efficiency!(params, sets, config)
+    haskey(config, INTERNALEMPIRE_MISSING_LINE_EFFICIENCY_DEFAULT_KEY) || return params
+    default = Float64(config[INTERNALEMPIRE_MISSING_LINE_EFFICIENCY_DEFAULT_KEY])
+    0.0 <= default <= 1.0 || throw(ArgumentError(
+        "$(INTERNALEMPIRE_MISSING_LINE_EFFICIENCY_DEFAULT_KEY) must be between 0 and 1",
+    ))
+    for link in arcs(sets)
+        haskey(params.lineEfficiency, link) || (params.lineEfficiency[link] = default)
+    end
+    return params
+end
+
 function _optimizer_with_attributes(optimizer, optimizer_attributes)
     return optimizer_with_attributes(_optimizer_constructor(optimizer), optimizer_attributes...)
 end
 
-function _config_bool(config, key::AbstractString, default::Bool)
+function _config_bool(config, key::AbstractString, default::Bool)::Bool
     value = get(config, key, default)
     value isa Bool && return value
     if value isa AbstractString
@@ -87,7 +104,9 @@ function _prepare_model_inputs(
             season_for_hour[h] = season_count + peak_index
         end
     end
-    scenarios = config["number_of_scenarios"]
+    weather_scenarios = OpenEMPIRE.weather_scenario_count(config)
+    gas_scenarios = OpenEMPIRE.gas_scenario_count(config)
+    scenarios = OpenEMPIRE.combined_scenario_count(config)
     operational_hours_per_year = Int(get(config, "operational_hours_per_year", 8760))
 
     periods = OpenEMPIRE.create_timestruct(
@@ -104,7 +123,31 @@ function _prepare_model_inputs(
 
 
     _report_progress(progress, "Build 3/12: reading input data from $data_folder")
-    sets, params = OpenEMPIRE.read_data(data_folder; format = input_format)
+    gas_enabled = OpenEMPIRE.natural_gas_enabled(config)
+    hydrogen_enabled = OpenEMPIRE.hydrogen_enabled(config)
+    industry_enabled = OpenEMPIRE.industry_enabled(config)
+    hydrogen_enabled && !gas_enabled && throw(ArgumentError(
+        "hydrogen=true requires natural_gas=true",
+    ))
+    hydrogen_enabled && gas_scenarios != 1 && throw(ArgumentError(
+        "Deterministic Hydrogen requires number_of_gas_scenarios=1",
+    ))
+    industry_enabled && !gas_enabled && throw(ArgumentError(
+        "industry=true requires natural_gas=true",
+    ))
+    industry_enabled && gas_scenarios != 1 && throw(ArgumentError(
+        "Deterministic Industry requires number_of_gas_scenarios=1",
+    ))
+    sets, params = OpenEMPIRE.read_data(
+        data_folder;
+        format = input_format,
+        natural_gas = gas_enabled,
+        hydrogen = hydrogen_enabled,
+        industry = industry_enabled,
+        weather_scenarios,
+        gas_scenarios,
+    )
+    OpenEMPIRE._fill_internalempire_missing_line_efficiency!(params, sets, config)
     _report_progress(
         progress,
         "Build 4/12: input data loaded ($(length(nodes(sets))) nodes, $(length(generators(sets))) generators, $(length(storages(sets))) storages)",
@@ -196,10 +239,41 @@ function create_model(
     params.discountRate = config["discount_rate"]
 
     _report_progress(progress, "Build 7/12: preprocessing parameters")
-    OpenEMPIRE.preprocess_params(params, sets, periods)
+    gas_enabled = OpenEMPIRE.natural_gas_enabled(config)
+    hydrogen_enabled = OpenEMPIRE.hydrogen_enabled(config)
+    industry_enabled = OpenEMPIRE.industry_enabled(config)
+    OpenEMPIRE.preprocess_params(
+        params,
+        sets,
+        periods;
+        natural_gas = gas_enabled,
+        hydrogen = hydrogen_enabled,
+        industry = industry_enabled,
+    )
 
     _report_progress(progress, "Build 8/12: validating parameters")
     OpenEMPIRE.validate(params; sets, periods, strict = false)
+    if gas_enabled
+        gas_issues = OpenEMPIRE.validate_natural_gas(params, sets, periods)
+        isempty(gas_issues) || throw(ArgumentError(
+            "Natural-gas input validation found $(length(gas_issues)) issue(s):\n  - " *
+            join(gas_issues, "\n  - "),
+        ))
+    end
+    if hydrogen_enabled
+        hydrogen_issues = OpenEMPIRE.validate_hydrogen(params, sets, periods)
+        isempty(hydrogen_issues) || throw(ArgumentError(
+            "Hydrogen/CO2 input validation found $(length(hydrogen_issues)) issue(s):\n  - " *
+            join(hydrogen_issues, "\n  - "),
+        ))
+    end
+    if industry_enabled
+        industry_issues = OpenEMPIRE.validate_industry(params, sets, periods)
+        isempty(industry_issues) || throw(ArgumentError(
+            "Industry input validation found $(length(industry_issues)) issue(s):\n  - " *
+            join(industry_issues, "\n  - "),
+        ))
+    end
 
     _report_progress(progress, "Build 9/12: initializing JuMP model")
     emp = if isnothing(optimizer)
@@ -209,15 +283,28 @@ function create_model(
     end
     set_string_names_on_creation(emp, include_string_names)
     _report_progress(progress, "Build 10/12: creating variables")
-    @time OpenEMPIRE.create_variables(emp, sets, periods; progress)
+    @time OpenEMPIRE.create_variables(
+        emp,
+        sets,
+        periods;
+        natural_gas = gas_enabled,
+        hydrogen = hydrogen_enabled,
+        gas_transport_demand = hydrogen_enabled,
+        industry = industry_enabled,
+        progress,
+    )
     _report_progress(progress, "Build 11/12: creating constraints")
     @time OpenEMPIRE.create_constraints(
         emp,
         sets,
         params,
         periods;
+        natural_gas = gas_enabled,
         offshore_transmission_cap = _offshore_transmission_cap_setting(config),
         include_investment_constraints,
+        hydrogen = hydrogen_enabled,
+        gas_transport_demand = hydrogen_enabled,
+        industry = industry_enabled,
         progress,
     )
     _report_progress(progress, "Build 12/12: creating objective")
@@ -227,6 +314,9 @@ function create_model(
         params,
         periods,
         Discounter(OpenEMPIRE.discount_rate(params), 1, periods);
+        natural_gas = gas_enabled,
+        hydrogen = hydrogen_enabled,
+        industry = industry_enabled,
         progress,
     )
     _report_progress(progress, "Model build complete")

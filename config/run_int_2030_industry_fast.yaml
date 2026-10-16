@@ -1,0 +1,46 @@
+# Reduced real-model Industry parity run: full_model_int to 2030,
+# 2 weather scenarios, 24 h regular seasons. Natural gas, Hydrogen, and Industry
+# are on; Heat is off. This intentionally matches run_internalempire_hydrogen.py.
+use_temporary_directory: True
+temporary_directory: './'
+forecast_horizon_year: 2030
+number_of_scenarios: 2
+natural_gas: True
+hydrogen: True
+industry: True
+number_of_gas_scenarios: 1
+length_of_regular_season: 24
+discount_rate: 0.05
+wacc: 0.05
+optimization_solver: "Gurobi"
+use_scenario_generation: True
+use_fixed_sample: True
+internalempire_missing_hydro_raw_default_mw: 1.0
+internalempire_missing_line_efficiency_default: 0.97
+load_change_module: False
+filter_make: False
+filter_use: False
+copula_clusters_make: False
+copula_clusters_use: False
+copulas_to_use: ["electricload"]
+n_cluster: 10
+moment_matching: False
+n_tree_compare: 20
+use_emission_cap: True
+compute_operational_duals: False
+print_in_iamc_format: False
+write_in_lp_format: False
+serialize_instance: False
+write_raw_solution: True
+leap_years_investment: 5
+time_format: "%d/%m/%Y %H:%M"
+
+# Match the accepted gas/Hydrogen parity profile. Crossover remains disabled;
+# this certificate compares the matched barrier solutions and objective brackets.
+solver_method: 2
+solver_crossover: 0
+solver_presolve: 1
+solver_numericfocus: 1
+solver_barhomogeneous: 1
+solver_feasibilitytol: 1.0e-9
+solver_barconvtol: 1.0e-8
