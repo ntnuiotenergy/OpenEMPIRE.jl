@@ -54,8 +54,9 @@ benders = PlasmoBenders.BendersAlgorithm(
     graph,
     master_graph;
     solver = Gurobi.Optimizer,
-    multicut = true,
+    multicut = false,
     max_iters = 500,
+    parallelize_benders = true,
 )
 
 println("Benders algorithm created successfully.")
