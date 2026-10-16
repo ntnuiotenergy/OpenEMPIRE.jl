@@ -401,7 +401,7 @@ function create_subproblem_node!(
     )
 
     #Constraint 10
-    @constraint(
+    #=@constraint(
         node,
         gen_hydro_node_limit[
             n in N;
@@ -417,6 +417,27 @@ function create_subproblem_node!(
         )
         <=
         max_hydro_node(par, n)
+    )=#
+
+    # Constraint 10: Hydropower limit per node, strategic period, and operational scenario
+    @constraint(
+        node,
+        gen_hydro_node_limit[
+            n in N,
+            sc in 1:_opscenario_count(sp);
+            !isnothing(max_hydro_node(par, n))
+        ],
+        sum(
+            multiple_strat(sp, t) *
+            node[:genOperational][n, g, t]
+            for g in generators(sets, n)
+            if is_hydro(sets, g)
+            for rp in repr_periods(sp)
+            for (scenario_index, scenario) in enumerate(opscenarios(rp))
+            if scenario_index == sc
+            for t in scenario
+        )
+        <= max_hydro_node(par, n)
     )
 
     # Biomass availability constraint

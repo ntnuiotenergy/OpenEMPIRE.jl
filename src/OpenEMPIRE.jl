@@ -35,8 +35,8 @@ include("oos_aggregation.jl")
 
 #SA testing
 #include("opti_graph.jl")
-#include("benders_impl.jl")
-include("benders_impl_split_on_scenario.jl")
+include("benders_impl.jl")
+#include("benders_impl_split_on_scenario.jl")
 
 
 end # module OpenEMPIRE
