@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "benders_run_metadata.jl"))
+
 using OpenEMPIRE
 using JuMP
 using Plasmo
@@ -5,14 +7,112 @@ using PlasmoBenders
 using TimeStruct
 using Gurobi
 using Random
+using Dates
 
 # ---------------------------------------------------------
 # 1. Build OpenEMPIRE model/data
 # ---------------------------------------------------------
 
-config_file = "config/testrun.yaml"
-data_folder = "data/test"
-seed = 1
+#config_file = "config/testrun.yaml"
+#data_folder = "data/test"
+#seed = 1
+
+# ---------------------------------------------------------
+# 1. Resolve run configuration from command-line arguments
+# ---------------------------------------------------------
+
+function parse_benders_args(args)
+    options = Dict(
+        "dataset" => "test",
+        "data-folder" => "",
+        "config" => joinpath("config", "testrun.yaml"),
+        "format" => "csv",
+        "solver" => "Gurobi",
+        "seed" => "1",
+    )
+
+    for arg in args
+        startswith(arg, "--") ||
+            throw(ArgumentError("Expected --key=value, got: $arg"))
+
+        occursin("=", arg) ||
+            throw(ArgumentError("Expected --key=value, got: $arg"))
+
+        key, value = split(arg[3:end], "="; limit = 2)
+
+        haskey(options, key) ||
+            throw(ArgumentError("Unsupported argument: --$key"))
+
+        options[key] = value
+    end
+
+    isempty(options["dataset"]) &&
+        throw(ArgumentError("Dataset name cannot be empty."))
+
+    data_folder = isempty(options["data-folder"]) ?
+        joinpath("data", options["dataset"]) :
+        options["data-folder"]
+
+    isdir(data_folder) ||
+        throw(ArgumentError("Dataset folder not found: $data_folder"))
+
+    isfile(options["config"]) ||
+        throw(ArgumentError("Config file not found: $(options["config"])"))
+
+    input_format = get(
+        Dict("csv" => :csv, "xlsx" => :xlsx, "auto" => :auto),
+        options["format"],
+        nothing,
+    )
+
+    input_format === nothing &&
+        throw(ArgumentError("Unsupported input format: $(options["format"])"))
+
+    solver_name = options["solver"]
+
+    optimizer = if solver_name == "Gurobi"
+        Gurobi.Optimizer
+    elseif solver_name == "HiGHS"
+        HiGHS.Optimizer
+    else
+        throw(ArgumentError("Unsupported solver: $solver_name"))
+    end
+
+    return (
+        dataset = options["dataset"],
+        data_folder = data_folder,
+        config_file = options["config"],
+        input_format = input_format,
+        solver_name = solver_name,
+        optimizer = optimizer,
+        seed = parse(Int, options["seed"]),
+    )
+end
+
+spec = parse_benders_args(ARGS)
+
+dataset = spec.dataset
+data_folder = spec.data_folder
+config_file = spec.config_file
+input_format = spec.input_format
+solver_name = spec.solver_name
+optimizer = spec.optimizer
+seed = spec.seed
+
+println("Dataset:      $dataset")
+println("Data folder:  $data_folder")
+println("Config file:  $config_file")
+println("Input format: $input_format")
+println("Solver:       $solver_name")
+println("Seed:         $seed")
+
+emp, periods, sets, params = OpenEMPIRE.create_model(
+    config_file,
+    data_folder;
+    optimizer = optimizer,
+    input_format = input_format,
+    scenario_rng = MersenneTwister(seed),
+)
 
 emp, periods, sets, params = OpenEMPIRE.create_model(
     config_file,
@@ -34,6 +134,12 @@ discounter = Discounter(
 
 println("\n=== Creating Benders OptiGraph ===")
 
+run_start_time = now()
+run_start_clock = time()
+
+# Build the decomposition graph
+build_start_clock = time()
+
 graph, master_graph, master, scenario_graphs, scenario_nodes =
     OpenEMPIRE.create_benders_graph(
         sets,
@@ -41,6 +147,8 @@ graph, master_graph, master, scenario_graphs, scenario_nodes =
         periods,
         discounter,
     )
+
+build_seconds = time() - build_start_clock
 
 println("Benders OptiGraph created successfully.")
 
@@ -50,13 +158,16 @@ println("Benders OptiGraph created successfully.")
 
 println("\n=== Creating Benders algorithm ===")
 
+solve_start_clock = time()
+
 benders = PlasmoBenders.BendersAlgorithm(
     graph,
     master_graph;
-    solver = Gurobi.Optimizer,
+    solver = optimizer,
     multicut = false,
     max_iters = 500,
     parallelize_benders = true,
+    tol = 1e-7,
 )
 
 println("Benders algorithm created successfully.")
@@ -68,6 +179,137 @@ println("Benders algorithm created successfully.")
 println("\n=== Running Benders ===")
 
 PlasmoBenders.run_algorithm!(benders)
+
+solve_seconds = time() - solve_start_clock
+
+
+#Write results to CSV
+
+timestamp = Dates.format(now(), dateformat"yyyymmdd_HHMMSS")
+
+result_dir = joinpath(
+    "results",
+    "benders_scenario_separation",
+    "$(timestamp)_$(dataset)",
+)
+
+output_dir = joinpath(result_dir, "output")
+mkpath(output_dir)
+
+# Investment results
+OpenEMPIRE.write_investment_csvs(
+    output_dir, master, sets, periods,
+)
+
+# Objective value, relative gap, and number of iterations
+costs = OpenEMPIRE.benders_cost_totals(
+    master,
+    scenario_nodes,
+    sets,
+    params,
+    periods,
+    discounter,
+)
+
+OpenEMPIRE.write_benders_objective_csv(
+    output_dir,
+    benders.objective_value,
+    PlasmoBenders.relative_gap(benders),
+    length(PlasmoBenders.get_lower_bounds(benders));
+    investment_costs = costs.investment_costs,
+    operational_costs = costs.operational_costs,
+)
+
+# Cost diagnostics
+OpenEMPIRE.write_cost_diagnostic_csvs(
+    output_dir, sets, params, periods,
+)
+
+# Operational results
+OpenEMPIRE.write_benders_operational_csvs(
+    output_dir, scenario_nodes, sets, params, periods,
+)
+
+OpenEMPIRE.write_benders_transmission_operational_report_csv(
+    output_dir, scenario_nodes, sets, params, periods,
+    OpenEMPIRE._period_labels(periods),
+)
+
+OpenEMPIRE.write_benders_operational_report_csv(
+    output_dir, scenario_nodes, sets, params, periods,
+    OpenEMPIRE._period_labels(periods),
+)
+
+# Generator report
+OpenEMPIRE.write_benders_generator_report_csv(
+    output_dir, master, scenario_nodes, sets, params, periods,
+    OpenEMPIRE._period_labels(periods),
+)
+
+# Storage report
+OpenEMPIRE.write_benders_storage_report_csv(
+    output_dir, master, scenario_nodes, sets, params, periods,
+    OpenEMPIRE._period_labels(periods),
+)
+
+# Transmission report
+OpenEMPIRE.write_benders_transmission_report_csv(
+    output_dir, master, scenario_nodes, sets, params, periods,
+    OpenEMPIRE._period_labels(periods),
+)
+
+# Curtailment reports
+OpenEMPIRE.write_benders_curtailment_report_csvs(
+    output_dir, master, scenario_nodes, sets, params, periods,
+    OpenEMPIRE._period_labels(periods),
+)
+
+# Europe plot report
+OpenEMPIRE.write_benders_europe_plot_report_csv(
+    output_dir, master, scenario_nodes, sets, params, periods,
+    OpenEMPIRE._period_labels(periods),
+)
+
+# Europe summary report
+OpenEMPIRE.write_benders_europe_summary_report_csv(
+    output_dir, master, scenario_nodes, sets, params, periods,
+    OpenEMPIRE._period_labels(periods),
+)
+
+run_end_time = now()
+wall_seconds = time() - run_start_clock
+
+write_benders_run_metadata(
+    result_dir,
+    output_dir;
+    decomposition_type = "scenario",
+    subproblem_structure = "one_per_strategic_period",
+    dataset = dataset,
+    input_format = string(input_format),
+    original_data_folder = data_folder,
+    original_config_file = config_file,
+    scenario_seed = seed,
+    number_of_subproblems = length(scenario_nodes),
+    multicut = false,
+    parallelize_benders = true,
+    max_iters = 500,
+    regularization = Dict{String, Any}(
+        "enabled" => false,
+        "method" => nothing,
+        "parameters" => Dict{String, Any}(),
+    ),
+    objective_value = benders.objective_value,
+    relative_gap = PlasmoBenders.relative_gap(benders),
+    iterations = length(PlasmoBenders.get_lower_bounds(benders)),
+    converged = PlasmoBenders.relative_gap(benders) <= 1e-7,
+    build_seconds = build_seconds,
+    solve_seconds = solve_seconds,
+    wall_seconds = wall_seconds,
+    start_time = run_start_time,
+    end_time = run_end_time,
+    solver_name = solver_name,
+    run_status = "complete",
+)
 
 # ---------------------------------------------------------
 # 5. Results

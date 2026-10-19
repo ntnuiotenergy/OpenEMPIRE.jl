@@ -266,6 +266,30 @@ function _flow_balance_price(emp::JuMP.Model, node::AbstractString, sp, t, disco
     return _dual_or_nan(emp[:flow_balance], node, t) / scale
 end
 
+#For the Benders decomposition implementation
+function _flow_balance_price_benders(
+    subproblem_nodes,
+    node::AbstractString,
+    sp,
+    t,
+    discounter::Discounter,
+)
+    subproblem = subproblem_nodes[sp]
+    objects = JuMP.object_dictionary(subproblem)
+
+    haskey(objects, :flow_balance) || return NaN
+
+    strategic_weight = objective_weight(sp, discounter)
+    strategic_weight == 0 && return NaN
+
+    scale = objective_weight(t, discounter; type = "avg_year") /
+            strategic_weight
+    scale == 0 && return NaN
+
+    return _dual_or_nan(subproblem[:flow_balance], node, t) / scale
+end
+
+
 function _emission_price(emp::JuMP.Model, par::EmpireParams, sp, scenario_index::Integer, t, discounter::Discounter)
     if co2_cap(par, sp) !== nothing && haskey(JuMP.object_dictionary(emp), :emission_cap)
         # The emission-cap constraint (model_definition.jl) is written in tons:
@@ -285,6 +309,39 @@ function _emission_price(emp::JuMP.Model, par::EmpireParams, sp, scenario_index:
     end
     return co2_price(par, sp)
 end
+
+#For the Benders decomposition implementation
+function _emission_price_benders(
+    subproblem_nodes,
+    par::EmpireParams,
+    sp,
+    scenario_index::Integer,
+    t,
+    discounter::Discounter,
+)
+    subproblem = subproblem_nodes[sp]
+
+    if co2_cap(par, sp) !== nothing &&
+       haskey(JuMP.object_dictionary(subproblem), :emission_cap)
+
+        strategic_weight = objective_weight(sp, discounter)
+        annual_multiple = multiple_strat(sp, t)
+
+        (strategic_weight == 0 || annual_multiple == 0) && return NaN
+
+        scale = objective_weight(t, discounter; type = "avg_year") /
+            (strategic_weight * annual_multiple)
+
+        scale == 0 && return NaN
+
+        return _dual_or_nan(
+            subproblem[:emission_cap], scenario_index,
+        ) / scale
+    end
+
+    return co2_price(par, sp)
+end
+
 
 function _incoming_nodes(sets, node::AbstractString)
     return [from for (from, to) in arcs(sets) if to == node]
@@ -1627,7 +1684,7 @@ function write_scenario_artifacts(
     return archived_key
 end
 
-function write_investment_csvs(output_dir::AbstractString, emp::JuMP.Model, sets, periods::TimeStructure)
+function write_investment_csvs(output_dir::AbstractString, emp, sets, periods::TimeStructure)
     strategic_periods = _strategic_indices(periods)
 
     gen_inv = emp[:genInvCap]
@@ -1765,6 +1822,94 @@ function write_operational_csvs(output_dir::AbstractString, emp::JuMP.Model, set
     return output_dir
 end
 
+#--------------------------- For the Benders decomposition implementation -------------------------------------------------
+function write_benders_operational_csvs(
+    output_dir::AbstractString,
+    subproblem_nodes,
+    sets,
+    par::EmpireParams,
+    periods::TimeStructure,
+)
+    gen_file = joinpath(output_dir, "genOperational.csv")
+
+    _stream_csv_table(
+        gen_file,
+        ["Node", "Generator", "Period", "Scenario", "Season", "Hour", "genOperational"],
+    ) do row
+        _foreach_operational_context(par, periods) do period, sp, scenario, rp, season, hour, t
+            node = subproblem_nodes[sp]
+            gen_op = node[:genOperational]
+
+            for (n, g) in node_generators(sets)
+                row([
+                    n, g, period, scenario, season, hour,
+                    _solution_value(gen_op[n, g, t]),
+                ])
+            end
+        end
+    end
+
+    _stream_csv_table(
+        joinpath(output_dir, "transmissionOperational.csv"),
+        ["FromNode", "ToNode", "Period", "Scenario", "Season", "Hour", "transmissionOperational"],
+    ) do row
+        _foreach_operational_context(par, periods) do period, sp, scenario, rp, season, hour, t
+            node = subproblem_nodes[sp]
+            trans_op = node[:transmissionOperational]
+
+            for (m, n) in arcs(sets)
+                row([
+                    m, n, period, scenario, season, hour,
+                    _solution_value(trans_op[m, n, t]),
+                ])
+            end
+        end
+    end
+
+    for (filename, column, container_name) in (
+        ("storCharge.csv", "storCharge", :storCharge),
+        ("storDischarge.csv", "storDischarge", :storDischarge),
+        ("storageOperational.csv", "storageOperational", :storOperational),
+    )
+        _stream_csv_table(
+            joinpath(output_dir, filename),
+            ["Node", "Storage", "Period", "Scenario", "Season", "Hour", column],
+        ) do row
+            _foreach_operational_context(par, periods) do period, sp, scenario, rp, season, hour, t
+                node = subproblem_nodes[sp]
+                container = node[container_name]
+
+                for (n, s) in node_storages(sets)
+                    row([
+                        n, s, period, scenario, season, hour,
+                        _solution_value(container[n, s, t]),
+                    ])
+                end
+            end
+        end
+    end
+
+    _stream_csv_table(
+        joinpath(output_dir, "loadShed.csv"),
+        ["Node", "Period", "Scenario", "Season", "Hour", "loadShed"],
+    ) do row
+        _foreach_operational_context(par, periods) do period, sp, scenario, rp, season, hour, t
+            node = subproblem_nodes[sp]
+            load_shed = node[:loadShed]
+
+            for n in nodes(sets)
+                row([
+                    n, period, scenario, season, hour,
+                    _solution_value(load_shed[n, t]),
+                ])
+            end
+        end
+    end
+
+    return output_dir
+end
+
+
 function write_report_csvs(output_dir::AbstractString, emp::JuMP.Model, sets, par::EmpireParams, periods::TimeStructure)
     labels = _period_labels(periods)
 
@@ -1782,10 +1927,35 @@ function write_report_csvs(output_dir::AbstractString, emp::JuMP.Model, sets, pa
     return output_dir
 end
 
-function write_objective_csv(output_dir::AbstractString, emp::JuMP.Model)
+function write_objective_csv(output_dir::AbstractString, emp)
     return _write_csv_table(joinpath(output_dir, "results_objective.csv"), ["Objective function value:$(_objective_value_or_nan(emp))"]) do io
         nothing
     end
+end
+
+#For the Benders decomposition implementation:
+function write_benders_objective_csv(
+    output_dir::AbstractString,
+    objective_value,
+    relative_gap,
+    number_of_runs::Integer;
+    investment_costs,
+    operational_costs,
+)
+    output_file = joinpath(output_dir, "results_objective.csv")
+
+    println("Writing results_objective.csv")
+
+    open(output_file, "w") do io
+        println(io, "Metric,Value")
+        println(io, "ObjectiveValue,$objective_value")
+        println(io, "InvestmentCosts,$investment_costs")
+        println(io, "OperationalCosts,$operational_costs")
+        println(io, "RelativeGap,$relative_gap")
+        println(io, "NumberOfIterations,$number_of_runs")
+    end
+
+    return output_file
 end
 
 function write_cost_diagnostic_csvs(output_dir::AbstractString, sets, par::EmpireParams, periods::TimeStructure)
@@ -1814,6 +1984,30 @@ function _weighted_generation(emp::JuMP.Model, par::EmpireParams, node::Abstract
             end
         end
     end
+    return total
+end
+
+#For the Benders decomposition implemetation
+function _weighted_generation_benders(
+    subproblem_nodes,
+    par::EmpireParams,
+    node::AbstractString,
+    generator::AbstractString,
+    sp,
+)
+    gen_op = subproblem_nodes[sp][:genOperational]
+    total = 0.0
+
+    for rp in repr_periods(sp)
+        for (sc_index, sc) in enumerate(opscenarios(rp))
+            for t in sc
+                total += multiple_strat(sp, t) *
+                         probability(t) *
+                         _value_or_zero(gen_op, node, generator, t)
+            end
+        end
+    end
+
     return total
 end
 
@@ -1848,6 +2042,60 @@ function _weighted_storage_losses(emp::JuMP.Model, par::EmpireParams, node::Abst
     end
     return total
 end
+
+#For the Benders decomposition implementation
+
+function _weighted_storage_discharge_benders(
+    subproblem_nodes,
+    par::EmpireParams,
+    node::AbstractString,
+    storage::AbstractString,
+    sp,
+)
+    stor_discharge = subproblem_nodes[sp][:storDischarge]
+    total = 0.0
+
+    for rp in repr_periods(sp)
+        for sc in opscenarios(rp)
+            for t in sc
+                total += multiple_strat(sp, t) *
+                         probability(t) *
+                         _value_or_zero(stor_discharge, node, storage, t)
+            end
+        end
+    end
+
+    return total
+end
+
+#For the Benders decomposition implementation
+function _weighted_storage_losses_benders(
+    subproblem_nodes,
+    par::EmpireParams,
+    node::AbstractString,
+    storage::AbstractString,
+    sp,
+)
+    stor_charge = subproblem_nodes[sp][:storCharge]
+    stor_discharge = subproblem_nodes[sp][:storDischarge]
+    total = 0.0
+
+    for rp in repr_periods(sp)
+        for sc in opscenarios(rp)
+            for t in sc
+                total += multiple_strat(sp, t) * probability(t) * (
+                    (1 - discharge_eff(par, storage)) *
+                    _value_or_zero(stor_discharge, node, storage, t) +
+                    (1 - charge_eff(par, storage)) *
+                    _value_or_zero(stor_charge, node, storage, t)
+                )
+            end
+        end
+    end
+
+    return total
+end
+
 
 function _weighted_transmission_volume(emp::JuMP.Model, par::EmpireParams, from::AbstractString, to::AbstractString, sp, scenario_index = nothing)
     trans_op = emp[:transmissionOperational]
@@ -1885,6 +2133,61 @@ function _weighted_transmission_losses(emp::JuMP.Model, par::EmpireParams, from:
     return total
 end
 
+#For the Benders decomposition implementation
+function _weighted_transmission_volume_benders(
+    subproblem_nodes,
+    par::EmpireParams,
+    from::AbstractString,
+    to::AbstractString,
+    sp,
+)
+    trans_op = subproblem_nodes[sp][:transmissionOperational]
+    total = 0.0
+
+    for rp in repr_periods(sp)
+        for sc in opscenarios(rp)
+            for t in sc
+                weight = multiple_strat(sp, t) * probability(t)
+                total += weight * (
+                    _value_or_zero(trans_op, from, to, t) +
+                    _value_or_zero(trans_op, to, from, t)
+                )
+            end
+        end
+    end
+
+    return total
+end
+
+#For the Benders decomposition implementation
+function _weighted_transmission_losses_benders(
+    subproblem_nodes,
+    par::EmpireParams,
+    from::AbstractString,
+    to::AbstractString,
+    sp,
+)
+    trans_op = subproblem_nodes[sp][:transmissionOperational]
+    total = 0.0
+
+    for rp in repr_periods(sp)
+        for sc in opscenarios(rp)
+            for t in sc
+                weight = multiple_strat(sp, t) * probability(t)
+                total += weight * (
+                    (1 - line_eff(par, from, to)) *
+                    _value_or_zero(trans_op, from, to, t) +
+                    (1 - line_eff(par, to, from)) *
+                    _value_or_zero(trans_op, to, from, t)
+                )
+            end
+        end
+    end
+
+    return total
+end
+
+
 function _weighted_curtailment(emp::JuMP.Model, par::EmpireParams, node::AbstractString, generator::AbstractString, sp, scenario_index = nothing)
     gen_cap = emp[:genInstalledCap]
     gen_op = emp[:genOperational]
@@ -1903,6 +2206,39 @@ function _weighted_curtailment(emp::JuMP.Model, par::EmpireParams, node::Abstrac
     return total
 end
 
+#For the Benders decomposition implementation
+function _weighted_curtailment_benders(
+    master,
+    subproblem_nodes,
+    par::EmpireParams,
+    node::AbstractString,
+    generator::AbstractString,
+    sp,
+    scenario_index = nothing,
+)
+    gen_cap = master[:genInstalledCap]
+    gen_op = subproblem_nodes[sp][:genOperational]
+
+    installed = _value_or_zero(gen_cap, node, generator, sp)
+    total = 0.0
+
+    for rp in repr_periods(sp)
+        for (sc_index, sc) in enumerate(opscenarios(rp))
+            scenario_index === nothing || sc_index == scenario_index || continue
+
+            for t in sc
+                available =
+                    _gen_capacity_availability(par, node, generator, t) * installed
+
+                total += multiple_strat(sp, t) * probability(t) *
+                    (available - _value_or_zero(gen_op, node, generator, t))
+            end
+        end
+    end
+
+    return total
+end
+
 function _scenario_generation(emp::JuMP.Model, par::EmpireParams, node::AbstractString, generator::AbstractString, sp, scenario_index::Integer)
     gen_op = emp[:genOperational]
     total = 0.0
@@ -1914,6 +2250,28 @@ function _scenario_generation(emp::JuMP.Model, par::EmpireParams, node::Abstract
             end
         end
     end
+    return total
+end
+
+#For the Benders decomposition implementation
+function _scenario_generation_benders(
+    subproblem_nodes, par::EmpireParams,
+    node::AbstractString, generator::AbstractString,
+    sp, scenario_index::Integer,
+)
+    gen_op = subproblem_nodes[sp][:genOperational]
+    total = 0.0
+
+    for rp in repr_periods(sp)
+        for (sc_index, sc) in enumerate(opscenarios(rp))
+            sc_index == scenario_index || continue
+            for t in sc
+                total += multiple_strat(sp, t) *
+                    _value_or_zero(gen_op, node, generator, t)
+            end
+        end
+    end
+
     return total
 end
 
@@ -1935,6 +2293,34 @@ function _scenario_storage_losses(emp::JuMP.Model, par::EmpireParams, node::Abst
     return total
 end
 
+#For the Benders decomposition implementation
+function _scenario_storage_losses_benders(
+    subproblem_nodes, par::EmpireParams,
+    node::AbstractString, storage::AbstractString,
+    sp, scenario_index::Integer,
+)
+    subproblem = subproblem_nodes[sp]
+    stor_charge = subproblem[:storCharge]
+    stor_discharge = subproblem[:storDischarge]
+    total = 0.0
+
+    for rp in repr_periods(sp)
+        for (sc_index, sc) in enumerate(opscenarios(rp))
+            sc_index == scenario_index || continue
+            for t in sc
+                total += multiple_strat(sp, t) * (
+                    (1 - discharge_eff(par, storage)) *
+                    _value_or_zero(stor_discharge, node, storage, t) +
+                    (1 - charge_eff(par, storage)) *
+                    _value_or_zero(stor_charge, node, storage, t)
+                )
+            end
+        end
+    end
+
+    return total
+end
+
 function _scenario_transmission_losses(emp::JuMP.Model, par::EmpireParams, from::AbstractString, to::AbstractString, sp, scenario_index::Integer)
     trans_op = emp[:transmissionOperational]
     total = 0.0
@@ -1949,6 +2335,32 @@ function _scenario_transmission_losses(emp::JuMP.Model, par::EmpireParams, from:
             end
         end
     end
+    return total
+end
+
+#For the Benders decomposition implementation
+function _scenario_transmission_losses_benders(
+    subproblem_nodes, par::EmpireParams,
+    from::AbstractString, to::AbstractString,
+    sp, scenario_index::Integer,
+)
+    trans_op = subproblem_nodes[sp][:transmissionOperational]
+    total = 0.0
+
+    for rp in repr_periods(sp)
+        for (sc_index, sc) in enumerate(opscenarios(rp))
+            sc_index == scenario_index || continue
+            for t in sc
+                total += multiple_strat(sp, t) * (
+                    (1 - line_eff(par, from, to)) *
+                    _value_or_zero(trans_op, from, to, t) +
+                    (1 - line_eff(par, to, from)) *
+                    _value_or_zero(trans_op, to, from, t)
+                )
+            end
+        end
+    end
+
     return total
 end
 
@@ -1970,6 +2382,33 @@ function _scenario_curtailment(emp::JuMP.Model, par::EmpireParams, node::Abstrac
     return total
 end
 
+#For the Benders decomposition implementation
+function _scenario_curtailment_benders(
+    master, subproblem_nodes, par::EmpireParams,
+    node::AbstractString, generator::AbstractString,
+    sp, scenario_index::Integer,
+)
+    gen_cap = master[:genInstalledCap]
+    gen_op = subproblem_nodes[sp][:genOperational]
+    installed = _value_or_zero(gen_cap, node, generator, sp)
+    total = 0.0
+
+    for rp in repr_periods(sp)
+        for (sc_index, sc) in enumerate(opscenarios(rp))
+            sc_index == scenario_index || continue
+            for t in sc
+                available =
+                    _gen_capacity_availability(par, node, generator, t) * installed
+
+                total += multiple_strat(sp, t) *
+                    (available - _value_or_zero(gen_op, node, generator, t))
+            end
+        end
+    end
+
+    return total
+end
+
 function _annual_emissions(emp::JuMP.Model, sets, par::EmpireParams, sp, scenario_index::Integer)
     gen_op = emp[:genOperational]
     total = 0.0
@@ -1987,9 +2426,46 @@ function _annual_emissions(emp::JuMP.Model, sets, par::EmpireParams, sp, scenari
     return total
 end
 
+#For the Benders decomposition implementation
+function _annual_emissions_benders(
+    subproblem_nodes, sets, par::EmpireParams,
+    sp, scenario_index::Integer,
+)
+    gen_op = subproblem_nodes[sp][:genOperational]
+    total = 0.0
+
+    for rp in repr_periods(sp)
+        for (sc_index, sc) in enumerate(opscenarios(rp))
+            sc_index == scenario_index || continue
+            for t in sc, (n, g) in node_generators(sets)
+                total += multiple_strat(sp, t) *
+                    _value_or_zero(gen_op, n, g, t) *
+                    co2_content(par, g) *
+                    (3.6 / _gen_efficiency(par, g, sp))
+            end
+        end
+    end
+
+    return total
+end
+
 function _annual_generation(emp::JuMP.Model, sets, par::EmpireParams, sp, scenario_index::Integer)
     return sum(
         _scenario_generation(emp, par, n, g, sp, scenario_index)
+        for (n, g) in node_generators(sets);
+        init = 0.0,
+    )
+end
+
+#For the Benders decomposition implementation
+function _annual_generation_benders(
+    subproblem_nodes, sets, par::EmpireParams,
+    sp, scenario_index::Integer,
+)
+    return sum(
+        _scenario_generation_benders(
+            subproblem_nodes, par, n, g, sp, scenario_index,
+        )
         for (n, g) in node_generators(sets);
         init = 0.0,
     )
@@ -2015,6 +2491,63 @@ function write_generator_report_csv(output_dir::AbstractString, emp::JuMP.Model,
             capacity_factor = installed == 0 ? 0.0 : weighted_gen / (installed * 8760)
             inv_cap = _value_or_zero(gen_inv, n, g, sp)
             discounted_cost = _discount_multiplier(par, periods, sp) * inv_cap * gen_invest_cost(par, g, sp)
+            _write_csv_row(io, [
+                n,
+                g,
+                _period_label(labels, period_index),
+                inv_cap,
+                installed,
+                capacity_factor,
+                discounted_cost,
+                weighted_gen / 1000,
+            ])
+        end
+    end
+end
+
+#For the Benders decomposition implementation
+function write_benders_generator_report_csv(
+    output_dir::AbstractString,
+    master,
+    subproblem_nodes,
+    sets,
+    par::EmpireParams,
+    periods::TimeStructure,
+    labels::Vector{String},
+)
+    gen_inv = master[:genInvCap]
+    gen_cap = master[:genInstalledCap]
+
+    header = [
+        "Node",
+        "GeneratorType",
+        "Period",
+        "genInvCap_MW",
+        "genInstalledCap_MW",
+        "genExpectedCapacityFactor",
+        "DiscountedInvestmentCost_Euro",
+        "genExpectedAnnualProduction_GWh",
+    ]
+
+    return _write_csv_table(
+        joinpath(output_dir, "results_output_gen.csv"),
+        header,
+    ) do io
+        for (n, g) in node_generators(sets),
+            (period_index, sp) in _strategic_indices(periods)
+
+            installed = _value_or_zero(gen_cap, n, g, sp)
+            weighted_gen = _weighted_generation_benders(
+                subproblem_nodes, par, n, g, sp,
+            )
+            capacity_factor =
+                installed == 0 ? 0.0 : weighted_gen / (installed * 8760)
+
+            inv_cap = _value_or_zero(gen_inv, n, g, sp)
+            discounted_cost =
+                _discount_multiplier(par, periods, sp) *
+                inv_cap * gen_invest_cost(par, g, sp)
+
             _write_csv_row(io, [
                 n,
                 g,
@@ -2070,6 +2603,74 @@ function write_storage_report_csv(output_dir::AbstractString, emp::JuMP.Model, s
     end
 end
 
+#For the Benders decomposition implementation
+function write_benders_storage_report_csv(
+    output_dir::AbstractString,
+    master,
+    subproblem_nodes,
+    sets,
+    par::EmpireParams,
+    periods::TimeStructure,
+    labels::Vector{String},
+)
+    stor_pw_inv = master[:storPWInvCap]
+    stor_pw_cap = master[:storPWInstalledCap]
+    stor_en_inv = master[:storENInvCap]
+    stor_en_cap = master[:storENInstalledCap]
+
+    header = [
+        "Node",
+        "StorageType",
+        "Period",
+        "storPWInvCap_MW",
+        "storPWInstalledCap_MW",
+        "storENInvCap_MWh",
+        "storENInstalledCap_MWh",
+        "DiscountedInvestmentCostPWEN_EuroPerMWMWh",
+        "ExpectedAnnualDischargeVolume_GWh",
+        "ExpectedAnnualLossesChargeDischarge_GWh",
+    ]
+
+    return _write_csv_table(
+        joinpath(output_dir, "results_output_stor.csv"),
+        header,
+    ) do io
+        for (n, s) in node_storages(sets),
+            (period_index, sp) in _strategic_indices(periods)
+
+            pw_inv = _value_or_zero(stor_pw_inv, n, s, sp)
+            en_inv = _value_or_zero(stor_en_inv, n, s, sp)
+
+            discounted_cost = _discount_multiplier(par, periods, sp) * (
+                pw_inv * stor_pw_invest_cost(par, s, sp) +
+                en_inv * stor_en_invest_cost(par, s, sp)
+            )
+
+            discharge = _weighted_storage_discharge_benders(
+                subproblem_nodes, par, n, s, sp,
+            )
+
+            losses = _weighted_storage_losses_benders(
+                subproblem_nodes, par, n, s, sp,
+            )
+
+            _write_csv_row(io, [
+                n,
+                s,
+                _period_label(labels, period_index),
+                pw_inv,
+                _value_or_zero(stor_pw_cap, n, s, sp),
+                en_inv,
+                _value_or_zero(stor_en_cap, n, s, sp),
+                discounted_cost,
+                discharge / 1000,
+                losses / 1000,
+            ])
+        end
+    end
+end
+
+
 function write_transmission_report_csv(output_dir::AbstractString, emp::JuMP.Model, sets, par::EmpireParams, periods::TimeStructure, labels::Vector{String})
     trans_inv = emp[:transmissionInvCap]
     trans_cap = emp[:transmissionInstalledCap]
@@ -2101,6 +2702,66 @@ function write_transmission_report_csv(output_dir::AbstractString, emp::JuMP.Mod
     end
 end
 
+#For the Benders decomposition implementation
+function write_benders_transmission_report_csv(
+    output_dir::AbstractString,
+    master,
+    subproblem_nodes,
+    sets,
+    par::EmpireParams,
+    periods::TimeStructure,
+    labels::Vector{String},
+)
+    trans_inv = master[:transmissionInvCap]
+    trans_cap = master[:transmissionInstalledCap]
+
+    header = [
+        "BetweenNode",
+        "AndNode",
+        "Period",
+        "transmissionInvCap_MW",
+        "transmissionInstalledCap_MW",
+        "DiscountedInvestmentCost_Euro",
+        "transmissionExpectedAnnualVolume_GWh",
+        "ExpectedAnnualLosses_GWh",
+    ]
+
+    return _write_csv_table(
+        joinpath(output_dir, "results_output_transmission.csv"),
+        header,
+    ) do io
+        for (m, n) in bidir_arcs(sets),
+            (period_index, sp) in _strategic_indices(periods)
+
+            inv_cap = _value_or_zero(trans_inv, m, n, sp)
+
+            discounted_cost =
+                _discount_multiplier(par, periods, sp) *
+                inv_cap * trans_invest_cost(par, m, n, sp)
+
+            volume = _weighted_transmission_volume_benders(
+                subproblem_nodes, par, m, n, sp,
+            )
+
+            losses = _weighted_transmission_losses_benders(
+                subproblem_nodes, par, m, n, sp,
+            )
+
+            _write_csv_row(io, [
+                m,
+                n,
+                _period_label(labels, period_index),
+                inv_cap,
+                _value_or_zero(trans_cap, m, n, sp),
+                discounted_cost,
+                volume / 1000,
+                losses / 1000,
+            ])
+        end
+    end
+end
+
+
 function write_transmission_operational_report_csv(output_dir::AbstractString, emp::JuMP.Model, sets, par::EmpireParams, periods::TimeStructure, labels::Vector{String})
     trans_op = emp[:transmissionOperational]
     header = ["FromNode", "ToNode", "Period", "Season", "Scenario", "Hour", "TransmissionReceived_MW", "Losses_MW"]
@@ -2122,6 +2783,55 @@ function write_transmission_operational_report_csv(output_dir::AbstractString, e
         end
     end
 end
+
+#For the Benders decomposition implementation
+
+function write_benders_transmission_operational_report_csv(
+    output_dir::AbstractString,
+    subproblem_nodes,
+    sets,
+    par::EmpireParams,
+    periods::TimeStructure,
+    labels::Vector{String},
+)
+    header = [
+        "FromNode",
+        "ToNode",
+        "Period",
+        "Season",
+        "Scenario",
+        "Hour",
+        "TransmissionReceived_MW",
+        "Losses_MW",
+    ]
+
+    return _write_csv_table(
+        joinpath(output_dir, "results_output_transmission_operational.csv"),
+        header,
+    ) do io
+        _foreach_operational_context(par, periods) do period_index, sp,
+            scenario_index, _, season, hour, t
+
+            trans_op = subproblem_nodes[sp][:transmissionOperational]
+
+            for (m, n) in arcs(sets)
+                sent = _value_or_zero(trans_op, m, n, t)
+
+                _write_csv_row(io, [
+                    m,
+                    n,
+                    _period_label(labels, period_index),
+                    season,
+                    _scenario_label(scenario_index),
+                    hour,
+                    line_eff(par, m, n) * sent,
+                    (1 - line_eff(par, m, n)) * sent,
+                ])
+            end
+        end
+    end
+end
+
 
 function write_operational_report_csv(output_dir::AbstractString, emp::JuMP.Model, sets, par::EmpireParams, periods::TimeStructure, labels::Vector{String})
     gen_op = emp[:genOperational]
@@ -2211,6 +2921,187 @@ function write_operational_report_csv(output_dir::AbstractString, emp::JuMP.Mode
     end
 end
 
+#For the Benders decomposition implementation
+function write_benders_operational_report_csv(
+    output_dir::AbstractString,
+    subproblem_nodes,
+    sets,
+    par::EmpireParams,
+    periods::TimeStructure,
+    labels::Vector{String},
+)
+    discounter = Discounter(discount_rate(par), 1, periods)
+    generator_columns = ["$(g)_MW" for g in generators(sets)]
+
+    header = vcat(
+        [
+            "Node", "Period", "Scenario", "Season", "Hour",
+            "AllGen_MW", "Load_MW", "Net_load_MW",
+        ],
+        generator_columns,
+        [
+            "storCharge_MW",
+            "storDischarge_MW",
+            "storEnergyLevel_MWh",
+            "LossesChargeDischargeBleed_MW",
+            "FlowOut_MW",
+            "FlowIn_MW",
+            "LossesFlowIn_MW",
+            "LoadShed_MW",
+            "Price_EURperMWh",
+            "AvgCO2_kgCO2perMWh",
+        ],
+    )
+
+    return _write_csv_table(
+        joinpath(output_dir, "results_output_Operational.csv"),
+        header,
+    ) do io
+        _foreach_operational_context(par, periods) do period_index, sp,
+            scenario_index, _, season, hour, t
+
+            subproblem = subproblem_nodes[sp]
+            gen_op = subproblem[:genOperational]
+            stor_charge = subproblem[:storCharge]
+            stor_discharge = subproblem[:storDischarge]
+            stor_op = subproblem[:storOperational]
+            trans_op = subproblem[:transmissionOperational]
+            load_shed = subproblem[:loadShed]
+
+            for n in nodes(sets)
+                all_gen = sum(
+                    _value_or_zero(gen_op, n, g, t)
+                    for g in generators(sets, n);
+                    init = 0.0,
+                )
+
+                shed = _value_or_zero(load_shed, n, t)
+
+                storage_net = sum(
+                    _value_or_zero(stor_charge, n, s, t) -
+                    discharge_eff(par, s) *
+                    _value_or_zero(stor_discharge, n, s, t)
+                    for s in storages(sets, n);
+                    init = 0.0,
+                )
+
+                transmission_net =
+                    sum(
+                        _value_or_zero(trans_op, n, to, t)
+                        for to in _outgoing_nodes(sets, n);
+                        init = 0.0,
+                    ) -
+                    sum(
+                        line_eff(par, from, n) *
+                        _value_or_zero(trans_op, from, n, t)
+                        for from in _incoming_nodes(sets, n);
+                        init = 0.0,
+                    )
+
+                net_load = -(
+                    sload(par, n, t) - shed +
+                    storage_net + transmission_net
+                )
+
+                gen_values = [
+                    _value_or_zero(gen_op, n, g, t)
+                    for g in generators(sets)
+                ]
+
+                storage_charge = sum(
+                    -_value_or_zero(stor_charge, n, s, t)
+                    for s in storages(sets, n);
+                    init = 0.0,
+                )
+
+                storage_discharge = sum(
+                    _value_or_zero(stor_discharge, n, s, t)
+                    for s in storages(sets, n);
+                    init = 0.0,
+                )
+
+                storage_level = sum(
+                    _value_or_zero(stor_op, n, s, t)
+                    for s in storages(sets, n);
+                    init = 0.0,
+                )
+
+                storage_losses = sum(
+                    -(1 - discharge_eff(par, s)) *
+                    _value_or_zero(stor_discharge, n, s, t) -
+                    (1 - charge_eff(par, s)) *
+                    _value_or_zero(stor_charge, n, s, t) -
+                    (1 - bleed_eff(par, s)) *
+                    _value_or_zero(stor_op, n, s, t)
+                    for s in storages(sets, n);
+                    init = 0.0,
+                )
+
+                flow_out = sum(
+                    -_value_or_zero(trans_op, n, to, t)
+                    for to in _outgoing_nodes(sets, n);
+                    init = 0.0,
+                )
+
+                flow_in = sum(
+                    _value_or_zero(trans_op, from, n, t)
+                    for from in _incoming_nodes(sets, n);
+                    init = 0.0,
+                )
+
+                losses_flow_in = sum(
+                    -(1 - line_eff(par, from, n)) *
+                    _value_or_zero(trans_op, from, n, t)
+                    for from in _incoming_nodes(sets, n);
+                    init = 0.0,
+                )
+
+                co2_weighted_gen = sum(
+                    _value_or_zero(gen_op, n, g, t) *
+                    co2_content(par, g) *
+                    (3.6 / _gen_efficiency(par, g, sp))
+                    for g in generators(sets, n);
+                    init = 0.0,
+                )
+
+                avg_co2 = all_gen == 0 ? 0.0 :
+                          co2_weighted_gen / all_gen
+
+                price = _flow_balance_price_benders(
+                    subproblem_nodes, n, sp, t, discounter,
+                )
+
+                _write_csv_row(io, vcat(
+                    Any[
+                        n,
+                        _period_label(labels, period_index),
+                        _scenario_label(scenario_index),
+                        season,
+                        hour,
+                        all_gen,
+                        -sload(par, n, t),
+                        net_load,
+                    ],
+                    gen_values,
+                    Any[
+                        storage_charge,
+                        storage_discharge,
+                        storage_level,
+                        storage_losses,
+                        flow_out,
+                        flow_in,
+                        losses_flow_in,
+                        shed,
+                        price,
+                        avg_co2,
+                    ],
+                ))
+            end
+        end
+    end
+end
+
+
 function write_curtailment_report_csvs(output_dir::AbstractString, emp::JuMP.Model, sets, par::EmpireParams, periods::TimeStructure, labels::Vector{String})
     gen_cap = emp[:genInstalledCap]
     gen_op = emp[:genOperational]
@@ -2244,6 +3135,72 @@ function write_curtailment_report_csvs(output_dir::AbstractString, emp::JuMP.Mod
             _write_csv_row(io, [n, g, _period_label(labels, period_index), _weighted_curtailment(emp, par, n, g, sp) / 1000])
         end
     end
+    return output_dir
+end
+
+#For the Benders decomposition implementation
+function write_benders_curtailment_report_csvs(
+    output_dir::AbstractString,
+    master,
+    subproblem_nodes,
+    sets,
+    par::EmpireParams,
+    periods::TimeStructure,
+    labels::Vector{String},
+)
+    gen_cap = master[:genInstalledCap]
+    res_pairs = [
+        (n, g) for (n, g) in node_generators(sets)
+        if _is_res_generator(sets, g)
+    ]
+
+    _write_csv_table(
+        joinpath(output_dir, "results_output_curtailed_operational.csv"),
+        ["Node", "Period", "Scenario", "Season", "Hour", "RESGeneratorType", "Curtailment_MWh"],
+    ) do io
+        _foreach_operational_context(par, periods) do period_index, sp, scenario_index, _, season, hour, t
+            gen_op = subproblem_nodes[sp][:genOperational]
+
+            for (n, g) in res_pairs
+                installed = _value_or_zero(gen_cap, n, g, sp)
+
+                curtailment = multiple_strat(sp, t) * probability(t) *
+                    (
+                        _gen_capacity_availability(par, n, g, t) * installed -
+                        _value_or_zero(gen_op, n, g, t)
+                    )
+
+                _write_csv_row(io, [
+                    n,
+                    _period_label(labels, period_index),
+                    _scenario_label(scenario_index),
+                    season,
+                    hour,
+                    g,
+                    curtailment,
+                ])
+            end
+        end
+    end
+
+    _write_csv_table(
+        joinpath(output_dir, "results_output_curtailed_prod.csv"),
+        ["Node", "RESGeneratorType", "Period", "ExpectedAnnualCurtailment_GWh"],
+    ) do io
+        for (n, g) in res_pairs, (period_index, sp) in _strategic_indices(periods)
+            curtailment = _weighted_curtailment_benders(
+                master, subproblem_nodes, par, n, g, sp,
+            )
+
+            _write_csv_row(io, [
+                n,
+                g,
+                _period_label(labels, period_index),
+                curtailment / 1000,
+            ])
+        end
+    end
+
     return output_dir
 end
 
@@ -2301,6 +3258,127 @@ function write_europe_plot_report_csv(output_dir::AbstractString, emp::JuMP.Mode
         end
     end
 end
+
+#For the Benders decomposition implementation
+function write_benders_europe_plot_report_csv(
+    output_dir::AbstractString,
+    master,
+    subproblem_nodes,
+    sets,
+    par::EmpireParams,
+    periods::TimeStructure,
+    labels::Vector{String},
+)
+    gen_cap = master[:genInstalledCap]
+    stor_pw_cap = master[:storPWInstalledCap]
+    stor_en_cap = master[:storENInstalledCap]
+
+    node_gen_pairs = Set(node_generators(sets))
+    node_storage_pairs = Set(node_storages(sets))
+
+    return _write_csv_table(
+        joinpath(output_dir, "results_output_EuropePlot.csv"),
+        ["Period", "genInstalledCap_MW"],
+    ) do io
+        # Installed generation capacity
+        _write_csv_row(io, vcat([""], generators(sets)))
+
+        _write_csv_row(io, vcat(Any["Initial"], [
+            sum(
+                gencap_init(par, n, g, first(strat_periods(periods)))
+                for n in nodes(sets)
+                if (n, g) in node_gen_pairs;
+                init = 0.0,
+            )
+            for g in generators(sets)
+        ]))
+
+        for (period_index, sp) in _strategic_indices(periods)
+            _write_csv_row(io, vcat(Any[_period_label(labels, period_index)], [
+                sum(
+                    _value_or_zero(gen_cap, n, g, sp)
+                    for n in nodes(sets)
+                    if (n, g) in node_gen_pairs;
+                    init = 0.0,
+                )
+                for g in generators(sets)
+            ]))
+        end
+
+        # Expected annual generation
+        _write_csv_row(io, [""])
+        _write_csv_row(io, ["Period", "genExpectedAnnualProduction_GWh"])
+        _write_csv_row(io, vcat([""], generators(sets)))
+
+        for (period_index, sp) in _strategic_indices(periods)
+            _write_csv_row(io, vcat(Any[_period_label(labels, period_index)], [
+                sum(
+                    _weighted_generation_benders(
+                        subproblem_nodes, par, n, g, sp,
+                    )
+                    for n in nodes(sets)
+                    if (n, g) in node_gen_pairs;
+                    init = 0.0,
+                ) / 1000
+                for g in generators(sets)
+            ]))
+        end
+
+        # Installed storage power capacity
+        _write_csv_row(io, [""])
+        _write_csv_row(io, ["Period", "storPWInstalledCap_MW"])
+        _write_csv_row(io, vcat([""], storages(sets)))
+
+        for (period_index, sp) in _strategic_indices(periods)
+            _write_csv_row(io, vcat(Any[_period_label(labels, period_index)], [
+                sum(
+                    _value_or_zero(stor_pw_cap, n, s, sp)
+                    for n in nodes(sets)
+                    if (n, s) in node_storage_pairs;
+                    init = 0.0,
+                )
+                for s in storages(sets)
+            ]))
+        end
+
+        # Installed storage energy capacity
+        _write_csv_row(io, [""])
+        _write_csv_row(io, ["Period", "storENInstalledCap_MWh"])
+        _write_csv_row(io, vcat([""], storages(sets)))
+
+        for (period_index, sp) in _strategic_indices(periods)
+            _write_csv_row(io, vcat(Any[_period_label(labels, period_index)], [
+                sum(
+                    _value_or_zero(stor_en_cap, n, s, sp)
+                    for n in nodes(sets)
+                    if (n, s) in node_storage_pairs;
+                    init = 0.0,
+                )
+                for s in storages(sets)
+            ]))
+        end
+
+        # Expected annual storage discharge
+        _write_csv_row(io, [""])
+        _write_csv_row(io, ["Period", "storExpectedAnnualDischarge_GWh"])
+        _write_csv_row(io, vcat([""], storages(sets)))
+
+        for (period_index, sp) in _strategic_indices(periods)
+            _write_csv_row(io, vcat(Any[_period_label(labels, period_index)], [
+                sum(
+                    _weighted_storage_discharge_benders(
+                        subproblem_nodes, par, n, s, sp,
+                    )
+                    for n in nodes(sets)
+                    if (n, s) in node_storage_pairs;
+                    init = 0.0,
+                ) / 1000
+                for s in storages(sets)
+            ]))
+        end
+    end
+end
+
 
 function write_europe_summary_report_csv(output_dir::AbstractString, emp::JuMP.Model, sets, par::EmpireParams, periods::TimeStructure, labels::Vector{String})
     gen_inv = emp[:genInvCap]
@@ -2390,4 +3468,284 @@ function write_europe_summary_report_csv(output_dir::AbstractString, emp::JuMP.M
             ])
         end
     end
+end
+
+#For the Benders decomposition implementation
+function write_benders_europe_summary_report_csv(
+    output_dir::AbstractString,
+    master,
+    subproblem_nodes,
+    sets,
+    par::EmpireParams,
+    periods::TimeStructure,
+    labels::Vector{String},
+)
+    gen_inv = master[:genInvCap]
+    gen_cap = master[:genInstalledCap]
+    stor_pw_inv = master[:storPWInvCap]
+    stor_pw_cap = master[:storPWInstalledCap]
+    stor_en_inv = master[:storENInvCap]
+    stor_en_cap = master[:storENInstalledCap]
+
+    discounter = Discounter(discount_rate(par), 1, periods)
+    node_gen_pairs = Set(node_generators(sets))
+    node_storage_pairs = Set(node_storages(sets))
+
+    header = [
+        "Period",
+        "Scenario",
+        "AnnualCO2emission_Ton",
+        "CO2Price_EuroPerTon",
+        "CO2Cap_Ton",
+        "AnnualGeneration_GWh",
+        "AvgCO2factor_TonPerMWh",
+        "AvgELPrice_EuroPerMWh",
+        "TotAnnualCurtailedRES_GWh",
+        "TotAnnualLossesChargeDischarge_GWh",
+        "AnnualLossesTransmission_GWh",
+    ]
+
+    return _write_csv_table(
+        joinpath(output_dir, "results_output_EuropeSummary.csv"),
+        header,
+    ) do io
+        # Scenario-specific operating results
+        for (period_index, sp) in _strategic_indices(periods)
+            scenario_count = length(opscenarios(first(repr_periods(sp))))
+
+            for scenario_index in 1:scenario_count
+                emissions = _annual_emissions_benders(
+                    subproblem_nodes, sets, par, sp, scenario_index,
+                )
+                generation = _annual_generation_benders(
+                    subproblem_nodes, sets, par, sp, scenario_index,
+                )
+                avg_co2 = generation == 0 ? 0.0 : emissions / generation
+
+                prices = Float64[]
+                for rp in repr_periods(sp)
+                    sc = collect(opscenarios(rp))[scenario_index]
+                    for t in sc, n in nodes(sets)
+                        push!(
+                            prices,
+                            _flow_balance_price_benders(
+                                subproblem_nodes, n, sp, t, discounter,
+                            ),
+                        )
+                    end
+                end
+
+                valid_prices = filter(!isnan, prices)
+                avg_price = isempty(valid_prices) ?
+                    NaN : sum(valid_prices) / length(valid_prices)
+
+                first_time = first(first(opscenarios(first(repr_periods(sp)))))
+                co2_price_value = _emission_price_benders(
+                    subproblem_nodes, par, sp, scenario_index,
+                    first_time, discounter,
+                )
+
+                _write_csv_row(io, [
+                    _period_label(labels, period_index),
+                    _scenario_label(scenario_index),
+                    emissions,
+                    co2_price_value,
+                    co2_cap(par, sp) === nothing ? 0.0 : co2_cap(par, sp) * 1e6,
+                    generation / 1000,
+                    avg_co2,
+                    avg_price,
+                    sum(
+                        _scenario_curtailment_benders(
+                            master, subproblem_nodes, par, n, g, sp, scenario_index,
+                        )
+                        for (n, g) in node_generators(sets)
+                        if _is_res_generator(sets, g);
+                        init = 0.0,
+                    ) / 1000,
+                    sum(
+                        _scenario_storage_losses_benders(
+                            subproblem_nodes, par, n, s, sp, scenario_index,
+                        )
+                        for (n, s) in node_storages(sets);
+                        init = 0.0,
+                    ) / 1000,
+                    sum(
+                        _scenario_transmission_losses_benders(
+                            subproblem_nodes, par, m, n, sp, scenario_index,
+                        )
+                        for (m, n) in bidir_arcs(sets);
+                        init = 0.0,
+                    ) / 1000,
+                ])
+            end
+        end
+
+        # Generation investment and production summary
+        _write_csv_row(io, [""])
+        _write_csv_row(io, [
+            "GeneratorType", "Period", "genInvCap_MW",
+            "genInstalledCap_MW", "TotDiscountedInvestmentCost_Euro",
+            "genExpectedAnnualProduction_GWh",
+        ])
+
+        for g in generators(sets), (period_index, sp) in _strategic_indices(periods)
+            _write_csv_row(io, [
+                g,
+                _period_label(labels, period_index),
+                sum(
+                    _value_or_zero(gen_inv, n, g, sp)
+                    for n in nodes(sets) if (n, g) in node_gen_pairs;
+                    init = 0.0,
+                ),
+                sum(
+                    _value_or_zero(gen_cap, n, g, sp)
+                    for n in nodes(sets) if (n, g) in node_gen_pairs;
+                    init = 0.0,
+                ),
+                sum(
+                    _discount_multiplier(par, periods, sp) *
+                    _value_or_zero(gen_inv, n, g, sp) *
+                    gen_invest_cost(par, g, sp)
+                    for n in nodes(sets) if (n, g) in node_gen_pairs;
+                    init = 0.0,
+                ),
+                sum(
+                    _weighted_generation_benders(
+                        subproblem_nodes, par, n, g, sp,
+                    )
+                    for n in nodes(sets) if (n, g) in node_gen_pairs;
+                    init = 0.0,
+                ) / 1000,
+            ])
+        end
+
+        # Storage investment and discharge summary
+        _write_csv_row(io, [""])
+        _write_csv_row(io, [
+            "StorageType", "Period", "storPWInvCap_MW",
+            "storPWInstalledCap_MW", "storENInvCap_MWh",
+            "storENInstalledCap_MWh", "TotDiscountedInvestmentCostPWEN_Euro",
+            "ExpectedAnnualDischargeVolume_GWh",
+        ])
+
+        for s in storages(sets), (period_index, sp) in _strategic_indices(periods)
+            _write_csv_row(io, [
+                s,
+                _period_label(labels, period_index),
+                sum(
+                    _value_or_zero(stor_pw_inv, n, s, sp)
+                    for n in nodes(sets) if (n, s) in node_storage_pairs;
+                    init = 0.0,
+                ),
+                sum(
+                    _value_or_zero(stor_pw_cap, n, s, sp)
+                    for n in nodes(sets) if (n, s) in node_storage_pairs;
+                    init = 0.0,
+                ),
+                sum(
+                    _value_or_zero(stor_en_inv, n, s, sp)
+                    for n in nodes(sets) if (n, s) in node_storage_pairs;
+                    init = 0.0,
+                ),
+                sum(
+                    _value_or_zero(stor_en_cap, n, s, sp)
+                    for n in nodes(sets) if (n, s) in node_storage_pairs;
+                    init = 0.0,
+                ),
+                sum(
+                    _discount_multiplier(par, periods, sp) * (
+                        _value_or_zero(stor_pw_inv, n, s, sp) *
+                            stor_pw_invest_cost(par, s, sp) +
+                        _value_or_zero(stor_en_inv, n, s, sp) *
+                            stor_en_invest_cost(par, s, sp)
+                    )
+                    for n in nodes(sets) if (n, s) in node_storage_pairs;
+                    init = 0.0,
+                ),
+                sum(
+                    _weighted_storage_discharge_benders(
+                        subproblem_nodes, par, n, s, sp,
+                    )
+                    for n in nodes(sets) if (n, s) in node_storage_pairs;
+                    init = 0.0,
+                ) / 1000,
+            ])
+        end
+    end
+end
+
+function benders_cost_totals(
+    master,
+    subproblem_nodes,
+    sets,
+    par,
+    periods::TimeStructure,
+    discounter::Discounter,
+)
+    N = nodes(sets)
+    HUB = collect(offshore_energy_hubs(sets))
+
+    investment_costs = 0.0
+    operational_costs = 0.0
+
+    # Investment costs from the master problem
+    for sp in strat_periods(periods)
+        investment_costs += objective_weight(sp, discounter) * (
+            sum(
+                gen_invest_cost(par, g, sp) *
+                JuMP.value(master[:genInvCap][n, g, sp])
+                for n in N
+                for g in generators(sets, n);
+                init = 0.0,
+            ) +
+            sum(
+                stor_pw_invest_cost(par, s, sp) *
+                JuMP.value(master[:storPWInvCap][n, s, sp]) +
+                stor_en_invest_cost(par, s, sp) *
+                JuMP.value(master[:storENInvCap][n, s, sp])
+                for n in N
+                for s in storages(sets, n);
+                init = 0.0,
+            ) +
+            sum(
+                trans_invest_cost(par, m, n, sp) *
+                JuMP.value(master[:transmissionInvCap][m, n, sp])
+                for (m, n) in bidir_arcs(sets);
+                init = 0.0,
+            ) +
+            sum(
+                offshore_conv_invest_cost(par, sp) *
+                JuMP.value(master[:offshoreConvInvCap][hub, sp])
+                for hub in HUB;
+                init = 0.0,
+            )
+        )
+    end
+
+    # Operational costs from all subproblems
+    for (sp, node) in subproblem_nodes
+        for t in sp
+            operational_costs +=
+                objective_weight(t, discounter; type = "avg_year") * (
+                    sum(
+                        lost_load_cost(par, n, t) *
+                        JuMP.value(node[:loadShed][n, t])
+                        for n in N;
+                        init = 0.0,
+                    ) +
+                    sum(
+                        gen_marginal_cost(par, g, t) *
+                        JuMP.value(node[:genOperational][n, g, t])
+                        for n in N
+                        for g in generators(sets, n);
+                        init = 0.0,
+                    )
+                )
+        end
+    end
+
+    return (
+        investment_costs = investment_costs,
+        operational_costs = operational_costs,
+    )
 end
