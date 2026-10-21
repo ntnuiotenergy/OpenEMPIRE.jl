@@ -2,7 +2,7 @@
 # To be used with the execution script run.py
 
 forecast_horizon_year: 2060                            # Target or end year for the run
-number_of_scenarios: 1                                 # Number of scenarios in every investment period
+number_of_scenarios: 2                                 # Number of scenarios in every investment period
 length_of_regular_season: 24                          # Number of hours in a regular season
 discount_rate: 0.05                                    # Rate used to discount future cash flows to present value
 wacc: 0.05                                             # Weighted average cost of capital
