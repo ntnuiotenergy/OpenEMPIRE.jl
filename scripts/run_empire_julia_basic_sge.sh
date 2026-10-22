@@ -24,6 +24,10 @@
 #   JULIA_OPTIMIZE  true/false, default: true
 #   JULIA_FIXED_SAMPLE  true/false, default: false. If true, pass
 #                       --fixed-sample and require ScenarioData/sampling_key.csv.
+#   STORAGE_ROOT       Storage root, default: /storage/users/$USER
+#   RESULTS_DIR        Run output directory, default:
+#                      $STORAGE_ROOT/OpenEMPIRE.jl/results
+#   TMPDIR             Julia temporary directory, default: $STORAGE_ROOT/tmp
 #   JULIA_SGE_HOSTS Host expression for SGE, default:
 #                   compute-6-24|compute-6-25|compute-6-26|compute-6-27|compute-6-28|compute-6-29|compute-6-30|compute-6-31|compute-6-32|compute-6-33|compute-6-34|compute-6-35|compute-6-36|compute-6-37|compute-6-38|compute-6-39|compute-6-40|compute-6-41|compute-6-42|compute-6-43|compute-6-44|compute-6-45|compute-6-46|compute-6-47|compute-6-48|compute-6-49
 #   EMPIRE_PERF         1/true/yes enables performance reporting, default: off
@@ -38,6 +42,10 @@ JULIA_SEED=${JULIA_SEED:-1}
 JULIA_OPTIMIZE=${JULIA_OPTIMIZE:-true}
 JULIA_FIXED_SAMPLE=${JULIA_FIXED_SAMPLE:-false}
 JULIA_SGE_HOSTS=${JULIA_SGE_HOSTS:-compute-6-24|compute-6-25|compute-6-26|compute-6-27|compute-6-28|compute-6-29|compute-6-30|compute-6-31|compute-6-32|compute-6-33|compute-6-34|compute-6-35|compute-6-36|compute-6-37|compute-6-38|compute-6-39|compute-6-40|compute-6-41|compute-6-42|compute-6-43|compute-6-44|compute-6-45|compute-6-46|compute-6-47|compute-6-48|compute-6-49}
+STORAGE_USER=${USER:-$(id -un)}
+STORAGE_ROOT=${STORAGE_ROOT:-/storage/users/$STORAGE_USER}
+RESULTS_DIR=${RESULTS_DIR:-$STORAGE_ROOT/OpenEMPIRE.jl/results}
+TMPDIR=${TMPDIR:-$STORAGE_ROOT/tmp}
 
 function split_sge_hosts() {
 	local host_expr="$1"
@@ -117,7 +125,7 @@ function submit_with_node_selection() {
 	echo "Submitting to selected SGE host: ${selected_host}"
 	qsub \
 		-l hostname="$selected_host" \
-		-v JULIA_CMD="$JULIA_CMD",JULIA_SOLVER="$JULIA_SOLVER",JULIA_SEED="$JULIA_SEED",JULIA_OPTIMIZE="$JULIA_OPTIMIZE",JULIA_FIXED_SAMPLE="$JULIA_FIXED_SAMPLE",JULIA_SGE_HOSTS="$JULIA_SGE_HOSTS",EMPIRE_PERF="${EMPIRE_PERF:-}",EMPIRE_PERF_INTERVAL="${EMPIRE_PERF_INTERVAL:-}" \
+		-v JULIA_CMD="$JULIA_CMD",JULIA_SOLVER="$JULIA_SOLVER",JULIA_SEED="$JULIA_SEED",JULIA_OPTIMIZE="$JULIA_OPTIMIZE",JULIA_FIXED_SAMPLE="$JULIA_FIXED_SAMPLE",JULIA_SGE_HOSTS="$JULIA_SGE_HOSTS",RESULTS_DIR="$RESULTS_DIR",TMPDIR="$TMPDIR",EMPIRE_PERF="${EMPIRE_PERF:-}",EMPIRE_PERF_INTERVAL="${EMPIRE_PERF_INTERVAL:-}" \
 		"$0" "$DATASET" "$CONFIG_FILE" "$INPUT_FORMAT"
 	echo "Job submitted to ${selected_host}. Use 'qstat' to monitor status."
 }
@@ -155,10 +163,13 @@ echo "Solver:       $JULIA_SOLVER"
 echo "Seed:         $JULIA_SEED"
 echo "Optimize:     $JULIA_OPTIMIZE"
 echo "Fixed sample: $JULIA_FIXED_SAMPLE"
+echo "Results:      $RESULTS_DIR"
+echo "TMPDIR:       $TMPDIR"
 echo "Start time:   $(date)"
 echo "================================================"
 
-mkdir -p logs
+mkdir -p logs "$RESULTS_DIR" "$TMPDIR"
+export TMPDIR
 
 echo "Loading optional Solstorm modules..."
 module load gurobi/13.0 2>/dev/null || module load gurobi/12.0 2>/dev/null || true
@@ -312,7 +323,8 @@ $PERF_PREFIX $JULIA_CMD --project=. scripts/run_julia_empire.jl \
 	--solver="$JULIA_SOLVER" \
 	--seed="$JULIA_SEED" \
 	$FIXED_SAMPLE_FLAG \
-	$OPTIMIZE_FLAG
+	$OPTIMIZE_FLAG \
+	--results="$RESULTS_DIR"
 
 EXIT_CODE=$?
 

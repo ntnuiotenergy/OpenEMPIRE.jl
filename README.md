@@ -140,7 +140,11 @@ Useful extra flags:
 | `--generate-only` | only generate scenario data, then stop |
 | `--seed=1` | seed for random scenario sampling |
 | `--fixed-sample` | reuse the dataset's existing `sampling_key.csv` |
-| `--results=PATH` | where to write output (default `results/julia_runs`) |
+| `--results=PATH` | optionally override where to write output (default `results/julia_runs`) |
+
+The results path and Julia's temporary directory are configurable but optional
+for ordinary runs. Set `TMPDIR` before starting Julia only when you want to
+override Julia's system temporary directory.
 
 A good first check that everything is wired up, without waiting for a solve:
 
@@ -265,9 +269,11 @@ memory than a laptop (hundreds of GB), so they run there.
 - **Never run computation on the login or head server.** That includes Julia
   precompilation and data preparation. Submit it as a job, or run it on a
   compute node inside `screen`.
-- **Write run outputs to `/storage/users/<username>`, not your home directory.**
+- **This storage requirement is specific to Solstorm:** put run outputs and
+  temporary files under `/storage/users/<username>`, not your home directory.
   Home is for code and small files. Storage is for working data — and is treated
-  as temporary.
+  as temporary. The output and temporary-directory overrides are optional
+  elsewhere.
 - **There are no backups.** Copy anything you want to keep back to your own
   machine.
 
@@ -380,6 +386,40 @@ the model. The solver can be selected with an environment variable:
 ```bash
 JULIA_SOLVER=Gurobi sh scripts/run_empire_julia_basic_sge.sh test
 ```
+
+On Solstorm, both the results directory and Julia's temporary directory must
+be on `/storage/users/$USER`, not in your home directory. The basic SGE runner
+sets these defaults for you:
+
+- results: `/storage/users/$USER/OpenEMPIRE.jl/results`
+- temporary files: `/storage/users/$USER/tmp`
+
+You can choose different locations, but keep both under `/storage/users/$USER`,
+by setting `RESULTS_DIR` or `TMPDIR` when submitting:
+
+```bash
+export RESULTS_DIR="/storage/users/$USER/empire-results"
+export TMPDIR="/storage/users/$USER/tmp"
+mkdir -p "$RESULTS_DIR" "$TMPDIR"
+sh scripts/run_empire_julia_basic_sge.sh test
+```
+
+If you invoke Julia directly on Solstorm, explicitly pass a results path under
+`/storage/users/$USER` and set `TMPDIR` there before starting Julia, for
+example:
+
+```bash
+TMPDIR="/storage/users/$USER/tmp" julia --project=. \
+  scripts/run_julia_empire.jl --dataset=test \
+  --results="/storage/users/$USER/empire-results"
+```
+
+Julia's `TMPDIR` environment variable controls the system temporary-directory
+location; set it before launching Julia (including before dependency setup or
+precompilation). OpenEMPIRE's own atomic staging workspaces are deliberately
+created beside the destination they publish, so those temporary files are
+under the configured results directory. SGE stdout and stderr are separate
+scheduler logs and remain in `logs/` in the checkout.
 
 ### Monitoring a job
 
