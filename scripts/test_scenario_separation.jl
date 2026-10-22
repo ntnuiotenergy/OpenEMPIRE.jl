@@ -114,13 +114,10 @@ emp, periods, sets, params = OpenEMPIRE.create_model(
     scenario_rng = MersenneTwister(seed),
 )
 
-emp, periods, sets, params = OpenEMPIRE.create_model(
-    config_file,
-    data_folder;
-    optimizer = Gurobi.Optimizer,
-    input_format = :csv,
-    scenario_rng = MersenneTwister(seed),
-)
+first_sp = first(strat_periods(periods))
+first_rp = first(repr_periods(first_sp))
+
+number_of_scenarios = length(opscenarios(first_rp))
 
 discounter = Discounter(
     OpenEMPIRE.discount_rate(params),
@@ -156,7 +153,18 @@ println("Benders OptiGraph created successfully.")
 # 3. Create Benders algorithm
 # ---------------------------------------------------------
 
+
 println("\n=== Creating Benders algorithm ===")
+
+max_iters = 500
+multicut = false
+parallelize_benders = true
+tolerance = 1e-7
+
+# Regularization configuration
+regularize = false
+regularize_param = 0.5
+warm_start = false
 
 solve_start_clock = time()
 
@@ -164,10 +172,13 @@ benders = PlasmoBenders.BendersAlgorithm(
     graph,
     master_graph;
     solver = optimizer,
-    multicut = false,
-    max_iters = 500,
-    parallelize_benders = true,
-    tol = 1e-7,
+    multicut = multicut,
+    max_iters = max_iters,
+    parallelize_benders = parallelize_benders,
+    tol = tolerance,
+    regularize = regularize,
+    regularize_param = regularize_param,
+    warm_start = warm_start,
 )
 
 println("Benders algorithm created successfully.")
@@ -290,13 +301,19 @@ write_benders_run_metadata(
     original_config_file = config_file,
     scenario_seed = seed,
     number_of_subproblems = length(scenario_nodes),
+    number_of_scenarios = number_of_scenarios,
     multicut = false,
     parallelize_benders = true,
     max_iters = 500,
     regularization = Dict{String, Any}(
-        "enabled" => false,
-        "method" => nothing,
-        "parameters" => Dict{String, Any}(),
+        "enabled" => regularize,
+        "method" => regularize ? "PlasmoBenders regularization" : nothing,
+        "parameters" => regularize ?
+            Dict{String, Any}(
+                "regularize_param" => regularize_param,
+                "warm_start" => warm_start,
+            ) :
+            Dict{String, Any}(),
     ),
     objective_value = benders.objective_value,
     relative_gap = PlasmoBenders.relative_gap(benders),
