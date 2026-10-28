@@ -26,7 +26,10 @@ INPUT_FORMAT=csv
 JULIA_CMD=${JULIA_CMD:-julia}
 JULIA_SOLVER=${JULIA_SOLVER:-Gurobi}
 JULIA_SEED=${JULIA_SEED:-1}
-RESULTS_DIR=${RESULTS_DIR:-/storage/users/torgrif/int_full_offshore_jl}
+STORAGE_USER=${USER:-$(id -un)}
+STORAGE_ROOT=${STORAGE_ROOT:-/storage/users/$STORAGE_USER}
+RESULTS_DIR=${RESULTS_DIR:-$STORAGE_ROOT/int_full_offshore_jl}
+TMPDIR=${TMPDIR:-$STORAGE_ROOT/tmp}
 
 if [ -z "$JOB_ID" ]; then
 	mkdir -p logs
@@ -53,7 +56,7 @@ if [ -z "$JOB_ID" ]; then
 	echo "Selected node: ${BEST_NODE}"
 
 	qsub -l hostname=${BEST_NODE} \
-		-v JULIA_CMD="$JULIA_CMD",JULIA_SOLVER="$JULIA_SOLVER",JULIA_SEED="$JULIA_SEED",RESULTS_DIR="$RESULTS_DIR" \
+		-v JULIA_CMD="$JULIA_CMD",JULIA_SOLVER="$JULIA_SOLVER",JULIA_SEED="$JULIA_SEED",RESULTS_DIR="$RESULTS_DIR",TMPDIR="$TMPDIR" \
 		"$0"
 	echo "Submitted. Monitor with qstat and logs/julia_full_<JOB_ID>.out"
 	exit 0
@@ -65,10 +68,12 @@ echo "Job ID:       $JOB_ID"
 echo "Hostname:     $(hostname)"
 echo "Config:       $CONFIG_FILE"
 echo "Results:      $RESULTS_DIR"
+echo "TMPDIR:       $TMPDIR"
 echo "Start time:   $(date)"
 echo "================================================"
 
-mkdir -p logs "$RESULTS_DIR"
+mkdir -p logs "$RESULTS_DIR" "$TMPDIR"
+export TMPDIR
 
 # Julia 1.12.2 is unusable on these nodes (its bundled 7z fails), so 1.9.3 first.
 module load gurobi/13.0 2>/dev/null || module load gurobi/12.0 2>/dev/null || true

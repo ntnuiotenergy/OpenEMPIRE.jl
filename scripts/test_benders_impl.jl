@@ -106,6 +106,11 @@ emp, periods, sets, params = OpenEMPIRE.create_model(
     scenario_rng = MersenneTwister(seed),
 )
 
+# Count scenarios (shared across all strategic-period subproblems)
+first_sp = first(strat_periods(periods))
+first_rp = first(repr_periods(first_sp))
+number_of_scenarios = length(opscenarios(first_rp))
+
 model_build_seconds = time() - model_build_start
 
 discounter = Discounter(
@@ -140,12 +145,17 @@ println("Benders OptiGraph created successfully.")
 
 println("\n=== Creating Benders algorithm ===")
 
+max_iters = 500
+
 benders = PlasmoBenders.BendersAlgorithm(
     graph,
     master_graph;
     solver = optimizer,
     multicut = true,
-    max_iters = 500,
+    max_iters = max_iters,
+    #regularize = true,
+    #regularize_param = 0.5,
+    warm_start = false, #må være false når regularize = true
 )
 
 println("Benders algorithm created successfully.")
@@ -309,13 +319,17 @@ write_benders_run_metadata(
     original_config_file = config_file,
     scenario_seed = seed,
     number_of_subproblems = length(subproblem_nodes),
+    number_of_scenarios = number_of_scenarios,
     multicut = true,
     parallelize_benders = false,
-    max_iters = 500,
+    max_iters = max_iters,
     regularization = Dict{String, Any}(
-        "enabled" => false,
-        "method" => nothing,
-        "parameters" => Dict{String, Any}(),
+        "enabled" => PlasmoBenders.get_regularize(benders),
+        "method" => "PlasmoBenders regularization",
+        "parameters" => Dict{String, Any}(
+            "regularize_param" => PlasmoBenders.get_regularize_param(benders),
+            "warm_start" => false,
+        ),
     ),
     objective_value = benders.objective_value,
     relative_gap = relative_gap,

@@ -15,7 +15,10 @@ INPUT_FORMAT=${INPUT_FORMAT:-csv}
 JULIA_CMD=${JULIA_CMD:-julia}
 JULIA_SOLVER=${JULIA_SOLVER:-Gurobi}
 JULIA_SEED=${JULIA_SEED:-1}
-RESULTS_DIR=${RESULTS_DIR:-/storage/users/torgrif/int_full_hydrogen_jl}
+STORAGE_USER=${USER:-$(id -un)}
+STORAGE_ROOT=${STORAGE_ROOT:-/storage/users/$STORAGE_USER}
+RESULTS_DIR=${RESULTS_DIR:-$STORAGE_ROOT/int_full_hydrogen_jl}
+TMPDIR=${TMPDIR:-$STORAGE_ROOT/tmp}
 TARGET_NODE=${TARGET_NODE:-}
 
 function valid_target_node() {
@@ -53,7 +56,7 @@ if [[ -z "$JOB_ID" ]]; then
 
 	echo "Selected node: $SELECTED_NODE"
 	qsub -l hostname="$SELECTED_NODE" \
-		-v DATASET="$DATASET",CONFIG_FILE="$CONFIG_FILE",INPUT_FORMAT="$INPUT_FORMAT",JULIA_CMD="$JULIA_CMD",JULIA_SOLVER="$JULIA_SOLVER",JULIA_SEED="$JULIA_SEED",RESULTS_DIR="$RESULTS_DIR",TARGET_NODE="$SELECTED_NODE" \
+		-v DATASET="$DATASET",CONFIG_FILE="$CONFIG_FILE",INPUT_FORMAT="$INPUT_FORMAT",JULIA_CMD="$JULIA_CMD",JULIA_SOLVER="$JULIA_SOLVER",JULIA_SEED="$JULIA_SEED",RESULTS_DIR="$RESULTS_DIR",TMPDIR="$TMPDIR",TARGET_NODE="$SELECTED_NODE" \
 		"$0"
 	echo "Submitted. Monitor logs/julia_hydrogen_full_<JOB_ID>.out"
 	exit 0
@@ -66,10 +69,12 @@ echo "Hostname:     $(hostname)"
 echo "Dataset:      $DATASET"
 echo "Config:       $CONFIG_FILE"
 echo "Results:      $RESULTS_DIR"
+echo "TMPDIR:       $TMPDIR"
 echo "Start time:   $(date)"
 echo "================================================"
 
-mkdir -p logs "$RESULTS_DIR"
+mkdir -p logs "$RESULTS_DIR" "$TMPDIR"
+export TMPDIR
 module load gurobi/13.0 2>/dev/null || module load gurobi/12.0 2>/dev/null || true
 # Solstorm's Julia modules change over time: 1.9.3 was removed, and a hard-coded
 # load that ends in "|| true" fails silently, leaving the job to run with no Julia
