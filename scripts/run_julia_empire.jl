@@ -809,12 +809,20 @@ function _solve_model!(
     sets,
     params,
     periods,
+    run_start,
     progress,
 )
     solve_start = time()
     progress("Starting solver optimization")
     solve_stats = @timed JuMP.optimize!(emp)
     solve_seconds = time() - solve_start
+    termination = JuMP.termination_status(emp)
+
+    time_to_optimal_seconds = if termination == JuMP.MOI.OPTIMAL
+        time() - run_start
+    else
+        nothing
+    end
     push!(
         perf_phases,
         _perf_phase(
@@ -825,6 +833,7 @@ function _solve_model!(
         ),
     )
     manifest["timings"]["solve_seconds"] = solve_seconds
+    manifest["timings"]["time_to_optimal_seconds"] = time_to_optimal_seconds
     progress("Solver optimization finished in $(round(solve_seconds; digits = 2)) seconds")
     solution = _extract_solver_result(emp) do
         progress("Computing objective component diagnostics")
@@ -995,7 +1004,7 @@ function _run_model(spec::JuliaRunSpec, manifest, run_start, progress)
     _write_run_manifest(spec.manifest_path, manifest)
 
     solution = if spec.optimize
-        _solve_model!(spec, manifest, perf_phases, emp, sets, params, periods, progress)
+        _solve_model!(spec, manifest, perf_phases, emp, sets, params, periods, run_start, progress)
     else
         (
             termination = nothing,

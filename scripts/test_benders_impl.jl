@@ -145,7 +145,7 @@ println("Benders OptiGraph created successfully.")
 
 println("\n=== Creating Benders algorithm ===")
 
-max_iters = 500
+max_iters = 100000
 
 benders = PlasmoBenders.BendersAlgorithm(
     graph,

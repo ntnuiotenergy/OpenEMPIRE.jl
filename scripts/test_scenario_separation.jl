@@ -156,7 +156,7 @@ println("Benders OptiGraph created successfully.")
 
 println("\n=== Creating Benders algorithm ===")
 
-max_iters = 500
+max_iters = 100000
 multicut = false
 parallelize_benders = true
 tolerance = 1e-7
