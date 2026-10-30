@@ -349,8 +349,8 @@ write_benders_run_metadata(
     scenario_seed = seed,
     number_of_subproblems = length(scenario_nodes),
     number_of_scenarios = number_of_scenarios,
-    multicut = false,
-    parallelize_benders = true,
+    multicut = multicut,
+    parallelize_benders = parallelize_benders,
     max_iters = max_iters,
     regularization = Dict{String, Any}(
         "enabled" => regularize,
