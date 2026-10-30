@@ -148,10 +148,10 @@ println("\n=== Creating Benders algorithm ===")
 max_iters = 100000
 tolerance = 1e-7
 multicut = false
-parallelize_benders = false
+parallelize_benders = true
 
 # Regularization configuration
-regularize = false
+regularize = true
 regularize_param = 0.5
 warm_start = false
 
