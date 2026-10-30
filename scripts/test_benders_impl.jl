@@ -154,7 +154,7 @@ multicut = false
 parallelize_benders = true
 
 # Regularization configuration
-regularize = false
+regularize = true
 regularize_param = 0.5
 warm_start = false
 
