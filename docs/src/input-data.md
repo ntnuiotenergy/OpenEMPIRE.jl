@@ -56,11 +56,23 @@ Scenario controls include `use_scenario_generation`, `use_fixed_sample`,
 takes precedence over filters, and filters take precedence over copula
 clusters.
 
+The optional modules are switched on with `natural_gas`, `hydrogen` and
+`industry`, all `false` by default. Hydrogen and industry both require natural
+gas and a single gas scenario (`number_of_gas_scenarios: 1`).
+
 The obsolete `north_sea` setting is ignored with a warning. Use
 `offshore_transmission_cap` to control the offshore wind-farm transmission
 constraint.
 
-The example configurations in `config/` are the best reference for complete files. Keep the dataset path and configuration consistent when comparing runs.
+Every configuration in `config/` lists every option, in the same order and
+sections. Options a run does not need are written at their default. The
+exceptions are the Gurobi `solver_*` keys, where an empty value keeps the Gurobi
+default, and the opt-in `internalempire_*` compatibility keys, which are
+commented out unless a parity run needs them. Make a new configuration by
+copying the closest file and changing values. The full key reference, with
+defaults, is in
+[config/README.md](https://github.com/ntnuiotenergy/OpenEMPIRE.jl/blob/main/config/README.md).
+Keep the dataset path and configuration consistent when comparing runs.
 
 ## Scenario input files
 

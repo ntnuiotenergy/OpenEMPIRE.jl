@@ -58,7 +58,7 @@ the same map; without caching it is rebuilt three times per model (about 8 MiB
 per build at 19,440 operational periods).
 """
 function _sector_period_context(
-    emp::JuMP.Model,
+    emp::JuMP.AbstractModel,
     periods,
     gas_scenario_count::Int,
 )
@@ -73,7 +73,7 @@ end
 const NaturalGasPeriodContext = OperationalPeriodContext
 _natural_gas_period_maps(periods, gas_scenario_count::Int) =
     _sector_period_maps(periods, gas_scenario_count)
-_natural_gas_period_context(emp::JuMP.Model, periods, gas_scenario_count::Int) =
+_natural_gas_period_context(emp::JuMP.AbstractModel, periods, gas_scenario_count::Int) =
     _sector_period_context(emp, periods, gas_scenario_count)
 
 function _operational_scenario_at(representative_period, scenario_index::Int)
@@ -89,7 +89,7 @@ end
 Declare and sparsely index the deterministic natural-gas operational variables.
 """
 function create_natural_gas_variables!(
-    emp::JuMP.Model, sets, periods; transport_demand::Bool = false,
+    emp::JuMP.AbstractModel, sets, periods; transport_demand::Bool = false,
 )
     has_natural_gas(sets) ||
         throw(ArgumentError("natural_gas=true requires non-empty natural-gas sets"))
@@ -163,7 +163,7 @@ function create_natural_gas_variables!(
 end
 
 function natural_gas_pipeline_electricity_demand(
-    emp::JuMP.Model,
+    emp::JuMP.AbstractModel,
     sets,
     par,
     node,
@@ -181,7 +181,7 @@ function natural_gas_pipeline_electricity_demand(
 end
 
 function _create_natural_gas_reserve_constraints!(
-    emp::JuMP.Model,
+    emp::JuMP.AbstractModel,
     sets,
     par,
     periods,
@@ -250,7 +250,7 @@ natural-gas transport demand inside its Hydrogen block, so gas-only runs leave i
 disabled and Hydrogen runs opt in explicitly.
 """
 function create_natural_gas_constraints!(
-    emp::JuMP.Model, sets, par, periods; transport_demand::Bool = false,
+    emp::JuMP.AbstractModel, sets, par, periods; transport_demand::Bool = false,
 )
     gas = par.NaturalGas
     period_context = _natural_gas_period_context(emp, periods, gas.gasScenarioCount)
@@ -405,7 +405,7 @@ function create_natural_gas_constraints!(
 end
 
 function natural_gas_objective_expressions(
-    emp::JuMP.Model,
+    emp::JuMP.AbstractModel,
     sets,
     par,
     periods,

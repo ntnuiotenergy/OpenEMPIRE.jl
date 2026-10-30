@@ -15,7 +15,7 @@ struct HydrogenElectricityContext
     co2FlowsByNode::Dict{String, Vector{HydrogenFlowDemand}}
 end
 
-function _hydrogen_electricity_context!(emp::JuMP.Model, sets, par)
+function _hydrogen_electricity_context!(emp::JuMP.AbstractModel, sets, par)
     cached = get(emp.ext, :hydrogen_electricity_context, nothing)
     cached isa HydrogenElectricityContext && return cached
     hydrogen = hydrogen_sets(sets)
@@ -72,7 +72,7 @@ end
 Declare the deterministic Hydrogen and CO₂ subsystem variables using sparse
 indices only. No variables are added when the public Hydrogen gate is disabled.
 """
-function create_hydrogen_variables!(emp::JuMP.Model, sets, periods)
+function create_hydrogen_variables!(emp::JuMP.AbstractModel, sets, periods)
     has_hydrogen(sets) ||
         throw(ArgumentError("hydrogen=true requires non-empty Hydrogen sets"))
 
@@ -267,7 +267,7 @@ end
 
 """Add deterministic InternalEMPIRE-compatible Hydrogen and CO₂ constraints."""
 function create_hydrogen_constraints!(
-    emp::JuMP.Model,
+    emp::JuMP.AbstractModel,
     sets,
     par,
     periods;

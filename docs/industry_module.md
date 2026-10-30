@@ -28,13 +28,18 @@ electricity, natural gas, Hydrogen, biomass, emissions, and captured-CO2 balance
 
 ## Running and outputs
 
-Copy `config/run_full_model_int.yaml`, enable the gates above, then run:
+`config/run_int_full_industry.yaml` already has the gates above enabled, and
+`config/run_int_2030_industry_fast.yaml` is a reduced variant that finishes in
+minutes. Run either directly:
 
 ```bash
 julia --project=. scripts/run_julia_empire.jl \
   --dataset=full_model_int \
-  --config=/path/to/run_full_model_int_industry.yaml
+  --config=config/run_int_full_industry.yaml
 ```
+
+For a custom run, copy either file and change values; every config lists all
+options (see `config/README.md`).
 
 Results are written below `<result-dir>/output/`. Native operational files are
 `industrySteelOperations.csv`, `industryCementOperations.csv`,

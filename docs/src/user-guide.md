@@ -175,8 +175,12 @@ Three things decide what a run does:
 
 ### The config file
 
-Config files live in `config/`. `config/testrun.yaml` is the default and is
-commented throughout. The keys you are most likely to change:
+Config files live in `config/`. `config/testrun.yaml` is the default. Every
+config file lists **every** option, in the same order, with a comment on each.
+Options a run does not need are written out at their default, so you make a new
+config by copying the closest file and changing values. The full key reference,
+with defaults, is in [config/README.md](https://github.com/ntnuiotenergy/OpenEMPIRE.jl/blob/main/config/README.md). The keys you are most
+likely to change:
 
 ```yaml
 forecast_horizon_year: 2030      # last year modelled; periods are 5 years each
@@ -187,7 +191,8 @@ wacc: 0.05                       # weighted average cost of capital
 use_scenario_generation: True    # sample scenarios from the raw time series
 use_fixed_sample: False          # True = reuse the stored sampling_key.csv
 use_emission_cap: True           # True = CO2 cap; False = CO2 price
-north_sea: False                 # optional offshore transmission cap
+offshore_transmission_cap: True  # cap wind-farm corridors by their own generation
+natural_gas: False               # optional modules: natural_gas, hydrogen, industry
 ```
 
 **Horizon and periods.** The model steps in 5-year investment periods starting
@@ -202,15 +207,19 @@ starting at maximum.
 ### Solver options
 
 Solver settings also live in the config file and are passed straight through to
-Gurobi. Leave a key out to keep the Gurobi default.
+Gurobi. Every config lists all the `solver_*` keys; leave a value empty to keep
+the Gurobi default (empty is not the same as `0`).
 
 ```yaml
 solver_method: 2             # 2 = barrier, usually best for large LPs
 solver_crossover: 0          # 0 = skip crossover (much faster on large runs)
 solver_numericfocus: 1       # more careful numerics
-# solver_presolve: 2         # aggressive presolve
-# solver_threads: 16
+solver_presolve:             # empty = Gurobi default
+solver_threads:              # set to the physical core count if needed
 ```
+
+`optimization_solver` in the config is informational only; the solver used is
+chosen with `--solver`.
 
 **On large runs, keep `solver_crossover: 0`.** Barrier finds the optimum on its
 own; leaving crossover enabled can add hours of extra work afterwards.

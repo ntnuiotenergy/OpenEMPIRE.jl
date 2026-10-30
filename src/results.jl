@@ -200,7 +200,7 @@ function _value_or_zero(container, args...)
     end
 end
 
-function _objective_value_or_nan(emp::JuMP.Model)
+function _objective_value_or_nan(emp::JuMP.AbstractModel)
     try
         return Float64(JuMP.objective_value(emp))
     catch
@@ -256,7 +256,7 @@ function _is_res_generator(sets, generator::AbstractString)
     return false
 end
 
-function _flow_balance_price(emp::JuMP.Model, node::AbstractString, sp, t, discounter::Discounter)
+function _flow_balance_price(emp::JuMP.AbstractModel, node::AbstractString, sp, t, discounter::Discounter)
     objects = JuMP.object_dictionary(emp)
     haskey(objects, :flow_balance) || return NaN
     strategic_weight = objective_weight(sp, discounter)
@@ -360,7 +360,7 @@ The low-level files mirror the simple first-stage and operational variable
 dumps, while the `results_*.csv` files provide Python-style reporting tables
 with cleaned Julia naming conventions.
 """
-function write_solution_tables(result_dir::AbstractString, emp::JuMP.Model, sets, par::EmpireParams, periods::TimeStructure)
+function write_solution_tables(result_dir::AbstractString, emp::JuMP.AbstractModel, sets, par::EmpireParams, periods::TimeStructure)
     output_dir = joinpath(result_dir, "output")
     mkpath(output_dir)
 
@@ -1060,7 +1060,7 @@ end
 
 function write_natural_gas_csvs(
     output_dir::AbstractString,
-    emp::JuMP.Model,
+    emp::JuMP.AbstractModel,
     sets,
     par::EmpireParams,
     periods::TimeStructure,
@@ -1451,7 +1451,7 @@ end
 
 function write_natural_gas_dual_csvs(
     output_dir::AbstractString,
-    emp::JuMP.Model,
+    emp::JuMP.AbstractModel,
     sets,
     par::EmpireParams,
     periods::TimeStructure,
@@ -1759,7 +1759,7 @@ function write_investment_csvs(output_dir::AbstractString, emp, sets, periods::T
     return output_dir
 end
 
-function write_operational_csvs(output_dir::AbstractString, emp::JuMP.Model, sets, par::EmpireParams, periods::TimeStructure)
+function write_operational_csvs(output_dir::AbstractString, emp::JuMP.AbstractModel, sets, par::EmpireParams, periods::TimeStructure)
     # Streamed rather than accumulated: these are the largest tables the port
     # writes (genOperational reaches 13,048,560 rows on full_model_int), and
     # building them as Vector{NamedTuple} before handing them to CSV.write held
@@ -1973,7 +1973,7 @@ function write_cost_diagnostic_csvs(output_dir::AbstractString, sets, par::Empir
     return output_dir
 end
 
-function _weighted_generation(emp::JuMP.Model, par::EmpireParams, node::AbstractString, generator::AbstractString, sp, scenario_index = nothing)
+function _weighted_generation(emp::JuMP.AbstractModel, par::EmpireParams, node::AbstractString, generator::AbstractString, sp, scenario_index = nothing)
     gen_op = emp[:genOperational]
     total = 0.0
     for rp in repr_periods(sp)
@@ -2025,7 +2025,7 @@ function _weighted_storage_discharge(emp::JuMP.Model, par::EmpireParams, node::A
     return total
 end
 
-function _weighted_storage_losses(emp::JuMP.Model, par::EmpireParams, node::AbstractString, storage::AbstractString, sp, scenario_index = nothing)
+function _weighted_storage_losses(emp::JuMP.AbstractModel, par::EmpireParams, node::AbstractString, storage::AbstractString, sp, scenario_index = nothing)
     stor_charge = emp[:storCharge]
     stor_discharge = emp[:storDischarge]
     total = 0.0
@@ -2115,7 +2115,7 @@ function _weighted_transmission_volume(emp::JuMP.Model, par::EmpireParams, from:
     return total
 end
 
-function _weighted_transmission_losses(emp::JuMP.Model, par::EmpireParams, from::AbstractString, to::AbstractString, sp, scenario_index = nothing)
+function _weighted_transmission_losses(emp::JuMP.AbstractModel, par::EmpireParams, from::AbstractString, to::AbstractString, sp, scenario_index = nothing)
     trans_op = emp[:transmissionOperational]
     total = 0.0
     for rp in repr_periods(sp)

@@ -224,7 +224,7 @@ function preprocess_industry_investment_costs!(par, sets, periods)
 end
 
 """Declare sparse strategic and operational Industry variables."""
-function create_industry_variables!(emp::JuMP.Model, sets, periods)
+function create_industry_variables!(emp::JuMP.AbstractModel, sets, periods)
     has_industry(sets) || throw(ArgumentError("industry=true requires non-empty Industry sets"))
     industry = industry_sets(sets)
     strategic_periods = strat_periods(periods)
@@ -468,7 +468,7 @@ end
 
 """Add deterministic InternalEMPIRE-compatible Industry constraints."""
 function create_industry_constraints!(
-    emp::JuMP.Model, sets, par, periods;
+    emp::JuMP.AbstractModel, sets, par, periods;
     include_investment_constraints::Bool = true,
 )
     industry = industry_sets(sets)

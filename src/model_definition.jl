@@ -78,7 +78,7 @@ function _report_progress(progress, message)
 end
 
 function create_variables(
-    emp::JuMP.Model,
+    emp::JuMP.AbstractModel,
     sets,
     periods::TimeStruct.TimeStructure;
     natural_gas::Bool = false,
@@ -184,7 +184,7 @@ function create_variables(
 end
 
 function create_objective(
-    emp::JuMP.Model,
+    emp::JuMP.AbstractModel,
     sets,
     par,
     periods::TimeStructure,
@@ -208,7 +208,7 @@ end
 # true, so ordinary model building is unchanged.
 # Create all constraints in the model
 function create_constraints(
-    emp::JuMP.Model,
+    emp::JuMP.AbstractModel,
     sets,
     par,
     periods::TimeStructure;
@@ -317,7 +317,7 @@ Zero when the dataset has no hubs. If it has hubs but ships no converter costs t
 capacity would be unpriced rather than unavailable, so that case warns instead of
 silently building free converters.
 """
-function offshore_conv_investment_expr(emp::JuMP.Model, sets, par, sp)
+function offshore_conv_investment_expr(emp::JuMP.AbstractModel, sets, par, sp)
     hubs = offshore_energy_hubs(sets)
     isempty(hubs) && return zero(JuMP.AffExpr)
     cost = offshore_conv_invest_cost(par, sp)
@@ -340,7 +340,7 @@ function duration_aggr(sp, spp, strat_periods)
 end
 
 function create_generator_constraints(
-    emp::JuMP.Model,
+    emp::JuMP.AbstractModel,
     sets,
     par,
     periods::TimeStructure;
@@ -442,7 +442,7 @@ limits. The biomass table is in GJ and the biomethane table in TJ, matching the
 units of the source workbook and Pyomo formulation.
 """
 function create_bioenergy_constraints(
-        emp::JuMP.Model,
+        emp::JuMP.AbstractModel,
         sets,
         par,
         periods::TimeStructure;
@@ -495,7 +495,7 @@ function create_bioenergy_constraints(
 end
 
 function create_storage_constraints(
-    emp::JuMP.Model,
+    emp::JuMP.AbstractModel,
     sets,
     par,
     periods::TimeStructure;
@@ -619,7 +619,7 @@ function _offshore_endpoint(sets, m, n)
 end
 
 function create_transmission_constraints(
-    emp::JuMP.Model,
+    emp::JuMP.AbstractModel,
     sets,
     par,
     periods::TimeStructure;
@@ -745,7 +745,7 @@ function _opscenario_count(sp)
 end
 
 function create_emission_constraints(
-    emp::JuMP.Model,
+    emp::JuMP.AbstractModel,
     sets,
     par,
     periods::TimeStructure;
@@ -812,7 +812,7 @@ function create_emission_constraints(
     )
 end
 
-function objective_component_expressions(emp::JuMP.Model, sets, par, periods::TimeStructure, discounter::Discounter)
+function objective_component_expressions(emp::JuMP.AbstractModel, sets, par, periods::TimeStructure, discounter::Discounter)
     N = nodes(sets)
     SP = strat_periods(periods)
 
@@ -931,7 +931,7 @@ function objective_component_expressions(emp::JuMP.Model, sets, par, periods::Ti
     )
 end
 
-function objective_component_values(emp::JuMP.Model, sets, par, periods::TimeStructure, discounter::Discounter)
+function objective_component_values(emp::JuMP.AbstractModel, sets, par, periods::TimeStructure, discounter::Discounter)
     expressions = objective_component_expressions(emp, sets, par, periods, discounter)
     return map(JuMP.value, expressions)
 end

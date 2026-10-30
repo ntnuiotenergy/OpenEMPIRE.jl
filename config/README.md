@@ -16,6 +16,78 @@ the tables below.
 
 ---
 
+## Every file lists every option
+
+All run configs in this folder carry the **same keys, in the same order and
+grouped into the same sections**: horizon and resolution, optional modules,
+economics and emissions, scenario sampling, output, InternalEMPIRE compatibility,
+and solver. Where a run does not need a particular value, the key is written out
+with its default. Two runs can therefore be compared line by line, and a new
+config is made by copying the nearest file and changing values. You never need to
+add keys.
+
+There are two exceptions to "write the default":
+
+- **`solver_*` keys** have no OpenEMPIRE default. They are passed to Gurobi,
+  and an **empty value** (`solver_scaleflag:`) keeps Gurobi's own default.
+  Writing `0` is not the same as leaving it empty.
+- **`internalempire_*` keys** switch on a compatibility rule just by being
+  present, whatever their value. Files that do not use them carry them
+  commented out.
+
+Keep this convention when adding a config, or when adding a new key to the code:
+add the key, with its default, to every file in this folder.
+
+### Key reference
+
+| key | default | what it does |
+| --- | --- | --- |
+| **Horizon and resolution** | | |
+| `forecast_horizon_year` | *required* | last year modelled |
+| `leap_years_investment` | *required* | years per investment period |
+| `number_of_scenarios` | *required* | weather/load scenarios per investment period |
+| `length_of_regular_season` | *required* | hours in each regular season |
+| `regular_seasons` | `["winter", "spring", "summer", "fall"]` | regular seasons modelled |
+| `n_peak_seasons` | `2` | number of peak seasons |
+| `len_peak_season` | `24` | hours in each peak season |
+| `operational_hours_per_year` | `8760` | only used by chronological full-year out-of-sample runs |
+| **Optional modules** | | |
+| `natural_gas` | `False` | natural-gas module |
+| `hydrogen` | `False` | Hydrogen/CO2 module; requires `natural_gas` |
+| `industry` | `False` | Industry module; requires `natural_gas` |
+| `number_of_gas_scenarios` | `1` | gas terminal-price scenarios; must be 1 with hydrogen or industry |
+| `offshore_transmission_cap` | `True` | cap wind-farm corridors by their own generation |
+| **Economics and emissions** | | |
+| `discount_rate` | *required* | discount rate for future cash flows |
+| `wacc` | *required* | weighted average cost of capital |
+| `use_emission_cap` | `False` | `True` = CO2 cap (`CO2cap.csv`); `False` = CO2 price (`CO2price.csv`) |
+| `load_change_module` | `False` | not used by the model; recorded so out-of-sample runs can check they match their investment run |
+| **Scenario sampling** | | |
+| `use_scenario_generation` | `True` | sample scenarios from the raw time series |
+| `use_fixed_sample` | `False` | reuse the dataset's stored `sampling_key.csv` |
+| `time_format` | `"%d/%m/%Y %H:%M"` | time format of the scenario data files |
+| `filter_make` | `False` | cluster the candidate windows, write `filter_result.csv` |
+| `filter_use` | `False` | sample only from those clusters |
+| `n_cluster` | `10` | number of clusters for `filter_make` |
+| `copula_clusters_make` | `False` | cluster on co-movement between variables |
+| `copula_clusters_use` | `False` | copula-based scenario sampling |
+| `copulas_to_use` | `["electricload"]` | any of `electricload`, `hydroror`, `hydroseasonal`, `solar`, `windoffshore`, `windonshore` |
+| **Output** | | |
+| `write_raw_solution` | `False` | also write the raw JuMP solution |
+| **InternalEMPIRE compatibility** | | |
+| `internalempire_missing_hydro_raw_default_mw` | *absent* (off) | fill missing seasonal-hydro samples with this value (InternalEMPIRE uses 1.0) |
+| `internalempire_missing_line_efficiency_default` | *absent* (off) | fill missing line efficiencies with this value (InternalEMPIRE uses 0.97) |
+| **Solver** | | |
+| `optimization_solver` | — | informational only; the solver is chosen with `--solver` |
+| `solver_method`, `solver_crossover`, `solver_presolve`, `solver_numericfocus`, `solver_barhomogeneous`, `solver_scaleflag`, `solver_seed`, `solver_threads` | *empty* (Gurobi default) | integer Gurobi parameters `Method`, `Crossover`, `Presolve`, `NumericFocus`, `BarHomogeneous`, `ScaleFlag`, `Seed`, `Threads` |
+| `solver_barconvtol`, `solver_feasibilitytol` | *empty* (Gurobi default) | Gurobi tolerances `BarConvTol`, `FeasibilityTol` |
+
+The `--gurobi-method`, `--gurobi-crossover`, `--gurobi-presolve`,
+`--gurobi-feasibility-tol` and `--gurobi-bar-conv-tol` command-line flags
+override the matching config values.
+
+---
+
 ## The modules, and how they depend on each other
 
 Three optional modules sit on top of the base electricity model. Each is **off by
@@ -78,9 +150,9 @@ as intended.
 
 ## Building a run config
 
-Start from an existing file rather than a blank one — `testrun.yaml` is the
-smallest and is commented throughout. The settings below are the ones that
-actually change what is solved.
+Copy the existing file closest to what you want and change values — every file
+already lists every key, with a comment on each. `testrun.yaml` is the smallest.
+The settings below are the ones that actually change what is solved.
 
 ### Horizon and resolution
 
@@ -103,7 +175,7 @@ number_of_scenarios × length_of_regular_season × number of periods
 
 To make a run smaller, cut the horizon or the scenario count first.
 
-Optional, if the defaults do not suit:
+The season layout is also in every file, at its default:
 
 ```yaml
 regular_seasons: ["winter", "spring", "summer", "fall"]
@@ -137,7 +209,7 @@ time_format: "%d/%m/%Y %H:%M"
 same weather from the same stored key. Set it to `False` to draw a fresh sample
 and write a new key.
 
-Optional selection methods, all off by default:
+Alternative selection methods, all `False` in the bundled files:
 
 ```yaml
 filter_make: False              # cluster the candidate windows, write filter_result.csv
@@ -157,14 +229,37 @@ If more than one is enabled, `use_fixed_sample` wins over `filter_use`, and
 offshore_transmission_cap: true   # default; caps wind-farm corridors by their own generation
 ```
 
-The older `north_sea` key is obsolete. It is ignored and warned about rather than
-silently accepted, because runs were once submitted with `north_sea: true` against
-a build that no longer read it.
+The older `north_sea` key is obsolete and has been removed from every file here. If
+it appears in an older config, it is ignored with a warning rather than silently
+accepted, because runs were once submitted with `north_sea: true` against a build
+that no longer read it.
+
+### Output
+
+```yaml
+write_raw_solution: False   # True also writes the raw JuMP solution
+```
+
+The hydrogen and industry `_fast` parity configs set it to `True`.
+
+### InternalEMPIRE compatibility
+
+```yaml
+# internalempire_missing_hydro_raw_default_mw: 1.0
+# internalempire_missing_line_efficiency_default: 0.97
+```
+
+These two keys reproduce silent Pyomo defaults in InternalEMPIRE, so parity runs
+build the same model. Each takes effect **as soon as it is present**, whatever its
+value, so it is commented out in files that do not need it. The gas, hydrogen and
+industry parity configs and `run_full_model_int.yaml` enable the hydro default.
+The hydrogen and industry configs also enable the line-efficiency default.
 
 ### Solver
 
-Passed straight through to Gurobi. Leave a key out to keep the Gurobi default —
-an absent key is not the same as setting it to zero.
+Passed straight through to Gurobi. Every file lists all the solver keys; leave a
+value **empty** to keep the Gurobi default. An empty value is not the same as
+zero.
 
 ```yaml
 solver_method: 2            # 2 = barrier, best for large LPs
@@ -188,11 +283,18 @@ Two settings worth knowing before a large run:
   roughly four orders of magnitude compared with the standard barrier, at about
   2.4× the cost per iteration.
 
-`solver_presolve: 2` is best avoided — it has stalled the barrier on this model.
+`solver_presolve: 2` is best avoided on `full_model_int` — it has stalled the
+barrier there. The europe_v51 configs and `testrun.yaml` still use it.
+
+`optimization_solver` is informational only. The solver actually used is chosen
+with `--solver` on the command line.
 
 ---
 
 ## Worked examples
+
+Each example lists only the keys that differ from `testrun.yaml` or from the
+defaults. The real files spell out every key.
 
 **Base electricity only, small and fast** — start here:
 
@@ -271,3 +373,8 @@ Configs inherited from the Python version may still contain
 `moment_matching` and `n_tree_compare`. Nothing reads them here, so setting one
 has no effect. They have been removed from the files in this folder; what each did
 in the Python version is recorded in [TODO.md](../TODO.md).
+
+`north_sea` has also been removed (see [Offshore](#offshore)). One leftover is
+that out-of-sample runs still compare it between the investment run and the
+evaluation run. An investment run whose config still had `north_sea: true` will
+therefore not match an evaluation run that uses an updated config.
