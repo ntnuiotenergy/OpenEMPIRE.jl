@@ -205,6 +205,37 @@ result_dir = joinpath(
 output_dir = joinpath(result_dir, "output")
 mkpath(output_dir)
 
+function write_benders_iteration_times(output_dir, benders)
+
+    filepath = joinpath(output_dir, "benders_iteration_times.csv")
+
+    iteration_times = benders.time_iterations
+
+    isempty(iteration_times) && return
+
+    longest_iteration = maximum(iteration_times)
+    average_iteration = sum(iteration_times) / length(iteration_times)
+
+    open(filepath, "w") do file
+        println(file, "iteration,duration_seconds")
+
+        # Individual iteration times
+        for (i, t) in enumerate(iteration_times)
+            println(file, "$i,$t")
+        end
+
+        # Summary statistics
+        println(file, "")
+        println(file, "Summary,duration_seconds")
+        println(file, "Longest iteration,$longest_iteration")
+        println(file, "Average iteration,$average_iteration")
+    end
+
+    println("Iteration timings written to: $filepath")
+    println("Longest iteration: $longest_iteration seconds")
+    println("Average iteration: $average_iteration seconds")
+end
+
 #=OpenEMPIRE.write_investment_csvs(
     output_dir,
     master,
@@ -237,6 +268,8 @@ OpenEMPIRE.write_benders_objective_csv(
     investment_costs = costs.investment_costs,
     operational_costs = costs.operational_costs,
 )
+
+write_benders_iteration_times(output_dir, benders)
 
 #=OpenEMPIRE.write_cost_diagnostic_csvs(
     output_dir,
