@@ -55,8 +55,9 @@ those two are genuine functional gaps. The rest — LP export, IAMC formatting,
 serialisation, temporary directories — affect how a run is carried out or
 reported, not what it computes.
 
-`number_of_gas_scenarios` was deliberately **not** removed: it is unused on
-branches without the natural-gas module, but is read in four files once that
-module is present.
+`north_sea` has also been removed; it is superseded by `offshore_transmission_cap`
+and only triggers a warning if present. The remaining run configs now all list
+the same, complete set of keys that the Julia version reads (see
+[config/README.md](config/README.md)).
 
 The clarification points above are still open.

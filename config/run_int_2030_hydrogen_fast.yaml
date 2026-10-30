@@ -1,46 +1,61 @@
 # Reduced real-model Hydrogen/CO2 parity run: full_model_int to 2030,
 # 2 weather scenarios, 24 h regular seasons. Natural gas and Hydrogen are on;
 # Industry and Heat are off.
-use_temporary_directory: True
-temporary_directory: './'
-forecast_horizon_year: 2030
-number_of_scenarios: 2
-natural_gas: True
-hydrogen: True
-number_of_gas_scenarios: 1
-length_of_regular_season: 24
-discount_rate: 0.05
-wacc: 0.05
-optimization_solver: "Gurobi"
-use_scenario_generation: True
-use_fixed_sample: True
-internalempire_missing_hydro_raw_default_mw: 1.0
-internalempire_missing_line_efficiency_default: 0.97
-load_change_module: False
-filter_make: False
-filter_use: False
-copula_clusters_make: False
-copula_clusters_use: False
-copulas_to_use: ["electricload"]
-n_cluster: 10
-moment_matching: False
-n_tree_compare: 20
-use_emission_cap: True
-compute_operational_duals: False
-print_in_iamc_format: False
-write_in_lp_format: False
-serialize_instance: False
-write_raw_solution: True
-leap_years_investment: 5
-time_format: "%d/%m/%Y %H:%M"
 
+# --- Horizon and resolution ---
+forecast_horizon_year: 2030             # Last year modelled
+leap_years_investment: 5                # Years per investment period
+number_of_scenarios: 2                  # Weather/load scenarios per investment period
+length_of_regular_season: 24            # Hours in each regular season
+regular_seasons: ["winter", "spring", "summer", "fall"]  # Regular seasons modelled
+n_peak_seasons: 2                       # Number of peak seasons
+len_peak_season: 24                     # Hours in each peak season
+operational_hours_per_year: 8760        # Only used by chronological full-year out-of-sample runs
+
+# --- Optional modules (hydrogen and industry require natural_gas) ---
+natural_gas: True                       # Natural-gas module
+hydrogen: True                          # Hydrogen/CO2 module; requires natural_gas
+industry: False                         # Industry module; requires natural_gas
+number_of_gas_scenarios: 1              # Must be 1 when hydrogen or industry is on
+offshore_transmission_cap: True         # Cap wind-farm corridors by their own generation
+
+# --- Economics and emissions ---
+discount_rate: 0.05                     # Rate used to discount future cash flows to present value
+wacc: 0.05                              # Weighted average cost of capital
+use_emission_cap: True                  # True = CO2 cap (CO2cap.csv); False = CO2 price (CO2price.csv)
+load_change_module: False               # Not used by the model; recorded for out-of-sample checks
+
+# --- Scenario sampling ---
+use_scenario_generation: True           # Sample scenarios from the raw time series
+use_fixed_sample: True                  # Reuse the dataset's stored sampling_key.csv
+time_format: "%d/%m/%Y %H:%M"           # Time format for scenario data files
+filter_make: False                      # Cluster the candidate windows, write filter_result.csv
+filter_use: False                       # Sample only from those clusters
+n_cluster: 10                           # Number of clusters for filter_make
+copula_clusters_make: False             # Cluster on co-movement between variables
+copula_clusters_use: False              # Copula-based scenario generation (strata/filter approach)
+copulas_to_use: ["electricload"]        # Any of ["electricload", "hydroror", "hydroseasonal", "solar", "windoffshore", "windonshore"]
+
+# --- Output ---
+write_raw_solution: True                # Also write the raw JuMP solution
+
+# --- InternalEMPIRE compatibility (absent = off; set only for parity runs) ---
+internalempire_missing_hydro_raw_default_mw: 1.0  # Fill missing seasonal-hydro samples (Pyomo default=1)
+internalempire_missing_line_efficiency_default: 0.97  # Fill missing line efficiencies (Pyomo default=0.97)
+
+# --- Solver ---
+# solver_* keys are passed to Gurobi; an empty value keeps the Gurobi default.
 # Reduced parity profile. Crossover cleanup exceeded one million simplex
 # iterations on this model, so the comparison uses the matched barrier-only
 # certificate and excludes non-unique dispatch.
-solver_method: 2
-solver_crossover: 0
-solver_presolve: 1
-solver_numericfocus: 1
-solver_barhomogeneous: 1
-solver_feasibilitytol: 1.0e-9
-solver_barconvtol: 1.0e-8
+optimization_solver: "Gurobi"           # Informational only; the solver is chosen with --solver
+solver_method: 2                        # 2 = barrier (interior point), usually best for large LPs
+solver_crossover: 0                     # 0 = skip crossover
+solver_presolve: 1                      # 1 = conservative, 2 = aggressive (2 has stalled the barrier at full scale)
+solver_numericfocus: 1                  # 1-3 = progressively more numerical care
+solver_barhomogeneous: 1                # 1 = homogeneous barrier; robust on difficult runs
+solver_barconvtol: 1.0e-8               # Barrier convergence tolerance
+solver_feasibilitytol: 1.0e-9           # Primal feasibility tolerance
+solver_scaleflag:                       # Robustness option; can slow solves
+solver_seed:                            # Random seed
+solver_threads:                         # Set to the physical core count if needed
