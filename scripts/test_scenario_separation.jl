@@ -29,6 +29,7 @@ function parse_benders_args(args)
         "format" => "csv",
         "solver" => "Gurobi",
         "seed" => "1",
+        "results" => "results"
     )
 
     for arg in args
@@ -86,6 +87,7 @@ function parse_benders_args(args)
         solver_name = solver_name,
         optimizer = optimizer,
         seed = parse(Int, options["seed"]),
+        results_dir = options["results"],
     )
 end
 
@@ -98,6 +100,7 @@ input_format = spec.input_format
 solver_name = spec.solver_name
 optimizer = spec.optimizer
 seed = spec.seed
+results_base_dir = spec.results_dir
 
 println("Dataset:      $dataset")
 println("Data folder:  $data_folder")
@@ -213,7 +216,7 @@ println("Time to convergence: ", time_to_optimal_seconds, " seconds")
 timestamp = Dates.format(now(), dateformat"yyyymmdd_HHMMSS")
 
 result_dir = joinpath(
-    "results",
+    results_base_dir,
     "benders_scenario_separation",
     "$(timestamp)_$(dataset)",
 )
