@@ -166,7 +166,7 @@ parallelize_benders = true
 tolerance = 1e-7
 
 # Regularization configuration
-regularize = false
+regularize = true
 regularize_param = 0.5
 warm_start = false
 
