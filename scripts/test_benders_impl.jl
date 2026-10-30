@@ -86,7 +86,7 @@ config_file = spec.config_file
 input_format = spec.input_format
 solver_name = spec.solver_name
 optimizer = spec.optimizer
-seed = spec.
+seed = spec.seed
 results_base_dir = spec.results_dir
 
 println("Dataset:      $dataset")
