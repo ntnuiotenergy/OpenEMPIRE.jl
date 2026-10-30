@@ -1,30 +1,57 @@
 # This is an OpenEMPIRE configuration file.
-# To be used with the execution script run.py
+# To be used with scripts/run_julia_empire.jl.
 
-forecast_horizon_year: 2045                            # Target or end year for the run
-number_of_scenarios: 50                                 # Number of scenarios in every investment period
-length_of_regular_season: 168                          # Number of hours in a regular season
-discount_rate: 0.05                                    # Rate used to discount future cash flows to present value
-wacc: 0.05                                             # Weighted average cost of capital
-optimization_solver: "Gurobi"                          # Mathematical solver used for optimization tasks
-use_scenario_generation: True                          # Indicates if scenarios should be generated dynamically
-use_fixed_sample: False                                # Specifies if fixed scenario samples should be used
-load_change_module: False                              #
-filter_make : False                                    #
-filter_use : False                                     #
-copula_clusters_make: False                            # Make copula clusters (for copula-strata SGR)
-copula_clusters_use: False                             # Copula-based scenario generation (strata/filter approach)
-copulas_to_use: ["electricload"]                       # Emprical copula construction of ["electricload", "hydroror", "hydroseasonal", "solar", "windoffshore", "windonshore"]
-n_cluster : 10                                         #
-use_emission_cap: True                                 # Indicates if there's a cap on CO2 emissions
-leap_years_investment: 5                               # Number of years per period (default: 5)
-time_format: "%d/%m/%Y %H:%M"                          # Time format for scenario data files
+# --- Horizon and resolution ---
+forecast_horizon_year: 2045             # Last year modelled
+leap_years_investment: 5                # Years per investment period
+number_of_scenarios: 50                 # Weather/load scenarios per investment period
+length_of_regular_season: 168           # Hours in each regular season
+regular_seasons: ["winter", "spring", "summer", "fall"]  # Regular seasons modelled
+n_peak_seasons: 2                       # Number of peak seasons
+len_peak_season: 24                     # Hours in each peak season
+operational_hours_per_year: 8760        # Only used by chronological full-year out-of-sample runs
 
-# Solver (Gurobi) performance options. Leave a value commented/absent to use the Gurobi default.
-solver_method: 2                                       # 2 = barrier (interior point), usually best for large LPs
-solver_crossover: 0                                    # 0 = skip crossover; matches Python EMPIRE's large-run default
-solver_presolve: 2                                     # 2 = aggressive presolve
-# solver_threads: 16                                   # Set to physical core count on the machine if needed
-# solver_scaleflag: 2                                  # Robustness option; can slow solves
-# solver_numericfocus: 1                               # Robustness option; 1-3 means progressively more numerical care
-# solver_barhomogeneous: 1                             # Robustness option for difficult/infeasible barrier runs
+# --- Optional modules (hydrogen and industry require natural_gas) ---
+natural_gas: False                      # Natural-gas module
+hydrogen: False                         # Hydrogen/CO2 module; requires natural_gas
+industry: False                         # Industry module; requires natural_gas
+number_of_gas_scenarios: 1              # Must be 1 when hydrogen or industry is on
+offshore_transmission_cap: True         # Cap wind-farm corridors by their own generation
+
+# --- Economics and emissions ---
+discount_rate: 0.05                     # Rate used to discount future cash flows to present value
+wacc: 0.05                              # Weighted average cost of capital
+use_emission_cap: True                  # True = CO2 cap (CO2cap.csv); False = CO2 price (CO2price.csv)
+load_change_module: False               # Not used by the model; recorded for out-of-sample checks
+
+# --- Scenario sampling ---
+use_scenario_generation: True           # Sample scenarios from the raw time series
+use_fixed_sample: False                 # Reuse the dataset's stored sampling_key.csv
+time_format: "%d/%m/%Y %H:%M"           # Time format for scenario data files
+filter_make: False                      # Cluster the candidate windows, write filter_result.csv
+filter_use: False                       # Sample only from those clusters
+n_cluster: 10                           # Number of clusters for filter_make
+copula_clusters_make: False             # Cluster on co-movement between variables
+copula_clusters_use: False              # Copula-based scenario generation (strata/filter approach)
+copulas_to_use: ["electricload"]        # Any of ["electricload", "hydroror", "hydroseasonal", "solar", "windoffshore", "windonshore"]
+
+# --- Output ---
+write_raw_solution: False               # Also write the raw JuMP solution
+
+# --- InternalEMPIRE compatibility (absent = off; set only for parity runs) ---
+# internalempire_missing_hydro_raw_default_mw: 1.0  # Fill missing seasonal-hydro samples (Pyomo default=1)
+# internalempire_missing_line_efficiency_default: 0.97  # Fill missing line efficiencies (Pyomo default=0.97)
+
+# --- Solver ---
+# solver_* keys are passed to Gurobi; an empty value keeps the Gurobi default.
+optimization_solver: "Gurobi"           # Informational only; the solver is chosen with --solver
+solver_method: 2                        # 2 = barrier (interior point), usually best for large LPs
+solver_crossover: 0                     # 0 = skip crossover
+solver_presolve: 2                      # 1 = conservative, 2 = aggressive (2 has stalled the barrier at full scale)
+solver_numericfocus:                    # 1-3 = progressively more numerical care
+solver_barhomogeneous:                  # 1 = homogeneous barrier; robust on difficult runs
+solver_barconvtol:                      # Barrier convergence tolerance
+solver_feasibilitytol:                  # Primal feasibility tolerance
+solver_scaleflag:                       # Robustness option; can slow solves
+solver_seed:                            # Random seed
+solver_threads:                         # Set to the physical core count if needed
