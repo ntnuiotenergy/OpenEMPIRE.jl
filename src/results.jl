@@ -1939,8 +1939,8 @@ function write_benders_objective_csv(
     objective_value,
     relative_gap,
     number_of_runs::Integer;
-    investment_costs,
-    operational_costs,
+    investment_costs = missing,
+    operational_costs = missing,
 )
     output_file = joinpath(output_dir, "results_objective.csv")
 

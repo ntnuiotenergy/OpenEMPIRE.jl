@@ -101,8 +101,8 @@ model_build_start = time()
 emp, periods, sets, params = OpenEMPIRE.create_model(
     config_file,
     data_folder;
-    optimizer = Gurobi.Optimizer,
-    input_format = :csv,
+    optimizer = optimizer,
+    input_format = input_format,
     scenario_rng = MersenneTwister(seed),
 )
 
@@ -146,16 +146,27 @@ println("Benders OptiGraph created successfully.")
 println("\n=== Creating Benders algorithm ===")
 
 max_iters = 100000
+tolerance = 1e-7
+multicut = false
+parallelize_benders = false
+
+# Regularization configuration
+regularize = false
+regularize_param = 0.5
+warm_start = false
+
 
 benders = PlasmoBenders.BendersAlgorithm(
     graph,
     master_graph;
     solver = optimizer,
-    multicut = true,
+    multicut = multicut,
     max_iters = max_iters,
-    #regularize = true,
-    #regularize_param = 0.5,
-    warm_start = false, #må være false når regularize = true
+    tol = tolerance,
+    regularize = regularize,
+    regularize_param = regularize_param,
+    parallelize_benders = parallelize_benders,
+    warm_start = warm_start, #må være false når regularize = true
 )
 
 println("Benders algorithm created successfully.")
@@ -170,7 +181,17 @@ solve_start_clock = time()
 PlasmoBenders.run_algorithm!(benders)
 solve_seconds = time() - solve_start_clock
 
-PlasmoBenders.run_algorithm!(benders)
+relative_gap = PlasmoBenders.relative_gap(benders)
+converged = relative_gap <= tolerance
+
+time_to_optimal_seconds = converged ?
+    time() - run_start_clock :
+    nothing
+
+println("Benders converged: ", converged)
+println("Time to convergence: ", time_to_optimal_seconds, " seconds")
+
+#PlasmoBenders.run_algorithm!(benders)
 
 #Write to CSV
 timestamp = Dates.format(now(), dateformat"yyyymmdd_HHMMSS")
@@ -184,7 +205,7 @@ result_dir = joinpath(
 output_dir = joinpath(result_dir, "output")
 mkpath(output_dir)
 
-OpenEMPIRE.write_investment_csvs(
+#=OpenEMPIRE.write_investment_csvs(
     output_dir,
     master,
     sets,
@@ -197,7 +218,7 @@ OpenEMPIRE.write_benders_operational_csvs(
     sets,
     params,
     periods,
-)
+)=#
 
 costs = OpenEMPIRE.benders_cost_totals(
     master,
@@ -217,7 +238,7 @@ OpenEMPIRE.write_benders_objective_csv(
     operational_costs = costs.operational_costs,
 )
 
-OpenEMPIRE.write_cost_diagnostic_csvs(
+#=OpenEMPIRE.write_cost_diagnostic_csvs(
     output_dir,
     sets,
     params,
@@ -300,12 +321,11 @@ OpenEMPIRE.write_benders_europe_summary_report_csv(
     params,
     periods,
     OpenEMPIRE._period_labels(periods),
-)
+)=#
 
 run_end_time = now()
 wall_seconds = time() - run_start_clock
 
-relative_gap = PlasmoBenders.relative_gap(benders)
 iterations = length(PlasmoBenders.get_lower_bounds(benders))
 
 write_benders_run_metadata(
@@ -321,7 +341,7 @@ write_benders_run_metadata(
     number_of_subproblems = length(subproblem_nodes),
     number_of_scenarios = number_of_scenarios,
     multicut = true,
-    parallelize_benders = false,
+    parallelize_benders = parallelize_benders,
     max_iters = max_iters,
     regularization = Dict{String, Any}(
         "enabled" => PlasmoBenders.get_regularize(benders),
@@ -334,9 +354,10 @@ write_benders_run_metadata(
     objective_value = benders.objective_value,
     relative_gap = relative_gap,
     iterations = iterations,
-    converged = relative_gap <= 1e-7,
+    converged = converged,
     build_seconds = model_build_seconds + decomposition_build_seconds,
     solve_seconds = solve_seconds,
+    time_to_optimal_seconds = time_to_optimal_seconds,
     wall_seconds = wall_seconds,
     start_time = run_start_time,
     end_time = run_end_time,

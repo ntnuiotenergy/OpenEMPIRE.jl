@@ -106,6 +106,10 @@ println("Input format: $input_format")
 println("Solver:       $solver_name")
 println("Seed:         $seed")
 
+run_start_time = now()
+run_start_clock = time()
+model_build_start = time()
+
 emp, periods, sets, params = OpenEMPIRE.create_model(
     config_file,
     data_folder;
@@ -119,6 +123,8 @@ first_rp = first(repr_periods(first_sp))
 
 number_of_scenarios = length(opscenarios(first_rp))
 
+model_build_seconds = time() - model_build_start
+
 discounter = Discounter(
     OpenEMPIRE.discount_rate(params),
     1,
@@ -131,11 +137,8 @@ discounter = Discounter(
 
 println("\n=== Creating Benders OptiGraph ===")
 
-run_start_time = now()
-run_start_clock = time()
-
 # Build the decomposition graph
-build_start_clock = time()
+decomposition_build_start = time()
 
 graph, master_graph, master, scenario_graphs, scenario_nodes =
     OpenEMPIRE.create_benders_graph(
@@ -145,7 +148,8 @@ graph, master_graph, master, scenario_graphs, scenario_nodes =
         discounter,
     )
 
-build_seconds = time() - build_start_clock
+decomposition_build_seconds = time() - decomposition_build_start
+build_seconds = model_build_seconds + decomposition_build_seconds
 
 println("Benders OptiGraph created successfully.")
 
@@ -165,8 +169,6 @@ tolerance = 1e-7
 regularize = false
 regularize_param = 0.5
 warm_start = false
-
-solve_start_clock = time()
 
 benders = PlasmoBenders.BendersAlgorithm(
     graph,
@@ -189,9 +191,21 @@ println("Benders algorithm created successfully.")
 
 println("\n=== Running Benders ===")
 
+solve_start_clock = time()
+
 PlasmoBenders.run_algorithm!(benders)
 
 solve_seconds = time() - solve_start_clock
+
+relative_gap = PlasmoBenders.relative_gap(benders)
+converged = relative_gap <= tolerance
+
+time_to_optimal_seconds = converged ?
+    time() - run_start_clock :
+    nothing
+
+println("Benders converged: ", converged)
+println("Time to convergence: ", time_to_optimal_seconds, " seconds")
 
 
 #Write results to CSV
@@ -208,31 +222,31 @@ output_dir = joinpath(result_dir, "output")
 mkpath(output_dir)
 
 # Investment results
-OpenEMPIRE.write_investment_csvs(
+#=OpenEMPIRE.write_investment_csvs(
     output_dir, master, sets, periods,
-)
+)=#
 
 # Objective value, relative gap, and number of iterations
-costs = OpenEMPIRE.benders_cost_totals(
+#=costs = OpenEMPIRE.benders_cost_totals(
     master,
     scenario_nodes,
     sets,
     params,
     periods,
     discounter,
-)
+)=#
 
 OpenEMPIRE.write_benders_objective_csv(
     output_dir,
     benders.objective_value,
     PlasmoBenders.relative_gap(benders),
     length(PlasmoBenders.get_lower_bounds(benders));
-    investment_costs = costs.investment_costs,
-    operational_costs = costs.operational_costs,
+    #investment_costs = costs.investment_costs,
+    #operational_costs = costs.operational_costs,
 )
 
 # Cost diagnostics
-OpenEMPIRE.write_cost_diagnostic_csvs(
+#=OpenEMPIRE.write_cost_diagnostic_csvs(
     output_dir, sets, params, periods,
 )
 
@@ -285,7 +299,7 @@ OpenEMPIRE.write_benders_europe_plot_report_csv(
 OpenEMPIRE.write_benders_europe_summary_report_csv(
     output_dir, master, scenario_nodes, sets, params, periods,
     OpenEMPIRE._period_labels(periods),
-)
+)=#
 
 run_end_time = now()
 wall_seconds = time() - run_start_clock
@@ -304,7 +318,7 @@ write_benders_run_metadata(
     number_of_scenarios = number_of_scenarios,
     multicut = false,
     parallelize_benders = true,
-    max_iters = 500,
+    max_iters = max_iters,
     regularization = Dict{String, Any}(
         "enabled" => regularize,
         "method" => regularize ? "PlasmoBenders regularization" : nothing,
@@ -318,9 +332,10 @@ write_benders_run_metadata(
     objective_value = benders.objective_value,
     relative_gap = PlasmoBenders.relative_gap(benders),
     iterations = length(PlasmoBenders.get_lower_bounds(benders)),
-    converged = PlasmoBenders.relative_gap(benders) <= 1e-7,
+    converged = PlasmoBenders.relative_gap(benders) <= tolerance,
     build_seconds = build_seconds,
     solve_seconds = solve_seconds,
+    time_to_optimal_seconds = time_to_optimal_seconds,
     wall_seconds = wall_seconds,
     start_time = run_start_time,
     end_time = run_end_time,

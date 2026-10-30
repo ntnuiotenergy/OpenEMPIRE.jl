@@ -42,6 +42,7 @@ function write_benders_run_metadata(
     converged = nothing,
     build_seconds = nothing,
     solve_seconds = nothing,
+    time_to_optimal_seconds = nothing,
     wall_seconds = nothing,
     start_time = nothing,
     end_time = now(),
@@ -97,6 +98,7 @@ function write_benders_run_metadata(
         "timings" => Dict{String, Any}(
             "build_seconds" => build_seconds,
             "solve_seconds" => solve_seconds,
+            "time_to_optimal_seconds" => time_to_optimal_seconds,
             "wall_seconds" => wall_seconds,
         ),
         "solver" => Dict{String, Any}(
@@ -134,6 +136,7 @@ function write_benders_run_metadata(
         "converged=$converged",
         "build_seconds=$build_seconds",
         "solve_seconds=$solve_seconds",
+        "time_to_optimal_seconds=$time_to_optimal_seconds",
         "wall_seconds=$wall_seconds",
         "solver=$solver_name",
         "run_status=$run_status",
