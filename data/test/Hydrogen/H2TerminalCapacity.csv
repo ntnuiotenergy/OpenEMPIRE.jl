@@ -1,0 +1,10 @@
+H2TerminalNodes,H2Terminals,Period,Capacity_(ton/hr)
+France,LH2Import,1,0
+France,LH2Import,2,0
+France,LH2Import,3,0
+Germany,LH2Import,1,0
+Germany,LH2Import,2,0
+Germany,LH2Import,3,0
+France,PipelineH2Import,1,0
+France,PipelineH2Import,2,0
+France,PipelineH2Import,3,0

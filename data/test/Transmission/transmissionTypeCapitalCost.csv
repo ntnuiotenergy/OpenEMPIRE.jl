@@ -5,3 +5,6 @@ HVAC_OverheadLine,3,604.46875
 HVDC_Cable,1,2769.230769230769
 HVDC_Cable,2,2769.230769230769
 HVDC_Cable,3,2160.0
+HVDC_OffshoreToOnshore,1,1185.6
+HVDC_OffshoreToOnshore,2,1014.0
+HVDC_OffshoreToOnshore,3,1014.0

@@ -45,3 +45,11 @@ France,Wind_onshr,202454.0
 Germany,Waste,1873.2
 Denmark,Waste,339.15000000000003
 France,Waste,927.1500000000001
+Denmark,Biomethane,200000.0
+France,Biomethane,200000.0
+Germany,Biomethane,200000.0
+Denmark,Hydrogen,200000.0
+France,Hydrogen,200000.0
+Germany,Hydrogen,200000.0
+Draupner,Gas,200.0
+DoggerBank,Wind_offshr,19512.0

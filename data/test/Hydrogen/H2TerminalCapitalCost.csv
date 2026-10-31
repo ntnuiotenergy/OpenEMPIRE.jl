@@ -1,0 +1,10 @@
+H2TerminalNodes,H2Terminals,Period,CapitalCost_(EUR/ton/h)
+France,LH2Import,1,9999999999999.0
+France,LH2Import,2,21631111.8
+France,LH2Import,3,21631111.8
+Germany,LH2Import,1,9999999999999.0
+Germany,LH2Import,2,21631111.8
+Germany,LH2Import,3,21631111.8
+France,PipelineH2Import,1,9999999999999.0
+France,PipelineH2Import,2,21851421.428571433
+France,PipelineH2Import,3,21438276.1904762

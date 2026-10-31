@@ -228,6 +228,8 @@ function _read_sector_vector(path, header, sector)
     return values
 end
 
+_is_hydrogen_generator(generator) = occursin("hydrogen", lowercase(generator))
+
 function _read_hydrogen_sets_csv(dir, generators, links, gas_sets)
     component = "Hydrogen"
     production_nodes = _read_sector_vector(
@@ -235,7 +237,7 @@ function _read_hydrogen_sets_csv(dir, generators, links, gas_sets)
     )
     generator_path = _required_csv(dir, component, "HydrogenGenerators.csv")
     hydrogen_generators = _read_sector_vector(generator_path, "HydrogenGenerator", component)
-    derived_generators = sort([g for g in generators if occursin("hydrogen", lowercase(g))])
+    derived_generators = sort(filter(_is_hydrogen_generator, generators))
     sort(hydrogen_generators) == derived_generators || throw(ArgumentError(
         "Hydrogen generator CSV $generator_path does not match the case-insensitive " *
         "generator-name rule; file=$(sort(hydrogen_generators)), derived=$derived_generators",
@@ -675,6 +677,11 @@ function read_sets_csv(
 
     sets_dir = "Sets"
     generators = _read_vector_csv(_required_csv(dir, sets_dir, "Generator.csv"))
+    # Hydrogen generators burn hydrogen that only the Hydrogen module prices; the
+    # InternalEMPIRE data gives them no fuel cost. Without the module they would run
+    # on free fuel, so leave them out of the model entirely.
+    hydrogen || filter!(!_is_hydrogen_generator, generators)
+    keep_generator(row) = row[end] in generators
     gas_sets = natural_gas ? _read_natural_gas_sets_csv(dir, generators) : NaturalGasSets()
     wind_farm_path = _optional_csv(dir, sets_dir, "OffshoreWindFarmNode.csv")
     energy_hub_path = _optional_csv(dir, sets_dir, "OffshoreEnergyHub.csv")
@@ -701,7 +708,9 @@ function read_sets_csv(
 
     return OpenEMPIRE.EmpireSets(
         Generator = generators,
-        ThermalGenerators = _read_vector_csv(_required_csv(dir, sets_dir, "ThermalGenerators.csv")),
+        ThermalGenerators = filter!(
+            in(generators), _read_vector_csv(_required_csv(dir, sets_dir, "ThermalGenerators.csv")),
+        ),
         HydroGenerator = _read_vector_csv(_required_csv(dir, sets_dir, "HydroGenerator.csv")),
         RegHydroGenerator = _read_vector_csv(_required_csv(dir, sets_dir, "RegHydroGenerator.csv")),
         Storage = _read_vector_csv(_required_csv(dir, sets_dir, "Storage.csv")),
@@ -714,8 +723,12 @@ function read_sets_csv(
         TransmissionType = _read_vector_csv(_required_csv(dir, sets_dir, "TransmissionType.csv")),
         TransmissionTypeOfDirectionalLink =
             _read_tuple3_csv(_required_csv(dir, sets_dir, "TransmissionTypeOfDirectionalLink.csv")),
-        GeneratorsOfTechnology = _read_tuple2_csv(_required_csv(dir, sets_dir, "GeneratorsOfTechnology.csv")),
-        GeneratorsOfNode = _read_tuple2_csv(_required_csv(dir, sets_dir, "GeneratorsOfNode.csv")),
+        GeneratorsOfTechnology = filter!(
+            keep_generator, _read_tuple2_csv(_required_csv(dir, sets_dir, "GeneratorsOfTechnology.csv")),
+        ),
+        GeneratorsOfNode = filter!(
+            keep_generator, _read_tuple2_csv(_required_csv(dir, sets_dir, "GeneratorsOfNode.csv")),
+        ),
         StoragesOfNode = _read_tuple2_csv(_required_csv(dir, sets_dir, "StoragesOfNode.csv")),
         NaturalGas = gas_sets,
         Hydrogen = hydrogen_sets,
@@ -1493,7 +1506,10 @@ function read_params_csv(
     par.storageLifetime = _read_float_by_string_csv(_required_csv(dir, storage, "storageLifetime.csv"))
 
     node = "Node"
-    par.nodeLostLoadCost = _read_strategic_profiles_csv(_required_csv(dir, node, "nodeLostLoadCost.csv"))
+    par.nodeLostLoadCost = _read_strategic_profiles_csv(
+        _required_csv(dir, node, "nodeLostLoadCost.csv");
+        default_value = DEFAULT_LOST_LOAD_COST,
+    )
     par.sloadAnnualDemand = _read_strategic_profiles_csv(_required_csv(dir, node, "sloadAnnualDemand.csv"))
     par.maxHydroNode = _read_float_by_string_csv(_required_csv(dir, node, "maxHydroNode.csv"))
 
@@ -1512,7 +1528,24 @@ function read_params_csv(
     end
     hydrogen && (par.Hydrogen = _read_hydrogen_params_csv(dir))
     industry && (par.Industry = _read_industry_params_csv(dir))
+    hydrogen || _drop_hydrogen_generator_params!(par)
 
+    return par
+end
+
+# Companion to the set filter in `read_sets_csv`: without the Hydrogen module the
+# hydrogen generators are not in the model, so their rows would only be unknown keys.
+function _drop_hydrogen_generator_params!(par)
+    for values in (
+        par.genCapitalCost, par.genFixedOMCost, par.genVariableOMCost, par.genFuelCost,
+        par.genEfficiency, par.genScaleInitCap, par.genRampUpCap, par.genCapAvailType,
+        par.genCO2Content, par.genLifetime,
+    )
+        filter!(entry -> !_is_hydrogen_generator(first(entry)), values)
+    end
+    for values in (par.genRefInitCap, par.genInitCap)
+        filter!(entry -> !_is_hydrogen_generator(first(entry)[2]), values)
+    end
     return par
 end
 

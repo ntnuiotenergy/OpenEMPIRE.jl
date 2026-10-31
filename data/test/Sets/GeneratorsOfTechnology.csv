@@ -46,3 +46,8 @@ Coal,CoalCCS
 CCS,GasCCS
 Gas,GasCCS
 Waste,Waste
+Hydrogen,HydrogenOCGT
+Hydrogen,HydrogenCCGT
+Hydrogen,Hydrogenfuelcell
+Biomethane,BiomethaneCCGT
+Biomethane,BiomethaneOCGT

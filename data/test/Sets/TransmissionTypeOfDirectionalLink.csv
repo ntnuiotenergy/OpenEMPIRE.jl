@@ -3,3 +3,9 @@ Denmark,Germany,HVAC_OverheadLine
 France,Germany,HVAC_OverheadLine
 Germany,Denmark,HVAC_OverheadLine
 Germany,France,HVAC_OverheadLine
+Denmark,EnergyhubEU,HVDC_OffshoreToOnshore
+EnergyhubEU,Denmark,HVDC_OffshoreToOnshore
+EnergyhubEU,Germany,HVDC_OffshoreToOnshore
+Germany,EnergyhubEU,HVDC_OffshoreToOnshore
+DoggerBank,EnergyhubEU,HVDC_Cable
+EnergyhubEU,DoggerBank,HVDC_Cable

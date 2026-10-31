@@ -2,3 +2,12 @@ Nodes,Period,NodeLostLoadCost
 Germany,1,22000
 Denmark,1,22000
 France,1,22000
+EnergyhubEU,1,999999999
+EnergyhubEU,2,999999999
+EnergyhubEU,3,999999999
+Draupner,1,999999999
+Draupner,2,999999999
+Draupner,3,999999999
+DoggerBank,1,999999999
+DoggerBank,2,999999999
+DoggerBank,3,999999999

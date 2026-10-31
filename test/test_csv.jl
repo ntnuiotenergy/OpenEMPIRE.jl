@@ -153,9 +153,33 @@ function test_read_bundled_csv_datasets()
     @test "europe_v51" in datasets
 
     test_sets, test_params = OpenEMPIRE.read_data(joinpath(data_root, "test"); format = :csv)
-    @test length(OpenEMPIRE.nodes(test_sets)) == 3
-    @test length(OpenEMPIRE.generators(test_sets)) == 27
-    @test length(test_params.genVariableOMCost) == 27
+    @test length(OpenEMPIRE.nodes(test_sets)) == 6
+    # Without the Hydrogen module its three generators are left out: nothing would
+    # price their fuel.
+    @test length(OpenEMPIRE.generators(test_sets)) == 29
+    @test length(test_params.genVariableOMCost) == 29
+    @test !any(occursin("Hydrogen", g) for g in OpenEMPIRE.generators(test_sets))
+    @test !any(occursin("Hydrogen", g) for (_, g) in OpenEMPIRE.node_generators(test_sets))
+    @test !haskey(test_params.genFuelCost, "HydrogenOCGT")
+    @test OpenEMPIRE.offshore_energy_hubs(test_sets) == Set(["EnergyhubEU"])
+    @test test_sets.OffshoreWindFarmNode == Set(["DoggerBank"])
+    # Germany lists a lost-load cost for period 1 only while other nodes list periods
+    # 1-3; the missing periods take Pyomo's default, not 0 (which made shedding free).
+    periods = OpenEMPIRE.create_timestruct(3, 5, 1, 1, 0, 0, 1)
+    for sp in strat_periods(periods)
+        @test test_params.nodeLostLoadCost["Germany"][sp] == OpenEMPIRE.DEFAULT_LOST_LOAD_COST
+    end
+    @test test_params.offshoreConvCapitalCost !== nothing
+    @test test_params.availableBioEnergy !== nothing
+
+    # The test case carries every optional-module input, so it loads with all of them on.
+    module_sets, _ = OpenEMPIRE.read_data(
+        joinpath(data_root, "test");
+        format = :csv, natural_gas = true, hydrogen = true, industry = true,
+    )
+    @test OpenEMPIRE.has_hydrogen(module_sets)
+    @test module_sets.Hydrogen.Generator == Set(["HydrogenCCGT", "HydrogenOCGT", "Hydrogenfuelcell"])
+    @test length(OpenEMPIRE.generators(module_sets)) == 32
 
     europe_sets, europe_params = OpenEMPIRE.read_data(joinpath(data_root, "europe_v51"); format = :csv)
     @test length(OpenEMPIRE.nodes(europe_sets)) == 49
@@ -178,7 +202,7 @@ function test_read_full_model_int_dataset()
 
     sets, params = OpenEMPIRE.read_data(dataset; format = :csv)
     @test length(OpenEMPIRE.nodes(sets)) == 52
-    @test length(OpenEMPIRE.generators(sets)) == 33
+    @test length(OpenEMPIRE.generators(sets)) == 30  # 33 less the 3 hydrogen generators
     @test length(OpenEMPIRE.arcs(sets)) == 436
     @test OpenEMPIRE.offshore_energy_hubs(sets) == Set(["EnergyhubEU"])
     @test params.offshoreConvCapitalCost !== nothing

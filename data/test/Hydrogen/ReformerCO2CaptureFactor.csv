@@ -1,0 +1,10 @@
+Plant_type,Period,Ton_CO2_emissions_captured_per_ton_H2
+SMR,1,0
+SMR,2,0
+SMR,3,0
+SMR_CCS,1,0
+SMR_CCS,2,0
+SMR_CCS,3,0
+GHR_ATR_CCS,1,0
+GHR_ATR_CCS,2,0
+GHR_ATR_CCS,3,0

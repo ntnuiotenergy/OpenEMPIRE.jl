@@ -26,3 +26,8 @@ LigniteCCSsup,0.8
 CoalCCS,0.8
 GasCCS,0.85
 Waste,0.95
+BiomethaneOCGT,0.85
+BiomethaneCCGT,0.85
+HydrogenOCGT,0.85
+HydrogenCCGT,0.85
+Hydrogenfuelcell,0.85

@@ -26,3 +26,8 @@ LigniteCCSsup,40
 CoalCCS,40
 GasCCS,30
 Waste,20
+BiomethaneOCGT,30
+BiomethaneCCGT,30
+HydrogenOCGT,30
+HydrogenCCGT,30
+Hydrogenfuelcell,20

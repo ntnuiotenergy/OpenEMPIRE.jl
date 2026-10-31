@@ -126,7 +126,8 @@ function test_generate_single_oos_scenario_tree()
         @test metadata["source_data_folder"] == abspath(source_data)
         @test metadata["source_data_sha256"] == OpenEMPIRE._oos_directory_sha256(source_data)
         @test metadata["source_config_sha256"] == OpenEMPIRE._oos_sha256_file(config_file)
-        @test metadata["config"]["number_of_scenarios"] == 3
+        @test metadata["config"]["number_of_scenarios"] ==
+              YAML.load_file(config_file)["number_of_scenarios"]
         for filename in OpenEMPIRE._OOS_TREE_FILENAMES
             file_metadata = metadata["files"][filename]
             generated_file = joinpath(scenario_dir, filename)

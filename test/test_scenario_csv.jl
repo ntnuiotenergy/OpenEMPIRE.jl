@@ -1570,12 +1570,13 @@ function test_create_model_adds_storage_max_constraints()
         @test _sparse_axis_length(emp[:storage_max_inv_en]) == expected
         @test _sparse_axis_length(emp[:storage_max_inst_pow]) == expected
         @test _sparse_axis_length(emp[:storage_max_inst_en]) == expected
-        # 81190 core rows plus the 4 offshore wind-farm cap rows (Denmark is the test
-        # dataset's only offshore wind farm: 2 arc directions x 2 strategic periods).
+        # 94684 core rows plus the 4 offshore wind-farm cap rows (DoggerBank is the
+        # test dataset's only offshore wind farm: its 2 arcs to and from EnergyhubEU
+        # x 2 strategic periods).
         # The cap is on by default now, so the Python side needs `north_sea: true` to
         # reach the same total; the cap is non-binding here, so the objective is
         # unchanged either way.
-        @test JuMP.num_constraints(emp; count_variable_in_set_constraints = false) == 81194
+        @test JuMP.num_constraints(emp; count_variable_in_set_constraints = false) == 94688
         @test _sparse_axis_length(emp[:wind_farm_transmission_cap]) == 4
     end
 end

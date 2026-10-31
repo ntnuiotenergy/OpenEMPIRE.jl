@@ -1,0 +1,10 @@
+H2TerminalNodes,H2Terminals,Period,FixedOM_(EUR/ton/h)
+France,LH2Import,1,399999999999.96
+France,LH2Import,2,865244.4720000001
+France,LH2Import,3,865244.4720000001
+Germany,LH2Import,1,399999999999.96
+Germany,LH2Import,2,865244.4720000001
+Germany,LH2Import,3,865244.4720000001
+France,PipelineH2Import,1,199999999999.98
+France,PipelineH2Import,2,437028.42857142864
+France,PipelineH2Import,3,428765.523809524

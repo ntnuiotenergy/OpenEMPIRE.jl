@@ -1,3 +1,6 @@
 FromNode,ToNode,lineLength_in_km
 Denmark,Germany,421.3629800409
 France,Germany,766.4799059127
+EnergyhubEU,Denmark,180.0
+EnergyhubEU,Germany,220.0
+EnergyhubEU,DoggerBank,215.0
