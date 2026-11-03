@@ -5,14 +5,50 @@ include(joinpath(@__DIR__, "benders_run_metadata.jl"))
 using JuMP, Plasmo, PlasmoBenders, TimeStruct, Gurobi, Random, Dates, Sockets
 using OpenEMPIRE
 
-if nprocs() < 3
-    addprocs(3 - nprocs(); exeflags="--project=$(Base.active_project())")
+# ---------------------------------------------------------
+# Start workers according to the SGE allocation
+# ---------------------------------------------------------
+
+hostfile = get(ENV, "SGE_PE_HOSTFILE", "")
+
+isempty(hostfile) &&
+    error("SGE_PE_HOSTFILE is not set. Start Julia using run_distributed.sh.")
+
+isfile(hostfile) ||
+    error("SGE hostfile does not exist: $hostfile")
+
+project_dir = dirname(Base.active_project())
+exeflags = "--project=$project_dir"
+
+local_host = split(gethostname(), ".")[1]
+
+for line in eachline(hostfile)
+    fields = split(line)
+
+    host = fields[1]
+    slots = parse(Int, fields[2])
+
+    short_host = split(host, ".")[1]
+
+    if short_host == local_host
+        println("Starting $slots local workers on $host")
+        addprocs(slots; exeflags=exeflags)
+    else
+        println("Starting $slots remote workers on $host")
+        addprocs(fill(host, slots); exeflags=exeflags)
+    end
 end
 
 @everywhere using JuMP, Plasmo, PlasmoBenders, Gurobi, OpenEMPIRE, Sockets
 
 worker_ids = workers()
 main_worker = myid()
+
+println("Main process: ", main_worker, " on ", gethostname())
+
+for w in worker_ids
+    println("Worker ", w, " on ", remotecall_fetch(gethostname, w))
+end
 
 println("Main process: ", main_worker, " on ", gethostname())
 
