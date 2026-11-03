@@ -944,3 +944,137 @@ function create_benders_graph(sets, par, periods, discounter)
     )
 
 end
+
+function create_distributed_benders_graph(
+    sets,
+    par,
+    periods,
+    discounter,
+    worker_ids,
+    main_worker,
+)
+
+    # Overall graph lives on the main process
+    graph = RemoteOptiGraph(
+        name = :overall,
+        worker = main_worker,
+    )
+
+    SP = strat_periods(periods)
+
+    # =====================================================
+    # MASTER
+    # =====================================================
+
+    master_graph = RemoteOptiGraph(
+        name = :master,
+        worker = main_worker,
+    )
+
+    master = add_node(master_graph)
+
+    set_name(master, :master)
+
+    create_master_node!(
+        master,
+        sets,
+        par,
+        periods,
+        discounter,
+    )
+
+    add_subgraph(graph, master_graph)
+    set_to_node_objectives(master_graph)
+
+    # =====================================================
+    # STRATEGIC-PERIOD SUBPROBLEMS
+    # =====================================================
+
+    scenario_graphs = []
+    scenario_nodes = []
+
+    scenario_count = 0
+
+    for (sp_index, sp) in enumerate(SP)
+        println("SP: ", sp)
+
+        for sc_index in 1:_opscenario_count(sp)
+
+            scenario_count += 1
+
+            # Assign scenario graphs cyclically across workers
+            worker_id = worker_ids[
+                mod1(scenario_count, length(worker_ids))
+            ]
+
+            println(
+                "Creating scenario node: SP ",
+                sp_index,
+                ", scenario ",
+                sc_index,
+                " on worker ",
+                worker_id,
+            )
+
+            # Get this scenario's representative periods
+            scenario_periods = [
+                opscenarios(rp)[sc_index]
+                for rp in repr_periods(sp)
+            ]
+
+            # Create scenario graph on assigned worker
+            scenario_graph = RemoteOptiGraph(
+                name = Symbol("scenario_graph_$(sp_index)_$(sc_index)"),
+                worker = worker_id,
+            )
+
+            scenario_node = add_node(scenario_graph)
+
+            set_name(
+                scenario_node,
+                Symbol("scenario_$(sp_index)_$(sc_index)")
+            )
+
+            # Add operational variables + constraints
+            create_scenario_node!(
+                scenario_node,
+                sets,
+                par,
+                periods,
+                sp,
+                scenario_periods,
+                discounter,
+            )
+
+            set_to_node_objectives(scenario_graph)
+
+            # Add scenario graph directly to overall graph
+            add_subgraph(graph, scenario_graph)
+
+            # Link scenario node directly to master
+            create_linking_constraints!(
+                graph,
+                master,
+                scenario_node,
+                sets,
+                par,
+                sp,
+                scenario_periods,
+            )
+
+            push!(scenario_graphs, scenario_graph)
+            push!(
+                scenario_nodes,
+                (sp, sc_index, scenario_node)
+            )
+        end
+    end
+
+    return (
+        graph,
+        master_graph,
+        master,
+        scenario_graphs,
+        scenario_nodes,
+    )
+end
