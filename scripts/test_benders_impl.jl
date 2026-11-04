@@ -201,7 +201,7 @@ timestamp = Dates.format(now(), dateformat"yyyymmdd_HHMMSS")
 
 result_dir = joinpath(
     results_base_dir,
-    "benders_scenario_separation",
+    "benders_investment_period",
     "$(timestamp)_$(dataset)",
 )
 

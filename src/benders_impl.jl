@@ -831,3 +831,106 @@ function create_benders_graph(sets, par, periods, discounter)
     return graph, master_graph, master, subproblem_graphs, subproblem_nodes
 end
 
+function create_distributed_benders_graph(
+    sets,
+    par,
+    periods,
+    discounter,
+    worker_ids,
+    main_worker,
+)
+
+    # Overall graph lives on the main process
+    graph = RemoteOptiGraph(
+        name = :overall,
+        worker = main_worker,
+    )
+
+    SP = strat_periods(periods)
+
+    # =====================================================
+    # MASTER
+    # =====================================================
+
+    master_graph = RemoteOptiGraph(
+        name = :master,
+        worker = main_worker,
+    )
+
+    master = add_node(master_graph)
+    set_name(master, :master)
+
+    create_master_node!(
+        master,
+        sets,
+        par,
+        periods,
+        discounter,
+    )
+
+    add_subgraph(graph, master_graph)
+    set_to_node_objectives(master_graph)
+
+    # =====================================================
+    # INVESTMENT-PERIOD SUBPROBLEMS
+    # =====================================================
+
+    subproblem_graphs = Dict()
+    subproblem_nodes = Dict()
+
+    for (sp_index, sp) in enumerate(SP)
+
+        # Assign subproblem cyclically across workers
+        worker_id = worker_ids[
+            mod1(sp_index, length(worker_ids))
+        ]
+
+        println(
+            "Creating subproblem for strategic period ",
+            sp_index,
+            " (", sp, ") on worker ",
+            worker_id,
+        )
+
+        # Create subproblem graph on assigned worker
+        sp_graph = RemoteOptiGraph(
+            name = Symbol("subproblem_graph_$(sp_index)"),
+            worker = worker_id,
+        )
+
+        node = add_node(sp_graph)
+        set_name(node, :subproblem)
+
+        create_subproblem_node!(
+            node,
+            sets,
+            par,
+            periods,
+            sp,
+            discounter,
+        )
+
+        add_subgraph(graph, sp_graph)
+        set_to_node_objectives(sp_graph)
+
+        create_linking_constraints!(
+            graph,
+            master,
+            node,
+            sets,
+            par,
+            sp,
+        )
+
+        subproblem_graphs[sp] = sp_graph
+        subproblem_nodes[sp] = node
+    end
+
+    return (
+        graph,
+        master_graph,
+        master,
+        subproblem_graphs,
+        subproblem_nodes,
+    )
+end
