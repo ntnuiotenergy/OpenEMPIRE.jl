@@ -44,6 +44,17 @@ end
 worker_ids = workers()
 main_worker = myid()
 
+for w in workers()
+    println("Testing Gurobi on worker $w")
+
+    result = remotecall_fetch(w) do
+        model = Gurobi.Optimizer()
+        return "Gurobi initialised successfully on $(gethostname())"
+    end
+
+    println(result)
+end
+
 println("Main process: ", main_worker, " on ", gethostname())
 
 for w in worker_ids
