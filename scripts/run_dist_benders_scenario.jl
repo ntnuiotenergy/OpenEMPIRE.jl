@@ -39,13 +39,6 @@ local_host = split(gethostname(), ".")[1]
     end
 end=#
 
-worker_exe = """
-bash -lc 'module load rocks-openmpi &&
-          module load Julia/1.12.2 &&
-          module load gurobi/13.0 &&
-          exec julia'
-"""
-
 for line in eachline(hostfile)
     fields = split(line)
 
@@ -64,7 +57,7 @@ for line in eachline(hostfile)
         println("Starting $slots remote workers on $host")
         addprocs(
             fill(host, slots);
-            exename=worker_exe,
+            exename=joinpath(dirname(@__DIR__), "scripts", "julia_worker.sh"),
             exeflags=exeflags
         )
     end
