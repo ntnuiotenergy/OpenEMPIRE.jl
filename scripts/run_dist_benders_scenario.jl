@@ -238,7 +238,7 @@ println("\n=== Creating Benders algorithm ===")
 
 max_iters = 100000
 multicut = false
-parallelize_benders = true
+parallelize_benders = false
 tolerance = 1e-7
 
 # Regularization configuration
@@ -272,6 +272,26 @@ solve_start_clock = time()
 PlasmoBenders.run_algorithm!(benders)
 
 solve_seconds = time() - solve_start_clock
+
+println("\n=== Benders timing summary ===")
+
+println(
+    "Total iteration time: ",
+    sum(PlasmoBenders.get_time_iterations(benders)),
+    " seconds"
+)
+
+println(
+    "Root problem solve time: ",
+    PlasmoBenders.get_time_root_problem_solve(benders),
+    " seconds"
+)
+
+println(
+    "Subproblem solve time: ",
+    PlasmoBenders.get_time_subproblem_solves(benders),
+    " seconds"
+)
 
 relative_gap = PlasmoBenders.relative_gap(benders)
 converged = relative_gap <= tolerance
