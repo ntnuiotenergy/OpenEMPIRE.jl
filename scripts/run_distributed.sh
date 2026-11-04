@@ -24,4 +24,5 @@ export SGE_PE_HOSTFILE="$HOSTFILE"
 echo "Using SGE hostfile: $SGE_PE_HOSTFILE"
 cat "$SGE_PE_HOSTFILE"
 
-exec julia --project=. scripts/run_dist_benders_scenario.jl "$@"
+#exec julia --project=. scripts/run_dist_benders_scenario.jl "$@"
+exec julia --project=. scripts/run_dist_benders_inv_period.jl "$@"
