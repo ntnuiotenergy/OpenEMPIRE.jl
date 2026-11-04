@@ -22,7 +22,7 @@ exeflags = "--project=$project_dir"
 
 local_host = split(gethostname(), ".")[1]
 
-for line in eachline(hostfile)
+#=for line in eachline(hostfile)
     fields = split(line)
 
     host = fields[1]
@@ -37,23 +37,43 @@ for line in eachline(hostfile)
         println("Starting $slots remote workers on $host")
         addprocs(fill(host, slots); exeflags=exeflags)
     end
+end=#
+
+worker_exe = """
+bash -lc 'module load rocks-openmpi &&
+          module load Julia/1.12.2 &&
+          module load gurobi/13.0 &&
+          exec julia'
+"""
+
+for line in eachline(hostfile)
+    fields = split(line)
+
+    host = fields[1]
+    slots = parse(Int, fields[2])
+
+    short_host = split(host, ".")[1]
+
+    if short_host == local_host
+        println("Starting $slots local workers on $host")
+        addprocs(
+            slots;
+            exeflags=exeflags
+        )
+    else
+        println("Starting $slots remote workers on $host")
+        addprocs(
+            fill(host, slots);
+            exename=worker_exe,
+            exeflags=exeflags
+        )
+    end
 end
 
 @everywhere using JuMP, Plasmo, PlasmoBenders, Gurobi, OpenEMPIRE, Sockets
 
 worker_ids = workers()
 main_worker = myid()
-
-for w in workers()
-    println("Testing Gurobi on worker $w")
-
-    result = remotecall_fetch(w) do
-        model = Gurobi.Optimizer()
-        return "Gurobi initialised successfully on $(gethostname())"
-    end
-
-    println(result)
-end
 
 println("Main process: ", main_worker, " on ", gethostname())
 
