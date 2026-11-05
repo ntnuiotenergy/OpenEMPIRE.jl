@@ -144,7 +144,7 @@ println("\n=== Creating Benders OptiGraph ===")
 decomposition_build_start = time()
 
 graph, master_graph, master, scenario_graphs, scenario_nodes =
-    OpenEMPIRE.create_benders_graph(
+    OpenEMPIRE.create_benders_graph_scenario(
         sets,
         params,
         periods,
@@ -164,12 +164,12 @@ println("Benders OptiGraph created successfully.")
 println("\n=== Creating Benders algorithm ===")
 
 max_iters = 100000
-multicut = false
+multicut = parse(Bool, get(ENV, "BENDERS_MULTICUT", "false"))
 parallelize_benders = true
 tolerance = 1e-7
 
 # Regularization configuration
-regularize = false
+regularize = parse(Bool, get(ENV, "BENDERS_REGULARIZE", "false"))
 regularize_param = 0.5
 warm_start = false
 
@@ -344,7 +344,7 @@ write_benders_run_metadata(
     result_dir,
     output_dir;
     decomposition_type = "scenario",
-    subproblem_structure = "one_per_strategic_period",
+    subproblem_structure = "one_per_strat_period_scenario_combo",
     dataset = dataset,
     input_format = string(input_format),
     original_data_folder = data_folder,

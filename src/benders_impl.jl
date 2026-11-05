@@ -771,7 +771,7 @@ function create_linking_constraints!(
 
 end
 
-function create_benders_graph(sets, par, periods, discounter)
+function create_benders_graph_inv_per(sets, par, periods, discounter)
 
     #Overall graph
     graph = OptiGraph() #creates the empty graph
@@ -831,7 +831,7 @@ function create_benders_graph(sets, par, periods, discounter)
     return graph, master_graph, master, subproblem_graphs, subproblem_nodes
 end
 
-function create_distributed_benders_graph(
+function create_distributed_benders_graph_inv_per(
     sets,
     par,
     periods,

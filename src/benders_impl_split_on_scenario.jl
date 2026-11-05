@@ -835,7 +835,7 @@ function create_linking_constraints!(
 
 end
 
-function create_benders_graph(sets, par, periods, discounter)
+function create_benders_graph_scenario(sets, par, periods, discounter)
 
     graph = OptiGraph()
 
@@ -945,7 +945,7 @@ function create_benders_graph(sets, par, periods, discounter)
 
 end
 
-function create_distributed_benders_graph(
+function create_distributed_benders_graph_scenario(
     sets,
     par,
     periods,

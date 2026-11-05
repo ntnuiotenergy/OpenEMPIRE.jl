@@ -1,6 +1,7 @@
 include(joinpath(@__DIR__, "benders_run_metadata.jl"))
 
 using OpenEMPIRE
+#using BendersInvestmentPeriod
 using JuMP
 using Plasmo
 using PlasmoBenders
@@ -131,7 +132,7 @@ println("\n=== Creating Benders OptiGraph ===")
 decomposition_build_start = time()
 
 graph, master_graph, master, subproblem_graphs, subproblem_nodes =
-    OpenEMPIRE.create_benders_graph(
+    OpenEMPIRE.create_benders_graph_inv_per(
         sets,
         params,
         periods,
@@ -150,11 +151,11 @@ println("\n=== Creating Benders algorithm ===")
 
 max_iters = 100000
 tolerance = 1e-7
-multicut = false
+multicut = parse(Bool, get(ENV, "BENDERS_MULTICUT", "false"))
 parallelize_benders = true
 
 # Regularization configuration
-regularize = false
+regularize = parse(Bool, get(ENV, "BENDERS_REGULARIZE", "false"))
 regularize_param = 0.5
 warm_start = false
 
@@ -201,7 +202,7 @@ timestamp = Dates.format(now(), dateformat"yyyymmdd_HHMMSS")
 
 result_dir = joinpath(
     results_base_dir,
-    "benders_investment_period",
+    "benders_investment_periods",
     "$(timestamp)_$(dataset)",
 )
 
