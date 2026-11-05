@@ -1,7 +1,7 @@
 using JuMP
 using Plasmo
 
-function create_master_node!(
+function create_master_node_inv_per!(
     master, 
     sets, #nodes, generators, storage, technologies, etc.
     par, #model parameters
@@ -599,7 +599,7 @@ function create_subproblem_node!(
 
 end
 
-function create_linking_constraints!(
+function create_linking_constraints_inv_per!(
     graph,
     master,
     node,
@@ -783,7 +783,7 @@ function create_benders_graph_inv_per(sets, par, periods, discounter)
     master = add_node(master_graph)
     set_name(master, :master)
 
-    create_master_node!(
+    create_master_node_inv_per!(
         master,
         sets,
         par,
@@ -819,7 +819,7 @@ function create_benders_graph_inv_per(sets, par, periods, discounter)
         add_subgraph!(graph, sp_graph)
         set_to_node_objectives(sp_graph)
 
-        create_linking_constraints!(
+        create_linking_constraints_inv_per!(
             graph,
             master,
             node,
@@ -860,7 +860,7 @@ function create_distributed_benders_graph_inv_per(
     master = add_node(master_graph)
     set_name(master, :master)
 
-    create_master_node!(
+    create_master_node_inv_per!(
         master,
         sets,
         par,
@@ -913,7 +913,7 @@ function create_distributed_benders_graph_inv_per(
         add_subgraph(graph, sp_graph)
         set_to_node_objectives(sp_graph)
 
-        create_linking_constraints!(
+        create_linking_constraints_inv_per!(
             graph,
             master,
             node,

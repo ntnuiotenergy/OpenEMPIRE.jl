@@ -31,13 +31,12 @@ include("out_of_sample.jl")
 include("oos_full_year.jl")
 include("oos_aggregation.jl")
 
-#SA testing
-#include("opti_graph.jl")
-#include("benders_impl.jl")
-#include("benders_impl_split_on_scenario.jl")
+#Benders decomposition implementations
+include("benders_impl.jl")
+include("benders_impl_split_on_scenario.jl")
 
 # Benders decomposition implementations
-benders_implementation = get(ENV, "BENDERS_IMPLEMENTATION", "investment_period")
+#=benders_implementation = get(ENV, "BENDERS_IMPLEMENTATION", "investment_period")
 
 if benders_implementation == "investment_period"
     println("Including investment-period Benders")
@@ -49,6 +48,6 @@ elseif benders_implementation == "scenario"
 
 else
     error("Unknown Benders implementation: $benders_implementation")
-end
+end=#
 
 end # module OpenEMPIRE

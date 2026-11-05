@@ -165,7 +165,7 @@ println("\n=== Creating Benders algorithm ===")
 
 max_iters = 100000
 multicut = parse(Bool, get(ENV, "BENDERS_MULTICUT", "false"))
-parallelize_benders = true
+parallelize_benders = false
 tolerance = 1e-7
 
 # Regularization configuration
