@@ -35,19 +35,4 @@ include("oos_aggregation.jl")
 include("benders_impl.jl")
 include("benders_impl_split_on_scenario.jl")
 
-# Benders decomposition implementations
-#=benders_implementation = get(ENV, "BENDERS_IMPLEMENTATION", "investment_period")
-
-if benders_implementation == "investment_period"
-    println("Including investment-period Benders")
-    include("benders_impl.jl")
-
-elseif benders_implementation == "scenario"
-    println("Including scenario-split Benders")
-    include("benders_impl_split_on_scenario.jl")
-
-else
-    error("Unknown Benders implementation: $benders_implementation")
-end=#
-
 end # module OpenEMPIRE
