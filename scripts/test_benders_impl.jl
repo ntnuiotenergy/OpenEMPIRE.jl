@@ -1,6 +1,7 @@
 include(joinpath(@__DIR__, "benders_run_metadata.jl"))
 
 using OpenEMPIRE
+#using BendersInvestmentPeriod
 using JuMP
 using Plasmo
 using PlasmoBenders
@@ -151,7 +152,7 @@ println("\n=== Creating Benders algorithm ===")
 max_iters = 100000
 tolerance = 1e-7
 multicut = parse(Bool, get(ENV, "BENDERS_MULTICUT", "false"))
-parallelize_benders = false
+parallelize_benders = true
 
 # Regularization configuration
 regularize = parse(Bool, get(ENV, "BENDERS_REGULARIZE", "false"))
@@ -263,22 +264,22 @@ OpenEMPIRE.write_benders_operational_csvs(
     periods,
 )=#
 
-#=costs = OpenEMPIRE.benders_cost_totals(
+costs = OpenEMPIRE.benders_cost_totals(
     master,
     subproblem_nodes,
     sets,
     params,
     periods,
     discounter,
-)=#
+)
 
 OpenEMPIRE.write_benders_objective_csv(
     output_dir,
     benders.objective_value,
     PlasmoBenders.relative_gap(benders),
     length(PlasmoBenders.get_lower_bounds(benders));
-    #investment_costs = costs.investment_costs,
-    #operational_costs = costs.operational_costs,
+    investment_costs = costs.investment_costs,
+    operational_costs = costs.operational_costs,
 )
 
 write_benders_iteration_times(output_dir, benders)
