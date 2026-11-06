@@ -1,7 +1,7 @@
 using JuMP
 using Plasmo
 
-function create_master_node!(
+function create_master_node_scenario!(
     master, 
     sets, #nodes, generators, storage, technologies, etc.
     par, #model parameters
@@ -653,7 +653,7 @@ function create_scenario_node!(
 
 end
 
-function create_linking_constraints!(
+function create_linking_constraints_scenario!(
     graph,
     master,
     scenario_node,
@@ -850,7 +850,7 @@ function create_benders_graph_scenario(sets, par, periods, discounter)
 
     set_name(master, :master)
 
-    create_master_node!(
+    create_master_node_scenario!(
         master,
         sets,
         par,
@@ -917,7 +917,7 @@ function create_benders_graph_scenario(sets, par, periods, discounter)
             )
 
             # Link directly to master
-            create_linking_constraints!(
+            create_linking_constraints_scenario!(
                 graph,
                 master,
                 scenario_node,
@@ -975,7 +975,7 @@ function create_distributed_benders_graph_scenario(
 
     set_name(master, :master)
 
-    create_master_node!(
+    create_master_node_scenario!(
         master,
         sets,
         par,
@@ -1052,7 +1052,7 @@ function create_distributed_benders_graph_scenario(
             add_subgraph(graph, scenario_graph)
 
             # Link scenario node directly to master
-            create_linking_constraints!(
+            create_linking_constraints_scenario!(
                 graph,
                 master,
                 scenario_node,
