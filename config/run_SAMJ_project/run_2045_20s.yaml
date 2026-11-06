@@ -3,8 +3,8 @@
 
 # --- Horizon and resolution ---
 forecast_horizon_year: 2045             # Last year modelled
-leap_years_investment: 20               # Years per investment period
-number_of_scenarios: 3                  # Weather/load scenarios per investment period
+leap_years_investment: 5               # Years per investment period
+number_of_scenarios: 20                  # Weather/load scenarios per investment period
 length_of_regular_season: 168           # Hours in each regular season
 regular_seasons: ["winter", "spring", "summer", "fall"]  # Regular seasons modelled
 n_peak_seasons: 2                       # Number of peak seasons
