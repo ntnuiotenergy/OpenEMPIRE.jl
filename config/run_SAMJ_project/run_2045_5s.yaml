@@ -45,7 +45,7 @@ write_raw_solution: False               # Also write the raw JuMP solution
 # --- Solver ---
 # solver_* keys are passed to Gurobi; an empty value keeps the Gurobi default.
 optimization_solver: "Gurobi"           # Informational only; the solver is chosen with --solver
-solver_method: 2                        # 2 = barrier (interior point), usually best for large LPs
+solver_method: 1                        # 2 = barrier (interior point), usually best for large LPs
 solver_crossover: 0                     # 0 = skip crossover
 solver_presolve: 2                      # 1 = conservative, 2 = aggressive (2 has stalled the barrier at full scale)
 solver_numericfocus:                    # 1-3 = progressively more numerical care
@@ -53,8 +53,8 @@ solver_barhomogeneous:                  # 1 = homogeneous barrier; robust on dif
 solver_barconvtol:                      # Barrier convergence tolerance
 solver_feasibilitytol:                  # Primal feasibility tolerance
 solver_scaleflag:                       # Robustness option; can slow solves
-solver_seed:                            # Random seed
-solver_threads:                         # Set to the physical core count if needed
+solver_seed: 0                          # Random seed
+solver_threads: 1                       # Set to the physical core count if needed
 # This is an OpenEMPIRE configuration file.
 # To be used with the execution script run.py
 

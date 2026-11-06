@@ -159,11 +159,20 @@ regularize = parse(Bool, get(ENV, "BENDERS_REGULARIZE", "false"))
 regularize_param = 0.5
 warm_start = false
 
+# Gurobi configuration
+benders_solver = optimizer_with_attributes(
+    Gurobi.Optimizer,
+    "Method" => 1,       # Dual simplex
+    "Presolve" => 2,    # Automatic presolve   
+    "Threads" => 1,      # Single-threaded
+    "Seed" => 0          # Fixed default seed
+)
+
 
 benders = PlasmoBenders.BendersAlgorithm(
     graph,
     master_graph;
-    solver = optimizer,
+    solver = benders_solver,
     multicut = multicut,
     max_iters = max_iters,
     tol = tolerance,
