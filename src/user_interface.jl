@@ -207,21 +207,9 @@ function generate_scenarios(
     return periods, sets, params
 end
 
-"""
-    create_model(config_file, data_folder; include_investment_constraints = true, ...)
-
-Build an EMPIRE model from configuration and input data. Set
-`include_investment_constraints = false` for out-of-sample evaluation after
-strategic capacities from a completed investment run will be fixed on the
-model.
-"""
-function create_model(
+function _prepare_processed_inputs(
     config_file,
     data_folder;
-    optimizer = nothing,
-    optimizer_attributes = (),
-    include_string_names = true,
-    include_investment_constraints::Bool = true,
     input_format = :auto,
     scenario_rng = Random.default_rng(),
     progress = nothing,
@@ -234,7 +222,6 @@ function create_model(
         progress,
     )
 
-    # Financial parameters
     params.WACC = config["wacc"]
     params.discountRate = config["discount_rate"]
 
@@ -274,6 +261,60 @@ function create_model(
             join(industry_issues, "\n  - "),
         ))
     end
+
+    return config, periods, sets, params, gas_enabled, hydrogen_enabled, industry_enabled
+end
+
+"""
+    prepare_model_inputs(config_file, data_folder; input_format, scenario_rng, progress)
+
+Prepare the processed OpenEMPIRE inputs required by decomposition models without
+constructing the complete JuMP model. Returns `(periods, sets, params)`.
+"""
+function prepare_model_inputs(
+    config_file,
+    data_folder;
+    input_format = :auto,
+    scenario_rng = Random.default_rng(),
+    progress = nothing,
+)
+    _, periods, sets, params, _, _, _ = _prepare_processed_inputs(
+        config_file,
+        data_folder;
+        input_format,
+        scenario_rng,
+        progress,
+    )
+    return periods, sets, params
+end
+
+"""
+    create_model(config_file, data_folder; include_investment_constraints = true, ...)
+
+Build an EMPIRE model from configuration and input data. Set
+`include_investment_constraints = false` for out-of-sample evaluation after
+strategic capacities from a completed investment run will be fixed on the
+model.
+"""
+function create_model(
+    config_file,
+    data_folder;
+    optimizer = nothing,
+    optimizer_attributes = (),
+    include_string_names = true,
+    include_investment_constraints::Bool = true,
+    input_format = :auto,
+    scenario_rng = Random.default_rng(),
+    progress = nothing,
+)
+    config, periods, sets, params, gas_enabled, hydrogen_enabled, industry_enabled =
+        _prepare_processed_inputs(
+        config_file,
+        data_folder;
+        input_format,
+        scenario_rng,
+        progress,
+    )
 
     _report_progress(progress, "Build 9/12: initializing JuMP model")
     emp = if isnothing(optimizer)

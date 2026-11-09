@@ -104,13 +104,8 @@ function parse_benders_args(args)
         throw(ArgumentError("Unsupported input format: $(options["format"])"))
 
     solver_name = options["solver"]
-    optimizer = if solver_name == "Gurobi"
-        Gurobi.Optimizer
-    elseif solver_name == "HiGHS"
-        HiGHS.Optimizer
-    else
-        throw(ArgumentError("Unsupported solver: $solver_name"))
-    end
+    solver_name == "Gurobi" ||
+        throw(ArgumentError("Only Gurobi is supported: $solver_name"))
 
     return (
         dataset = options["dataset"],
@@ -118,7 +113,6 @@ function parse_benders_args(args)
         config_file = config_file,
         input_format = input_format,
         solver_name = solver_name,
-        optimizer = optimizer,
         seed = parse(Int, options["seed"]),
         results_dir = options["results"],
     )
@@ -131,7 +125,6 @@ data_folder = spec.data_folder
 config_file = spec.config_file
 input_format = spec.input_format
 solver_name = spec.solver_name
-optimizer = spec.optimizer
 seed = spec.seed
 results_base_dir = spec.results_dir
 
@@ -147,10 +140,9 @@ run_start_time = now()
 run_start_clock = time()
 model_build_start = time()
 
-emp, periods, sets, params = OpenEMPIRE.create_model(
+periods, sets, params = OpenEMPIRE.prepare_model_inputs(
     config_file,
     data_folder;
-    optimizer = optimizer,
     input_format = input_format,
     scenario_rng = MersenneTwister(seed),
 )
