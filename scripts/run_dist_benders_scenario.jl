@@ -48,11 +48,7 @@ for line in eachline(hostfile)
     short_host = split(host, ".")[1]
 
     if short_host == local_host
-        println("Starting $slots local workers on $host")
-        addprocs(
-            slots;
-            exeflags=exeflags
-        )
+        println("Skipping main host $host; reserved for master")
     else
         println("Starting $slots remote workers on $host")
         addprocs(
@@ -67,6 +63,9 @@ end
 
 worker_ids = workers()
 main_worker = myid()
+
+isempty(worker_ids) &&
+    error("No remote workers were started; the main host is reserved for the master.")
 
 println("Main process: ", main_worker, " on ", gethostname())
 
