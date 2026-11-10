@@ -995,9 +995,9 @@ function create_distributed_benders_graph_scenario(
 
     scenario_count = 0
 
-    for (sp_index, sp) in enumerate(SP)
-        println("SP: ", sp)
+    scenario_jobs = []
 
+    for (sp_index, sp) in enumerate(SP)
         for sc_index in 1:_opscenario_count(sp)
 
             scenario_count += 1
@@ -1007,67 +1007,113 @@ function create_distributed_benders_graph_scenario(
                 mod1(scenario_count, length(worker_ids))
             ]
 
-            println(
-                "Creating scenario node: SP ",
-                sp_index,
-                ", scenario ",
-                sc_index,
-                " on worker ",
-                worker_id,
-            )
-
-            # Get this scenario's representative periods
             scenario_periods = [
                 opscenarios(rp)[sc_index]
                 for rp in repr_periods(sp)
             ]
 
-            # Create scenario graph on assigned worker
-            scenario_graph = RemoteOptiGraph(
-                name = Symbol("scenario_graph_$(sp_index)_$(sc_index)"),
-                worker = worker_id,
-            )
-
-            scenario_node = add_node(scenario_graph)
-
-            set_name(
-                scenario_node,
-                Symbol("scenario_$(sp_index)_$(sc_index)")
-            )
-
-            # Add operational variables + constraints
-            create_scenario_node!(
-                scenario_node,
-                sets,
-                par,
-                periods,
-                sp,
-                scenario_periods,
-                discounter,
-            )
-
-            set_to_node_objectives(scenario_graph)
-
-            # Add scenario graph directly to overall graph
-            add_subgraph(graph, scenario_graph)
-
-            # Link scenario node directly to master
-            create_linking_constraints_scenario!(
-                graph,
-                master,
-                scenario_node,
-                sets,
-                par,
-                sp,
-                scenario_periods,
-            )
-
-            push!(scenario_graphs, scenario_graph)
             push!(
-                scenario_nodes,
-                (sp, sc_index, scenario_node)
+                scenario_jobs,
+                (
+                    scenario_count,
+                    sp_index,
+                    sp,
+                    sc_index,
+                    scenario_periods,
+                    worker_id,
+                ),
             )
         end
+    end
+
+    # Build at most one scenario at a time per worker. Plasmo's remote
+    # operations are synchronous at the call site, so one async task per
+    # worker allows independent workers to build concurrently without
+    # concurrently mutating the shared graph on the main worker.
+    built_scenarios = Vector{Any}(undef, scenario_count)
+
+    @sync begin
+        for worker_id in worker_ids
+            @async begin
+                for (
+                    scenario_count,
+                    sp_index,
+                    sp,
+                    sc_index,
+                    scenario_periods,
+                    assigned_worker_id,
+                ) in scenario_jobs
+                    assigned_worker_id == worker_id || continue
+
+                    println(
+                        "Creating scenario node: SP ",
+                        sp_index,
+                        ", scenario ",
+                        sc_index,
+                        " on worker ",
+                        worker_id,
+                    )
+
+                    # Create scenario graph on assigned worker
+                    scenario_graph = RemoteOptiGraph(
+                        name = Symbol("scenario_graph_$(sp_index)_$(sc_index)"),
+                        worker = worker_id,
+                    )
+
+                    scenario_node = add_node(scenario_graph)
+
+                    set_name(
+                        scenario_node,
+                        Symbol("scenario_$(sp_index)_$(sc_index)")
+                    )
+
+                    # Add operational variables + constraints
+                    create_scenario_node!(
+                        scenario_node,
+                        sets,
+                        par,
+                        periods,
+                        sp,
+                        scenario_periods,
+                        discounter,
+                    )
+
+                    built_scenarios[scenario_count] = (
+                        sp,
+                        sc_index,
+                        scenario_periods,
+                        scenario_graph,
+                        scenario_node,
+                    )
+                end
+            end
+        end
+    end
+
+    # The overall graph and its linking constraints are owned by the main
+    # worker, so assemble them only after all independent builds complete.
+    for (
+        sp,
+        sc_index,
+        scenario_periods,
+        scenario_graph,
+        scenario_node,
+    ) in built_scenarios
+        set_to_node_objectives(scenario_graph)
+        add_subgraph(graph, scenario_graph)
+
+        create_linking_constraints_scenario!(
+            graph,
+            master,
+            scenario_node,
+            sets,
+            par,
+            sp,
+            scenario_periods,
+        )
+
+        push!(scenario_graphs, scenario_graph)
+        push!(scenario_nodes, (sp, sc_index, scenario_node))
     end
 
     return (

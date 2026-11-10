@@ -878,38 +878,52 @@ function create_distributed_benders_graph_inv_per(
     subproblem_graphs = Dict()
     subproblem_nodes = Dict()
 
-    for (sp_index, sp) in enumerate(SP)
+    # Build at most one subproblem at a time per worker. Plasmo's remote
+    # operations are synchronous at the call site, so one async task per
+    # worker allows independent workers to build concurrently without
+    # concurrently mutating the shared graph on the main worker.
+    built_subproblems = Vector{Any}(undef, length(SP))
 
-        # Assign subproblem cyclically across workers
-        worker_id = worker_ids[
-            mod1(sp_index, length(worker_ids))
-        ]
+    @sync begin
+        for (worker_index, worker_id) in enumerate(worker_ids)
+            @async begin
+                for (sp_index, sp) in enumerate(SP)
+                    mod1(sp_index, length(worker_ids)) == worker_index ||
+                        continue
 
-        println(
-            "Creating subproblem for strategic period ",
-            sp_index,
-            " (", sp, ") on worker ",
-            worker_id,
-        )
+                    println(
+                        "Creating subproblem for strategic period ",
+                        sp_index,
+                        " (", sp, ") on worker ",
+                        worker_id,
+                    )
 
-        # Create subproblem graph on assigned worker
-        sp_graph = RemoteOptiGraph(
-            name = Symbol("subproblem_graph_$(sp_index)"),
-            worker = worker_id,
-        )
+                    sp_graph = RemoteOptiGraph(
+                        name = Symbol("subproblem_graph_$(sp_index)"),
+                        worker = worker_id,
+                    )
 
-        node = add_node(sp_graph)
-        set_name(node, :subproblem)
+                    node = add_node(sp_graph)
+                    set_name(node, :subproblem)
 
-        create_subproblem_node!(
-            node,
-            sets,
-            par,
-            periods,
-            sp,
-            discounter,
-        )
+                    create_subproblem_node!(
+                        node,
+                        sets,
+                        par,
+                        periods,
+                        sp,
+                        discounter,
+                    )
 
+                    built_subproblems[sp_index] = (sp, sp_graph, node)
+                end
+            end
+        end
+    end
+
+    # The overall graph and its linking constraints are owned by the main
+    # worker, so assemble them only after all independent builds complete.
+    for (sp, sp_graph, node) in built_subproblems
         add_subgraph(graph, sp_graph)
         set_to_node_objectives(sp_graph)
 
