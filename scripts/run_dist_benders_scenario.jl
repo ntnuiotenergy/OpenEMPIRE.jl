@@ -240,7 +240,7 @@ warm_start = false
 # Gurobi configuartion
 benders_solver = optimizer_with_attributes(
     Gurobi.Optimizer,
-    "Method" => 1,       # Dual simplex
+    "Method" => 2,       # Barrier
     "Presolve" => 2,    # Automatic presolve 
     "Threads" => 1,      # Single-threaded
     "Seed" => 0          # Fixed default seed
