@@ -1068,6 +1068,7 @@ function create_distributed_benders_graph_scenario(
             cache,
         )
     end
+    empty!(worker_subproblems)
 
     @sync begin
         for worker_id in worker_ids
@@ -1149,6 +1150,8 @@ function create_distributed_benders_graph_scenario(
         push!(scenario_graphs, scenario_graph)
         push!(scenario_nodes, (sp, sc_index, scenario_node))
     end
+    empty!(scenario_jobs)
+    empty!(built_scenarios)
 
     return (
         graph,

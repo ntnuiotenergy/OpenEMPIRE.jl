@@ -917,6 +917,7 @@ function create_distributed_benders_graph_inv_per(
             cache,
         )
     end
+    empty!(worker_subproblems)
 
     @sync begin
         for (worker_index, worker_id) in enumerate(worker_ids)
@@ -969,6 +970,7 @@ function create_distributed_benders_graph_inv_per(
         subproblem_graphs[sp] = sp_graph
         subproblem_nodes[sp] = node
     end
+    empty!(built_subproblems)
 
     return (
         graph,
