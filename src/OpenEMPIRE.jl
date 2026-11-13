@@ -32,6 +32,7 @@ include("oos_full_year.jl")
 include("oos_aggregation.jl")
 
 #Benders decomposition implementations
+include("benders_worker_cache.jl")
 include("benders_impl.jl")
 include("benders_impl_split_on_scenario.jl")
 

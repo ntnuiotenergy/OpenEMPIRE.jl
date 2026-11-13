@@ -599,6 +599,18 @@ function create_subproblem_node!(
 
 end
 
+function create_subproblem_node!(node, sp)
+    cache = _benders_worker_cache()
+    return create_subproblem_node!(
+        node,
+        cache.sets,
+        cache.params,
+        nothing,
+        sp,
+        cache.discounter,
+    )
+end
+
 function create_linking_constraints_inv_per!(
     graph,
     master,
@@ -884,6 +896,27 @@ function create_distributed_benders_graph_inv_per(
     # concurrently mutating the shared graph on the main worker.
     built_subproblems = Vector{Any}(undef, length(SP))
 
+    worker_subproblems = Dict(
+        worker_id => [
+            sp for (sp_index, sp) in enumerate(SP)
+            if mod1(sp_index, length(worker_ids)) == findfirst(==(worker_id), worker_ids)
+        ]
+        for worker_id in worker_ids
+    )
+
+    for worker_id in worker_ids
+        cache = _benders_make_inv_period_cache(
+            sets,
+            par,
+            discounter,
+            worker_subproblems[worker_id],
+        )
+        _benders_initialize_worker_cache!(
+            worker_id,
+            cache,
+        )
+    end
+
     @sync begin
         for (worker_index, worker_id) in enumerate(worker_ids)
             @async begin
@@ -908,11 +941,7 @@ function create_distributed_benders_graph_inv_per(
 
                     create_subproblem_node!(
                         node,
-                        sets,
-                        par,
-                        periods,
                         sp,
-                        discounter,
                     )
 
                     built_subproblems[sp_index] = (sp, sp_graph, node)

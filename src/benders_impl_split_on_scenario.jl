@@ -653,6 +653,19 @@ function create_scenario_node!(
 
 end
 
+function create_scenario_node!(node, sp, scenario_periods)
+    cache = _benders_worker_cache()
+    return create_scenario_node!(
+        node,
+        cache.sets,
+        cache.params,
+        nothing,
+        sp,
+        scenario_periods,
+        cache.discounter,
+    )
+end
+
 function create_linking_constraints_scenario!(
     graph,
     master,
@@ -1032,6 +1045,28 @@ function create_distributed_benders_graph_scenario(
     # concurrently mutating the shared graph on the main worker.
     built_scenarios = Vector{Any}(undef, scenario_count)
 
+    worker_subproblems = Dict(
+        worker_id => [
+            (job[3], job[5])
+            for job in scenario_jobs
+            if job[6] == worker_id
+        ]
+        for worker_id in worker_ids
+    )
+
+    for worker_id in worker_ids
+        cache = _benders_make_scenario_cache(
+            sets,
+            par,
+            discounter,
+            worker_subproblems[worker_id],
+        )
+        _benders_initialize_worker_cache!(
+            worker_id,
+            cache,
+        )
+    end
+
     @sync begin
         for worker_id in worker_ids
             @async begin
@@ -1070,12 +1105,8 @@ function create_distributed_benders_graph_scenario(
                     # Add operational variables + constraints
                     create_scenario_node!(
                         scenario_node,
-                        sets,
-                        par,
-                        periods,
                         sp,
                         scenario_periods,
-                        discounter,
                     )
 
                     built_scenarios[scenario_count] = (
