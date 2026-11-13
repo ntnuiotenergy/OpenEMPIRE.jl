@@ -653,12 +653,12 @@ function create_scenario_node!(
 
 end
 
-function create_scenario_node!(node, sp, scenario_periods)
+function create_scenario_node!(node, sp, scenario_index, scenario_periods)
     cache = _benders_worker_cache()
     return create_scenario_node!(
         node,
         cache.sets,
-        cache.params,
+        cache.params[(sp, scenario_index)],
         nothing,
         sp,
         scenario_periods,
@@ -1047,7 +1047,7 @@ function create_distributed_benders_graph_scenario(
 
     worker_subproblems = Dict(
         worker_id => [
-            (job[3], job[5])
+            (job[3], job[4], job[5])
             for job in scenario_jobs
             if job[6] == worker_id
         ]
@@ -1106,6 +1106,7 @@ function create_distributed_benders_graph_scenario(
                     create_scenario_node!(
                         scenario_node,
                         sp,
+                        sc_index,
                         scenario_periods,
                     )
 

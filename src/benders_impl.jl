@@ -604,7 +604,7 @@ function create_subproblem_node!(node, sp)
     return create_subproblem_node!(
         node,
         cache.sets,
-        cache.params,
+        cache.params[sp],
         nothing,
         sp,
         cache.discounter,
