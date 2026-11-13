@@ -2,6 +2,13 @@ const BendersProfile = Dict{Any, Float64}
 const BendersProfileMap = Dict{String, BendersProfile}
 const BendersPairProfileMap = Dict{Tuple{String, String}, BendersProfile}
 
+incoming_arcs(sets::EmpireSets, node) = [
+    from for (from, to) in arcs(sets) if to == node
+]
+outgoing_arcs(sets::EmpireSets, node) = [
+    to for (from, to) in arcs(sets) if from == node
+]
+
 struct BendersSubproblemSets
     Generator::Vector{GenId}
     ThermalGenerators::Set{GenId}
@@ -14,6 +21,8 @@ struct BendersSubproblemSets
     Corridors::Vector{Arc}
     GeneratorsByNode::Dict{NodeId, Vector{GenId}}
     StoragesByNode::Dict{NodeId, Vector{StorId}}
+    IncomingByNode::Dict{NodeId, Vector{NodeId}}
+    OutgoingByNode::Dict{NodeId, Vector{NodeId}}
 end
 
 nodes(sets::BendersSubproblemSets) = sets.Node
@@ -29,6 +38,10 @@ generators(sets::BendersSubproblemSets, n) =
     get(sets.GeneratorsByNode, n, GenId[])
 storages(sets::BendersSubproblemSets, n) =
     get(sets.StoragesByNode, n, StorId[])
+incoming_arcs(sets::BendersSubproblemSets, n) =
+    get(sets.IncomingByNode, n, NodeId[])
+outgoing_arcs(sets::BendersSubproblemSets, n) =
+    get(sets.OutgoingByNode, n, NodeId[])
 node_generators(sets::BendersSubproblemSets) = [
     (node, generator)
     for (node, generators_at_node) in sets.GeneratorsByNode
@@ -86,6 +99,14 @@ function _benders_make_sets(sets::EmpireSets)
         copy(bidir_arcs(sets)),
         Dict(node => copy(generators(sets, node)) for node in nodes(sets)),
         Dict(node => copy(storages(sets, node)) for node in nodes(sets)),
+        Dict(
+            node => [from for (from, to) in arcs(sets) if to == node]
+            for node in nodes(sets)
+        ),
+        Dict(
+            node => [to for (from, to) in arcs(sets) if from == node]
+            for node in nodes(sets)
+        ),
     )
 end
 

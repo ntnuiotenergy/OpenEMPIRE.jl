@@ -331,6 +331,10 @@ function create_scenario_node!(
     S = storages(sets)
 
     num_rp = length(scenario_periods)
+    scenario_withprev = [
+        withprev(scenario_periods[rp])
+        for rp in 1:num_rp
+    ]
 
     # =====================================================
     # OPERATIONAL VARIABLES
@@ -427,14 +431,12 @@ function create_scenario_node!(
         sum(
             line_eff(par, m, n) *
             node[:transmissionOperational][m, n, rp, t]
-            for m in N
-            if (m, n) in arcs(sets)
+            for m in incoming_arcs(sets, n)
         )
         -
         sum(
             node[:transmissionOperational][n, m, rp, t]
-            for m in N
-            if (n, m) in arcs(sets)
+            for m in outgoing_arcs(sets, n)
         )
         +
         node[:loadShed][n, rp, t]
@@ -498,7 +500,7 @@ function create_scenario_node!(
             n in N,
             s in storages(sets, n),
             rp in 1:num_rp,
-            (prev, t) in withprev(scenario_periods[rp]);
+            (prev, t) in scenario_withprev[rp];
             !isnothing(prev)
         ],
         bleed_eff(par, s) *
@@ -523,7 +525,7 @@ function create_scenario_node!(
             n in N,
             g in generators(sets, n),
             rp in 1:num_rp,
-            (prev, t) in withprev(scenario_periods[rp]);
+            (prev, t) in scenario_withprev[rp];
             !isnothing(prev) &&
             is_thermal(sets, g) &&
             rampup_cap(par, g) == 0
@@ -546,7 +548,7 @@ function create_scenario_node!(
                 for n in N
                 for g in generators(sets, n)
                 if occursin("bio", lowercase(g))
-                for rp in 1:length(repr_periods(sp))
+                for rp in 1:num_rp
                 for t in scenario_periods[rp]
             ) <= available_bioenergy(par, sp)
         )
@@ -565,7 +567,7 @@ function create_scenario_node!(
                 3.6 / par.genEfficiency[g][sp]
                 for g in generators(sets, n)
                 if occursin("biomethane", lowercase(g))
-                for rp in 1:length(repr_periods(sp))
+                for rp in 1:num_rp
                 for t in scenario_periods[rp]
             ) <= 1e3 * max_biomethane_availability(par, n, sp)
         )
@@ -585,7 +587,7 @@ function create_scenario_node!(
                     (3.6 / par.genEfficiency[g][sp]) *
                     node[:genOperational][n, g, rp, t]
                     for g in generators(sets, n)
-                    for rp in 1:length(repr_periods(sp))
+                    for rp in 1:num_rp
                     for t in scenario_periods[rp]
                 )
         )
@@ -612,7 +614,7 @@ function create_scenario_node!(
             node[:genOperational][n, g, rp, t]
             for g in generators(sets, n)
             if is_hydro(sets, g)
-            for rp in 1:length(repr_periods(sp))
+            for rp in 1:num_rp
             for t in scenario_periods[rp]
         ) <= max_hydro_node(par, n)
     )

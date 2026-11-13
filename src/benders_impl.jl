@@ -331,6 +331,9 @@ function create_subproblem_node!(
     G = generators(sets)
     S = storages(sets)
     HUB = collect(offshore_energy_hubs(sets))
+    representative_periods = repr_periods(sp)
+    scenario_sets = [opscenarios(rp) for rp in representative_periods]
+    sp_withprev = withprev(sp)
 
     #OPERATIONAL VARIABLES
     @variable(node, genOperational[N, G, t in sp] >= 0)
@@ -367,15 +370,13 @@ function create_subproblem_node!(
         sum(
             line_eff(par, m, n) *
             node[:transmissionOperational][m, n, t]
-            for m in N
-            if (m, n) in arcs(sets)
+            for m in incoming_arcs(sets, n)
         )
         -
         # outgoing transmission
         sum(
             node[:transmissionOperational][n, m, t]
-            for m in N
-            if (n, m) in arcs(sets)
+            for m in outgoing_arcs(sets, n)
         )
         +
         node[:loadShed][n, t]
@@ -432,8 +433,8 @@ function create_subproblem_node!(
             node[:genOperational][n, g, t]
             for g in generators(sets, n)
             if is_hydro(sets, g)
-            for rp in repr_periods(sp)
-            for (scenario_index, scenario) in enumerate(opscenarios(rp))
+            for scenarios in scenario_sets
+            for (scenario_index, scenario) in enumerate(scenarios)
             if scenario_index == sc
             for t in scenario
         )
@@ -455,8 +456,8 @@ function create_subproblem_node!(
                 for n in N
                 for g in generators(sets, n)
                 if occursin("bio", lowercase(g))
-                for rp in repr_periods(sp)
-                for (scenario_index, scenario) in enumerate(opscenarios(rp))
+                for scenarios in scenario_sets
+                for (scenario_index, scenario) in enumerate(scenarios)
                 if scenario_index == sc
                 for t in scenario;
                 init = 0.0
@@ -478,8 +479,8 @@ function create_subproblem_node!(
                 3.6 / par.genEfficiency[g][sp]
                 for g in generators(sets, n)
                 if occursin("biomethane", lowercase(g))
-                for rp in repr_periods(sp)
-                for (scenario_index, scenario) in enumerate(opscenarios(rp))
+                for scenarios in scenario_sets
+                for (scenario_index, scenario) in enumerate(scenarios)
                 if scenario_index == sc
                 for t in scenario;
                 init = 0.0
@@ -503,8 +504,8 @@ function create_subproblem_node!(
                     (3.6 / par.genEfficiency[g][sp]) *
                     node[:genOperational][n, g, t]
                     for g in generators(sets, n)
-                    for rp in repr_periods(sp)
-                    for (scenario_index, scenario) in enumerate(opscenarios(rp))
+                    for scenarios in scenario_sets
+                    for (scenario_index, scenario) in enumerate(scenarios)
                     if scenario_index == sc
                     for t in scenario;
                     init = 0.0
@@ -543,7 +544,7 @@ function create_subproblem_node!(
         [
             n in N,
             s in storages(sets, n),
-            (prev, t) in withprev(sp);
+            (prev, t) in sp_withprev;
             !isnothing(prev)
         ],
         bleed_eff(par, s) *
@@ -563,7 +564,7 @@ function create_subproblem_node!(
         [
             n in nodes(sets),
             g in generators(sets, n),
-            (prev, t) in withprev(sp);
+            (prev, t) in sp_withprev;
             !isnothing(prev) &&
             is_thermal(sets, g) &&
             rampup_cap(par, g) == 0
