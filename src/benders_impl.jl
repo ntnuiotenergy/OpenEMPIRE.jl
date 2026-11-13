@@ -600,8 +600,7 @@ function create_subproblem_node!(
 
 end
 
-function create_subproblem_node!(node, sp)
-    cache = _benders_worker_cache()
+function create_subproblem_node!(node, sp, cache::BendersSubproblemCache)
     return create_subproblem_node!(
         node,
         cache.sets,
@@ -905,18 +904,15 @@ function create_distributed_benders_graph_inv_per(
         for worker_id in worker_ids
     )
 
-    for worker_id in worker_ids
-        cache = _benders_make_inv_period_cache(
+    worker_caches = Dict(
+        worker_id => _benders_make_inv_period_cache(
             sets,
             par,
             discounter,
             worker_subproblems[worker_id],
         )
-        _benders_initialize_worker_cache!(
-            worker_id,
-            cache,
-        )
-    end
+        for worker_id in worker_ids
+    )
     empty!(worker_subproblems)
 
     @sync begin
@@ -944,6 +940,7 @@ function create_distributed_benders_graph_inv_per(
                     create_subproblem_node!(
                         node,
                         sp,
+                        worker_caches[worker_id],
                     )
 
                     built_subproblems[sp_index] = (sp, sp_graph, node)
@@ -971,6 +968,7 @@ function create_distributed_benders_graph_inv_per(
         subproblem_nodes[sp] = node
     end
     empty!(built_subproblems)
+    empty!(worker_caches)
 
     return (
         graph,

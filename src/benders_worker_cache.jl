@@ -84,8 +84,6 @@ struct BendersSubproblemCache
     discounter
 end
 
-const _BENDERS_WORKER_CACHE = Ref{Union{Nothing, BendersSubproblemCache}}(nothing)
-
 function _benders_make_sets(sets::EmpireSets)
     return BendersSubproblemSets(
         copy(generators(sets)),
@@ -264,25 +262,3 @@ function _benders_make_scenario_cache(sets, par, discounter, subproblems)
     return BendersSubproblemCache(_benders_make_sets(sets), params, discounter)
 end
 
-function initialize_benders_worker_cache!(cache::BendersSubproblemCache)
-    _BENDERS_WORKER_CACHE[] = cache
-    return nothing
-end
-
-function _benders_worker_cache()
-    cache = _BENDERS_WORKER_CACHE[]
-    cache === nothing &&
-        error("Benders worker cache has not been initialized")
-    return cache
-end
-
-function _benders_initialize_worker_cache!(worker, cache)
-    isdefined(Main, :Distributed) ||
-        error("Distributed must be loaded before initializing Benders workers")
-    Main.Distributed.remotecall_wait(
-        initialize_benders_worker_cache!,
-        worker,
-        cache,
-    )
-    return nothing
-end

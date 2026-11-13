@@ -655,8 +655,13 @@ function create_scenario_node!(
 
 end
 
-function create_scenario_node!(node, sp, scenario_index, scenario_periods)
-    cache = _benders_worker_cache()
+function create_scenario_node!(
+    node,
+    sp,
+    scenario_index,
+    scenario_periods,
+    cache::BendersSubproblemCache,
+)
     return create_scenario_node!(
         node,
         cache.sets,
@@ -1056,18 +1061,15 @@ function create_distributed_benders_graph_scenario(
         for worker_id in worker_ids
     )
 
-    for worker_id in worker_ids
-        cache = _benders_make_scenario_cache(
+    worker_caches = Dict(
+        worker_id => _benders_make_scenario_cache(
             sets,
             par,
             discounter,
             worker_subproblems[worker_id],
         )
-        _benders_initialize_worker_cache!(
-            worker_id,
-            cache,
-        )
-    end
+        for worker_id in worker_ids
+    )
     empty!(worker_subproblems)
 
     @sync begin
@@ -1111,6 +1113,7 @@ function create_distributed_benders_graph_scenario(
                         sp,
                         sc_index,
                         scenario_periods,
+                        worker_caches[worker_id],
                     )
 
                     built_scenarios[scenario_count] = (
@@ -1152,6 +1155,7 @@ function create_distributed_benders_graph_scenario(
     end
     empty!(scenario_jobs)
     empty!(built_scenarios)
+    empty!(worker_caches)
 
     return (
         graph,
