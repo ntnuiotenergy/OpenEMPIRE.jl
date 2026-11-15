@@ -16,18 +16,33 @@ function create_master_node_scenario!(
     HUB = collect(offshore_energy_hubs(sets))
 
     #INVESTMENT VARIABLES
-    @variable(master, genInvCap[N, G, SP] >= 0)
-    @variable(master, transmissionInvCap[N, N, SP] >= 0)
+    @variable(master, genInvCap[N, G, SP] >= 0; container = IndexedVarArray)
+    @variable(master, transmissionInvCap[N, N, SP] >= 0; container = IndexedVarArray)
     @variable(master, offshoreConvInvCap[HUB, SP] >= 0)
-    @variable(master, storPWInvCap[N, S, SP] >= 0)
-    @variable(master, storENInvCap[N, S, SP] >= 0)
+    @variable(master, storPWInvCap[N, S, SP] >= 0; container = IndexedVarArray)
+    @variable(master, storENInvCap[N, S, SP] >= 0; container = IndexedVarArray)
 
     #INSTALLED CAPACITY VARIABLES
-    @variable(master, genInstalledCap[N, G, SP] >= 0)
-    @variable(master, transmissionInstalledCap[N, N, SP] >= 0)
+    @variable(master, genInstalledCap[N, G, SP] >= 0; container = IndexedVarArray)
+    @variable(master, transmissionInstalledCap[N, N, SP] >= 0; container = IndexedVarArray)
     @variable(master, offshoreConvInstalledCap[HUB, SP] >= 0)
-    @variable(master, storPWInstalledCap[N, S, SP] >= 0)
-    @variable(master, storENInstalledCap[N, S, SP] >= 0)
+    @variable(master, storPWInstalledCap[N, S, SP] >= 0; container = IndexedVarArray)
+    @variable(master, storENInstalledCap[N, S, SP] >= 0; container = IndexedVarArray)
+
+    for (n, g) in node_generators(sets), sp in SP
+        unsafe_insertvar!(genInvCap, n, g, sp)
+        unsafe_insertvar!(genInstalledCap, n, g, sp)
+    end
+    for (m, n) in bidir_arcs(sets), sp in SP
+        unsafe_insertvar!(transmissionInvCap, m, n, sp)
+        unsafe_insertvar!(transmissionInstalledCap, m, n, sp)
+    end
+    for (n, s) in node_storages(sets), sp in SP
+        unsafe_insertvar!(storPWInvCap, n, s, sp)
+        unsafe_insertvar!(storENInvCap, n, s, sp)
+        unsafe_insertvar!(storPWInstalledCap, n, s, sp)
+        unsafe_insertvar!(storENInstalledCap, n, s, sp)
+    end
 
     #INVESTMENT CONSTRIAINTS
     #Constraint 2 for generators
@@ -331,6 +346,9 @@ function create_scenario_node!(
     S = storages(sets)
 
     num_rp = length(scenario_periods)
+    scenario_hours = unique([
+        t for scenario in scenario_periods for t in scenario
+    ])
     scenario_withprev = [
         withprev(scenario_periods[rp])
         for rp in 1:num_rp
@@ -346,8 +364,9 @@ function create_scenario_node!(
             n in N,
             g in G,
             rp in 1:num_rp,
-            t in scenario_periods[rp]
-        ] >= 0
+            t in scenario_hours
+        ] >= 0;
+        container = IndexedVarArray
     )
 
     @variable(
@@ -356,8 +375,9 @@ function create_scenario_node!(
             n in N,
             m in N,
             rp in 1:num_rp,
-            t in scenario_periods[rp]
-        ] >= 0
+            t in scenario_hours
+        ] >= 0;
+        container = IndexedVarArray
     )
 
     @variable(
@@ -366,8 +386,9 @@ function create_scenario_node!(
             n in N,
             s in S,
             rp in 1:num_rp,
-            t in scenario_periods[rp]
-        ] >= 0
+            t in scenario_hours
+        ] >= 0;
+        container = IndexedVarArray
     )
 
     @variable(
@@ -376,8 +397,9 @@ function create_scenario_node!(
             n in N,
             s in S,
             rp in 1:num_rp,
-            t in scenario_periods[rp]
-        ] >= 0
+            t in scenario_hours
+        ] >= 0;
+        container = IndexedVarArray
     )
 
     @variable(
@@ -386,8 +408,9 @@ function create_scenario_node!(
             n in N,
             s in S,
             rp in 1:num_rp,
-            t in scenario_periods[rp]
-        ] >= 0
+            t in scenario_hours
+        ] >= 0;
+        container = IndexedVarArray
     )
 
     @variable(
@@ -403,6 +426,18 @@ function create_scenario_node!(
     node,
     nodeEmission[n in N]
 )
+
+    for (n, g) in node_generators(sets), rp in 1:num_rp, t in scenario_periods[rp]
+        unsafe_insertvar!(genOperational, n, g, rp, t)
+    end
+    for (m, n) in arcs(sets), rp in 1:num_rp, t in scenario_periods[rp]
+        unsafe_insertvar!(transmissionOperational, m, n, rp, t)
+    end
+    for (n, s) in node_storages(sets), rp in 1:num_rp, t in scenario_periods[rp]
+        unsafe_insertvar!(storCharge, n, s, rp, t)
+        unsafe_insertvar!(storDischarge, n, s, rp, t)
+        unsafe_insertvar!(storOperational, n, s, rp, t)
+    end
 
     # =====================================================
     # CONSTRAINT 1: FLOW BALANCE

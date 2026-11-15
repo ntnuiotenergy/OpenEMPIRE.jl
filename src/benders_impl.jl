@@ -16,18 +16,33 @@ function create_master_node_inv_per!(
     HUB = collect(offshore_energy_hubs(sets))
 
     #INVESTMENT VARIABLES
-    @variable(master, genInvCap[N, G, SP] >= 0)
-    @variable(master, transmissionInvCap[N, N, SP] >= 0)
+    @variable(master, genInvCap[N, G, SP] >= 0; container = IndexedVarArray)
+    @variable(master, transmissionInvCap[N, N, SP] >= 0; container = IndexedVarArray)
     @variable(master, offshoreConvInvCap[HUB, SP] >= 0)
-    @variable(master, storPWInvCap[N, S, SP] >= 0)
-    @variable(master, storENInvCap[N, S, SP] >= 0)
+    @variable(master, storPWInvCap[N, S, SP] >= 0; container = IndexedVarArray)
+    @variable(master, storENInvCap[N, S, SP] >= 0; container = IndexedVarArray)
 
     #INSTALLED CAPACITY VARIABLES
-    @variable(master, genInstalledCap[N, G, SP] >= 0)
-    @variable(master, transmissionInstalledCap[N, N, SP] >= 0)
+    @variable(master, genInstalledCap[N, G, SP] >= 0; container = IndexedVarArray)
+    @variable(master, transmissionInstalledCap[N, N, SP] >= 0; container = IndexedVarArray)
     @variable(master, offshoreConvInstalledCap[HUB, SP] >= 0)
-    @variable(master, storPWInstalledCap[N, S, SP] >= 0)
-    @variable(master, storENInstalledCap[N, S, SP] >= 0)
+    @variable(master, storPWInstalledCap[N, S, SP] >= 0; container = IndexedVarArray)
+    @variable(master, storENInstalledCap[N, S, SP] >= 0; container = IndexedVarArray)
+
+    for (n, g) in node_generators(sets), sp in SP
+        unsafe_insertvar!(genInvCap, n, g, sp)
+        unsafe_insertvar!(genInstalledCap, n, g, sp)
+    end
+    for (m, n) in bidir_arcs(sets), sp in SP
+        unsafe_insertvar!(transmissionInvCap, m, n, sp)
+        unsafe_insertvar!(transmissionInstalledCap, m, n, sp)
+    end
+    for (n, s) in node_storages(sets), sp in SP
+        unsafe_insertvar!(storPWInvCap, n, s, sp)
+        unsafe_insertvar!(storENInvCap, n, s, sp)
+        unsafe_insertvar!(storPWInstalledCap, n, s, sp)
+        unsafe_insertvar!(storENInstalledCap, n, s, sp)
+    end
 
     #INVESTMENT CONSTRIAINTS
     #Constraint 2 for generators
@@ -336,12 +351,24 @@ function create_subproblem_node!(
     sp_withprev = withprev(sp)
 
     #OPERATIONAL VARIABLES
-    @variable(node, genOperational[N, G, t in sp] >= 0)
-    @variable(node, transmissionOperational[N, N, t in sp] >= 0)
-    @variable(node, storCharge[N, S, t in sp] >= 0)
-    @variable(node, storDischarge[N, S, t in sp] >= 0)
-    @variable(node, storOperational[N, S, t in sp] >= 0)
+    @variable(node, genOperational[N, G, t in sp] >= 0; container = IndexedVarArray)
+    @variable(node, transmissionOperational[N, N, t in sp] >= 0; container = IndexedVarArray)
+    @variable(node, storCharge[N, S, t in sp] >= 0; container = IndexedVarArray)
+    @variable(node, storDischarge[N, S, t in sp] >= 0; container = IndexedVarArray)
+    @variable(node, storOperational[N, S, t in sp] >= 0; container = IndexedVarArray)
     @variable(node, loadShed[N, t in sp] >= 0)
+
+    for (n, g) in node_generators(sets), t in sp
+        unsafe_insertvar!(genOperational, n, g, t)
+    end
+    for (m, n) in arcs(sets), t in sp
+        unsafe_insertvar!(transmissionOperational, m, n, t)
+    end
+    for (n, s) in node_storages(sets), t in sp
+        unsafe_insertvar!(storCharge, n, s, t)
+        unsafe_insertvar!(storDischarge, n, s, t)
+        unsafe_insertvar!(storOperational, n, s, t)
+    end
 
     #EMISSIONS
     @variable(node, emissions[N, sc in 1:_opscenario_count(sp)] >= 0)
