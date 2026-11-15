@@ -2,6 +2,33 @@ const BendersProfile = Dict{Any, Float64}
 const BendersProfileMap = Dict{String, BendersProfile}
 const BendersPairProfileMap = Dict{Tuple{String, String}, BendersProfile}
 
+struct BendersIndexedVarArray end
+
+function JuMP.Containers.container(
+    f::Function,
+    indices,
+    ::Type{BendersIndexedVarArray},
+    names,
+)
+    iva_names = NamedTuple{tuple(names...)}(indices.prod.iterators)
+    T = Tuple{eltype.(indices.prod.iterators)...}
+    N = length(names)
+    inferred_type = first(Base.return_types(f))
+    variable_type = inferred_type <: JuMP.AbstractVariableRef ?
+        inferred_type :
+        Plasmo.RemoteVariableRef
+    return SparseVariables.IndexedVarArray{
+        variable_type,
+        N,
+        T,
+    }(
+        f,
+        SparseVariables.Dictionaries.Dictionary{T, variable_type}(),
+        iva_names,
+        Vector{SparseVariables.Dictionaries.Dictionary}(undef, 2^N),
+    )
+end
+
 incoming_arcs(sets::EmpireSets, node) = [
     from for (from, to) in arcs(sets) if to == node
 ]

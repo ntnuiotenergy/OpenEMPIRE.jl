@@ -16,18 +16,18 @@ function create_master_node_inv_per!(
     HUB = collect(offshore_energy_hubs(sets))
 
     #INVESTMENT VARIABLES
-    @variable(master, genInvCap[N, G, SP] >= 0; container = IndexedVarArray)
-    @variable(master, transmissionInvCap[N, N, SP] >= 0; container = IndexedVarArray)
+    @variable(master, genInvCap[N, G, SP] >= 0; container = BendersIndexedVarArray)
+    @variable(master, transmissionInvCap[N, N, SP] >= 0; container = BendersIndexedVarArray)
     @variable(master, offshoreConvInvCap[HUB, SP] >= 0)
-    @variable(master, storPWInvCap[N, S, SP] >= 0; container = IndexedVarArray)
-    @variable(master, storENInvCap[N, S, SP] >= 0; container = IndexedVarArray)
+    @variable(master, storPWInvCap[N, S, SP] >= 0; container = BendersIndexedVarArray)
+    @variable(master, storENInvCap[N, S, SP] >= 0; container = BendersIndexedVarArray)
 
     #INSTALLED CAPACITY VARIABLES
-    @variable(master, genInstalledCap[N, G, SP] >= 0; container = IndexedVarArray)
-    @variable(master, transmissionInstalledCap[N, N, SP] >= 0; container = IndexedVarArray)
+    @variable(master, genInstalledCap[N, G, SP] >= 0; container = BendersIndexedVarArray)
+    @variable(master, transmissionInstalledCap[N, N, SP] >= 0; container = BendersIndexedVarArray)
     @variable(master, offshoreConvInstalledCap[HUB, SP] >= 0)
-    @variable(master, storPWInstalledCap[N, S, SP] >= 0; container = IndexedVarArray)
-    @variable(master, storENInstalledCap[N, S, SP] >= 0; container = IndexedVarArray)
+    @variable(master, storPWInstalledCap[N, S, SP] >= 0; container = BendersIndexedVarArray)
+    @variable(master, storENInstalledCap[N, S, SP] >= 0; container = BendersIndexedVarArray)
 
     for (n, g) in node_generators(sets), sp in SP
         unsafe_insertvar!(genInvCap, n, g, sp)
@@ -351,11 +351,11 @@ function create_subproblem_node!(
     sp_withprev = withprev(sp)
 
     #OPERATIONAL VARIABLES
-    @variable(node, genOperational[N, G, t in sp] >= 0; container = IndexedVarArray)
-    @variable(node, transmissionOperational[N, N, t in sp] >= 0; container = IndexedVarArray)
-    @variable(node, storCharge[N, S, t in sp] >= 0; container = IndexedVarArray)
-    @variable(node, storDischarge[N, S, t in sp] >= 0; container = IndexedVarArray)
-    @variable(node, storOperational[N, S, t in sp] >= 0; container = IndexedVarArray)
+    @variable(node, genOperational[N, G, t in sp] >= 0; container = BendersIndexedVarArray)
+    @variable(node, transmissionOperational[N, N, t in sp] >= 0; container = BendersIndexedVarArray)
+    @variable(node, storCharge[N, S, t in sp] >= 0; container = BendersIndexedVarArray)
+    @variable(node, storDischarge[N, S, t in sp] >= 0; container = BendersIndexedVarArray)
+    @variable(node, storOperational[N, S, t in sp] >= 0; container = BendersIndexedVarArray)
     @variable(node, loadShed[N, t in sp] >= 0)
 
     for (n, g) in node_generators(sets), t in sp
