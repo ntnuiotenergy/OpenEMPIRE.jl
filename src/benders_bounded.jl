@@ -1,6 +1,101 @@
+function _optimize_remote_graph_forward_batch(optimizer, objects)
+    isempty(objects) && return Any[]
+
+    worker = first(objects).object.worker
+    jobs = NamedTuple[]
+
+    for job in objects
+        object = job.object
+        primal_iters = optimizer.primal_iters[object]
+        last_primals = primal_iters[:, size(primal_iters, 2)]
+
+        push!(
+            jobs,
+            (
+                index = job.index,
+                darray = job.darray,
+                var_copies = job.var_copies,
+                last_primals = last_primals,
+            ),
+        )
+    end
+
+    add_slacks = PlasmoBenders.get_add_slacks(optimizer)
+    feasibility_cuts = PlasmoBenders.get_feasibility_cuts(optimizer)
+    is_MIP = PlasmoBenders.get_is_MIP(optimizer)
+
+    remote_fetch = getfield(Main.Distributed, :remotecall_fetch)
+    return remote_fetch(worker, jobs) do remote_jobs
+        results = Any[]
+
+        for job in remote_jobs
+            lgraph = Plasmo.local_graph(job.darray)
+            lvar_copies = Plasmo._convert_proxy_to_local(
+                lgraph,
+                job.var_copies,
+            )
+
+            JuMP.fix.(lvar_copies, job.last_primals, force = true)
+            t_solve = @elapsed JuMP.optimize!(lgraph)
+
+            feasible = PlasmoBenders._check_termination_status(
+                lgraph,
+                job.index;
+                add_slacks_bool = add_slacks,
+                feasibility_cuts_bool = feasibility_cuts,
+            )
+
+            if feasibility_cuts && !feasible
+                objective = JuMP.dual_objective_value(lgraph)
+                duals = is_MIP ? nothing : Float64[
+                    JuMP.dual(lgraph, JuMP.FixRef(var))
+                    for var in lvar_copies
+                ]
+            elseif feasible
+                objective = JuMP.value(
+                    lgraph,
+                    JuMP.objective_function(lgraph),
+                )
+                duals = is_MIP ? nothing : Float64[
+                    JuMP.dual(lgraph, JuMP.FixRef(var))
+                    for var in lvar_copies
+                ]
+            else
+                error(
+                    "Remote Benders subproblem $(job.index) terminated " *
+                    "with status $(JuMP.termination_status(lgraph))",
+                )
+            end
+
+            push!(results, (job.index, feasible, objective, duals, t_solve))
+        end
+
+        results
+    end
+end
+
 function run_benders_by_worker!(optimizer; output = true, run_gc = false)
     optimizer.is_MIP &&
         error("run_benders_by_worker! currently supports linear Benders models only")
+
+    worker_groups = Dict{Int, Vector{NamedTuple}}()
+    for index in 2:length(optimizer.solve_order)
+        object = optimizer.solve_order[index]
+        comp_vars = optimizer.comp_vars[object]
+        var_copy_map = optimizer.var_copy_map[object]
+        var_copies = [var_copy_map[var] for var in comp_vars]
+        proxy_copies = Plasmo._convert_remote_to_proxy(object, var_copies)
+
+        push!(
+            get!(worker_groups, object.worker, NamedTuple[]),
+            (
+                index = index,
+                object = object,
+                darray = object.graph,
+                var_copies = proxy_copies,
+            ),
+        )
+    end
 
     while optimizer.current_iter < optimizer.max_iters
         root_object = optimizer.solve_order[1]
@@ -29,24 +124,15 @@ function run_benders_by_worker!(optimizer; output = true, run_gc = false)
         optimizer.last_solutions[root_object] =
             PlasmoBenders._get_object_last_solutions(root_object)
 
-        worker_groups = Dict{Int, Vector{Tuple{Int, Any}}}()
-        for index in 2:length(optimizer.solve_order)
-            object = optimizer.solve_order[index]
-            push!(
-                get!(worker_groups, object.worker, Tuple{Int, Any}[]),
-                (index, object),
-            )
-        end
-
         @sync for (_, objects) in worker_groups
             @async begin
-                for (index, object) in objects
-                    feasible, objective, duals, solve_time =
-                        PlasmoBenders._optimize_remote_graph_forward(
-                            optimizer,
-                            object,
-                            index,
-                        )
+                results = _optimize_remote_graph_forward_batch(
+                    optimizer,
+                    objects,
+                )
+
+                for (index, feasible, objective, duals, solve_time) in results
+                    object = optimizer.solve_order[index]
 
                     optimizer.time_subproblem_solves += solve_time
                     optimizer.feasibility_map[object] = feasible
