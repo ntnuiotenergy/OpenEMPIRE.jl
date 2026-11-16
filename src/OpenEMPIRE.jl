@@ -3,6 +3,7 @@ module OpenEMPIRE
 using JuMP
 using TimeStruct
 using SparseVariables
+using PlasmoBenders
 using XLSX
 using CSV
 using Clustering
