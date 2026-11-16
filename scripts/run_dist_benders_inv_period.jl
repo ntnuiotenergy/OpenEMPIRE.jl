@@ -33,16 +33,7 @@ for line in eachline(hostfile)
     slots > 0 || error("Host $host has no allocated SGE slots")
 
     if short_host == local_host
-        local_worker_slots = max(slots - 1, 0)
-        println(
-            "Reserving one slot for master on $host; starting ",
-            local_worker_slots,
-            " local worker(s)",
-        )
-        local_worker_slots > 0 && addprocs(
-            local_worker_slots;
-            exeflags=exeflags,
-        )
+        println("Skipping master host $host; reserved for main process")
     else
         println("Starting $slots remote workers on $host")
         addprocs(
