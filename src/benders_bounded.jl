@@ -100,6 +100,9 @@ function run_benders_by_worker!(optimizer; output = true, run_gc = false)
     optimizer.is_MIP &&
         error("run_benders_by_worker! currently supports linear Benders models only")
 
+    bounded_timings = NamedTuple[]
+    optimizer.ext["bounded_iteration_timings"] = bounded_timings
+
     worker_groups = Dict{Int, Vector{NamedTuple}}()
     for index in 2:length(optimizer.solve_order)
         object = optimizer.solve_order[index]
@@ -146,12 +149,26 @@ function run_benders_by_worker!(optimizer; output = true, run_gc = false)
         optimizer.last_solutions[root_object] =
             PlasmoBenders._get_object_last_solutions(root_object)
 
-        @sync for (_, objects) in worker_groups
+        worker_timings = Dict{Int, NamedTuple}()
+        worker_batch_start = time()
+
+        @sync for (worker_id, objects) in worker_groups
             @async begin
+                worker_start = time()
                 results = _optimize_remote_graph_forward_batch(
                     optimizer,
                     objects,
                     initialize_worker_cache = optimizer.current_iter == 0,
+                )
+                worker_wall_seconds = time() - worker_start
+                worker_solver_seconds = sum(result[5] for result in results)
+                worker_timings[worker_id] = (
+                    wall_seconds = worker_wall_seconds,
+                    solver_seconds = worker_solver_seconds,
+                    overhead_seconds = max(
+                        worker_wall_seconds - worker_solver_seconds,
+                        0.0,
+                    ),
                 )
 
                 for (index, feasible, objective, duals, solve_time) in results
@@ -171,6 +188,15 @@ function run_benders_by_worker!(optimizer; output = true, run_gc = false)
             end
         end
 
+        worker_batch_wall_seconds = time() - worker_batch_start
+        worker_solver_seconds = sum(
+            timing.solver_seconds for timing in values(worker_timings)
+        )
+        worker_overhead_seconds = max(
+            worker_batch_wall_seconds - worker_solver_seconds,
+            0.0,
+        )
+
         upper_bound = sum(
             optimizer.subgraph_objectives[object]
             for object in optimizer.solve_order
@@ -180,12 +206,29 @@ function run_benders_by_worker!(optimizer; output = true, run_gc = false)
             optimizer.best_upper_bound = upper_bound
         end
 
+        cut_start = time()
         PlasmoBenders._add_Benders_cuts!(optimizer)
+        cut_seconds = time() - cut_start
 
         push!(optimizer.lower_bounds, lower_bound)
         push!(optimizer.upper_bounds, upper_bound)
-        push!(optimizer.time_iterations, time() - root_start)
+        iteration_seconds = time() - root_start
+        push!(optimizer.time_iterations, iteration_seconds)
         optimizer.current_iter += 1
+
+        push!(
+            bounded_timings,
+            (
+                iteration = optimizer.current_iter,
+                total_seconds = iteration_seconds,
+                root_seconds = root_solve_time,
+                worker_batch_seconds = worker_batch_wall_seconds,
+                worker_solver_seconds = worker_solver_seconds,
+                worker_overhead_seconds = worker_overhead_seconds,
+                cut_seconds = cut_seconds,
+                workers = worker_timings,
+            ),
+        )
 
         gap = if optimizer.best_upper_bound != 0
             abs((optimizer.best_upper_bound - lower_bound) / optimizer.best_upper_bound)
@@ -203,6 +246,21 @@ function run_benders_by_worker!(optimizer; output = true, run_gc = false)
                 lower_bound,
                 ", upper bound ",
                 optimizer.best_upper_bound,
+            )
+            println(
+                "  timing: root=",
+                round(root_solve_time; digits = 3),
+                "s, worker_batch=",
+                round(worker_batch_wall_seconds; digits = 3),
+                "s, worker_solver=",
+                round(worker_solver_seconds; digits = 3),
+                "s, worker_overhead=",
+                round(worker_overhead_seconds; digits = 3),
+                "s, cuts=",
+                round(cut_seconds; digits = 3),
+                "s, total=",
+                round(iteration_seconds; digits = 3),
+                "s",
             )
             flush(stdout)
         end
