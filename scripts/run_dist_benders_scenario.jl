@@ -243,7 +243,7 @@ benders = PlasmoBenders.BendersAlgorithm(
     solver = benders_solver,
     multicut = multicut,
     max_iters = max_iters,
-    parallelize_benders = parallelize_benders,
+    parallelize_benders = false,
     tol = tolerance,
     regularize = regularize,
     regularize_param = regularize_param,
@@ -260,7 +260,11 @@ println("\n=== Running Benders ===")
 
 solve_start_clock = time()
 
-PlasmoBenders.run_algorithm!(benders)
+if parallelize_benders
+    OpenEMPIRE.run_benders_by_worker!(benders)
+else
+    PlasmoBenders.run_algorithm!(benders)
+end
 
 solve_seconds = time() - solve_start_clock
 

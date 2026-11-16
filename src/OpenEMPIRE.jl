@@ -35,5 +35,6 @@ include("oos_aggregation.jl")
 include("benders_worker_cache.jl")
 include("benders_impl.jl")
 include("benders_impl_split_on_scenario.jl")
+include("benders_bounded.jl")
 
 end # module OpenEMPIRE

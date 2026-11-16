@@ -226,7 +226,7 @@ benders = PlasmoBenders.BendersAlgorithm(
     tol = tolerance,
     regularize = regularize,
     regularize_param = regularize_param,
-    parallelize_benders = parallelize_benders,
+    parallelize_benders = false,
     warm_start = warm_start, #må være false når regularize = true
 )
 
@@ -239,7 +239,11 @@ println("Benders algorithm created successfully.")
 println("\n=== Running Benders ===")
 
 solve_start_clock = time()
-PlasmoBenders.run_algorithm!(benders)
+if parallelize_benders
+    OpenEMPIRE.run_benders_by_worker!(benders)
+else
+    PlasmoBenders.run_algorithm!(benders)
+end
 solve_seconds = time() - solve_start_clock
 
 relative_gap = PlasmoBenders.relative_gap(benders)
