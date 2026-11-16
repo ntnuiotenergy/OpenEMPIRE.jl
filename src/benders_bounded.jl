@@ -1,4 +1,29 @@
-function _optimize_remote_graph_forward_batch(optimizer, objects)
+const _BOUNDED_WORKER_FORWARD_CACHE = Dict{Int, Tuple{Any, Any}}()
+
+function _bounded_worker_forward_state(job)
+    state = get(_BOUNDED_WORKER_FORWARD_CACHE, job.index, nothing)
+    if state === nothing
+        job.darray === nothing &&
+            error("Missing graph handle when initializing worker subproblem cache")
+        job.var_copies === nothing &&
+            error("Missing variable proxies when initializing worker subproblem cache")
+
+        lgraph = Plasmo.local_graph(job.darray)
+        lvar_copies = Plasmo._convert_proxy_to_local(
+            lgraph,
+            job.var_copies,
+        )
+        state = (lgraph, lvar_copies)
+        _BOUNDED_WORKER_FORWARD_CACHE[job.index] = state
+    end
+    return state
+end
+
+function _optimize_remote_graph_forward_batch(
+    optimizer,
+    objects;
+    initialize_worker_cache = false,
+)
     isempty(objects) && return Any[]
 
     worker = first(objects).object.worker
@@ -13,8 +38,8 @@ function _optimize_remote_graph_forward_batch(optimizer, objects)
             jobs,
             (
                 index = job.index,
-                darray = job.darray,
-                var_copies = job.var_copies,
+                darray = initialize_worker_cache ? job.darray : nothing,
+                var_copies = initialize_worker_cache ? job.var_copies : nothing,
                 last_primals = last_primals,
             ),
         )
@@ -25,15 +50,12 @@ function _optimize_remote_graph_forward_batch(optimizer, objects)
     is_MIP = PlasmoBenders.get_is_MIP(optimizer)
 
     remote_fetch = getfield(Main.Distributed, :remotecall_fetch)
-    return remote_fetch(worker, jobs) do remote_jobs
+    return remote_fetch(worker, initialize_worker_cache, jobs) do clear_cache, remote_jobs
+        clear_cache && empty!(_BOUNDED_WORKER_FORWARD_CACHE)
         results = Any[]
 
         for job in remote_jobs
-            lgraph = Plasmo.local_graph(job.darray)
-            lvar_copies = Plasmo._convert_proxy_to_local(
-                lgraph,
-                job.var_copies,
-            )
+            lgraph, lvar_copies = _bounded_worker_forward_state(job)
 
             JuMP.fix.(lvar_copies, job.last_primals, force = true)
             t_solve = @elapsed JuMP.optimize!(lgraph)
@@ -129,6 +151,7 @@ function run_benders_by_worker!(optimizer; output = true, run_gc = false)
                 results = _optimize_remote_graph_forward_batch(
                     optimizer,
                     objects,
+                    initialize_worker_cache = optimizer.current_iter == 0,
                 )
 
                 for (index, feasible, objective, duals, solve_time) in results
