@@ -22,23 +22,6 @@ exeflags = "--project=$project_dir"
 
 local_host = split(gethostname(), ".")[1]
 
-#=for line in eachline(hostfile)
-    fields = split(line)
-
-    host = fields[1]
-    slots = parse(Int, fields[2])
-
-    short_host = split(host, ".")[1]
-
-    if short_host == local_host
-        println("Starting $slots local workers on $host")
-        addprocs(slots; exeflags=exeflags)
-    else
-        println("Starting $slots remote workers on $host")
-        addprocs(fill(host, slots); exeflags=exeflags)
-    end
-end=#
-
 for line in eachline(hostfile)
     fields = split(line)
 
@@ -46,15 +29,25 @@ for line in eachline(hostfile)
     slots = parse(Int, fields[2])
 
     short_host = split(host, ".")[1]
+    slots > 0 || error("Host $host has no allocated SGE slots")
 
     if short_host == local_host
-        println("Skipping main host $host; reserved for master")
+        local_worker_slots = max(slots - 1, 0)
+        println(
+            "Reserving one slot for master on $host; starting ",
+            local_worker_slots,
+            " local worker(s)",
+        )
+        local_worker_slots > 0 && addprocs(
+            local_worker_slots;
+            exeflags=exeflags,
+        )
     else
         println("Starting $slots remote workers on $host")
         addprocs(
             fill(host, slots);
             exename=joinpath(dirname(@__DIR__), "scripts", "julia_worker.sh"),
-            exeflags=exeflags
+            exeflags=exeflags,
         )
     end
 end
@@ -220,6 +213,12 @@ build_seconds = model_build_seconds + decomposition_build_seconds
 
 println("Benders OptiGraph created successfully.")
 
+requested_parallelize_benders = parse(
+    Bool,
+    get(ENV, "BENDERS_PARALLELIZE", "true"),
+)
+parallelize_benders = requested_parallelize_benders
+
 # ---------------------------------------------------------
 # 3. Create Benders algorithm
 # ---------------------------------------------------------
@@ -230,7 +229,6 @@ println("\n=== Creating Benders algorithm ===")
 max_iters = 100000
 tolerance = 1e-7
 multicut = parse(Bool, get(ENV, "BENDERS_MULTICUT", "false"))
-parallelize_benders = false
 
 # Regularization configuration
 regularize = parse(Bool, get(ENV, "BENDERS_REGULARIZE", "false"))

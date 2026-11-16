@@ -30,15 +30,25 @@ for line in eachline(hostfile)
     slots = parse(Int, fields[2])
 
     short_host = split(host, ".")[1]
+    slots > 0 || error("Host $host has no allocated SGE slots")
 
     if short_host == local_host
-        println("Skipping main host $host; reserved for master")
+        local_worker_slots = max(slots - 1, 0)
+        println(
+            "Reserving one slot for master on $host; starting ",
+            local_worker_slots,
+            " local worker(s)",
+        )
+        local_worker_slots > 0 && addprocs(
+            local_worker_slots;
+            exeflags=exeflags,
+        )
     else
         println("Starting $slots remote workers on $host")
         addprocs(
             fill(host, slots);
             exename=joinpath(dirname(@__DIR__), "scripts", "julia_worker.sh"),
-            exeflags=exeflags
+            exeflags=exeflags,
         )
     end
 end
@@ -184,6 +194,12 @@ decomposition_build_seconds = time() - decomposition_build_start
 
 println("Benders OptiGraph created successfully.")
 
+requested_parallelize_benders = parse(
+    Bool,
+    get(ENV, "BENDERS_PARALLELIZE", "true"),
+)
+parallelize_benders = requested_parallelize_benders
+
 # ---------------------------------------------------------
 # 3. Create Benders algorithm
 # ---------------------------------------------------------
@@ -193,7 +209,6 @@ println("\n=== Creating Benders algorithm ===")
 max_iters = 100000
 tolerance = 1e-7
 multicut = parse(Bool, get(ENV, "BENDERS_MULTICUT", "false"))
-parallelize_benders = false
 
 # Regularization configuration
 regularize = parse(Bool, get(ENV, "BENDERS_REGULARIZE", "false"))
