@@ -301,6 +301,33 @@ function write_benders_iteration_times(output_dir, benders)
     println("Average iteration: $average_iteration seconds")
 end
 
+function write_benders_bounds(output_dir, benders)
+    lower_bounds = benders.lower_bounds
+    upper_bounds = benders.upper_bounds
+    isempty(lower_bounds) && return
+
+    filepath = joinpath(output_dir, "benders_bounds.csv")
+    best_upper_bound = Inf
+
+    open(filepath, "w") do file
+        println(file, "iteration,lower_bound,upper_bound,best_upper_bound,relative_gap")
+        for iteration in eachindex(lower_bounds)
+            upper_bound = upper_bounds[iteration]
+            best_upper_bound = min(best_upper_bound, upper_bound)
+            relative_gap = best_upper_bound == 0 ?
+                abs(best_upper_bound - lower_bounds[iteration]) :
+                abs((best_upper_bound - lower_bounds[iteration]) / best_upper_bound)
+            println(
+                file,
+                "$(iteration),$(lower_bounds[iteration]),$(upper_bound),",
+                "$(best_upper_bound),$(relative_gap)",
+            )
+        end
+    end
+
+    println("Benders bounds written to: $filepath")
+end
+
 #=OpenEMPIRE.write_investment_csvs(
     output_dir,
     master,
@@ -335,6 +362,7 @@ OpenEMPIRE.write_benders_objective_csv(
 )
 
 write_benders_iteration_times(output_dir, benders)
+write_benders_bounds(output_dir, benders)
 
 #=OpenEMPIRE.write_cost_diagnostic_csvs(
     output_dir,
