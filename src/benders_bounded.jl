@@ -143,8 +143,7 @@ function run_benders_by_worker!(optimizer; output = true, run_gc = false)
         for object in optimizer.solve_order_dict[root_object]
             comp_vars = optimizer.comp_vars[object]
             primals = PlasmoBenders._get_variable_values(root_object, comp_vars)
-            optimizer.primal_iters[object] =
-                hcat(optimizer.primal_iters[object], primals)
+            optimizer.primal_iters[object] = reshape(copy(primals), :, 1)
         end
         optimizer.last_solutions[root_object] =
             PlasmoBenders._get_object_last_solutions(root_object)
@@ -179,10 +178,7 @@ function run_benders_by_worker!(optimizer; output = true, run_gc = false)
                     optimizer.subgraph_objectives[object] =
                         feasible ? objective : Inf
 
-                    optimizer.dual_iters[object] = hcat(
-                        optimizer.dual_iters[object],
-                        duals,
-                    )
+                    optimizer.dual_iters[object] = reshape(copy(duals), :, 1)
                     push!(optimizer.phis[object], objective)
                 end
             end

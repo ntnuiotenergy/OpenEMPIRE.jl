@@ -4,6 +4,93 @@ const BendersPairProfileMap = Dict{Tuple{String, String}, BendersProfile}
 
 struct BendersIndexedVarArray end
 
+function _benders_rebuild_indexed_array(
+    var::SparseVariables.IndexedVarArray{T, N, K},
+    variable_type,
+    convert_value,
+) where {T, N, K}
+    data = SparseVariables.Dictionaries.Dictionary{K, variable_type}()
+    for (key, value) in var
+        data[key] = convert_value(value)
+    end
+    return SparseVariables.IndexedVarArray{
+        variable_type,
+        N,
+        K,
+    }(
+        var.f,
+        data,
+        var.index_names,
+        Vector{SparseVariables.Dictionaries.Dictionary}(undef, 2^N),
+    )
+end
+
+function Plasmo._convert_remote_to_proxy(
+    rgraph::Plasmo.RemoteOptiGraph,
+    var::SparseVariables.IndexedVarArray{T, N, K},
+) where {T <: Plasmo.RemoteVariableRef, N, K}
+    return _benders_rebuild_indexed_array(
+        var,
+        Plasmo.ProxyVariableRef,
+        value -> Plasmo._convert_remote_to_proxy(rgraph, value),
+    )
+end
+
+function Plasmo._convert_proxy_to_remote(
+    rgraph::Plasmo.RemoteOptiGraph,
+    var::SparseVariables.IndexedVarArray{T, N, K},
+) where {T <: Plasmo.ProxyVariableRef, N, K}
+    return _benders_rebuild_indexed_array(
+        var,
+        Plasmo.RemoteVariableRef,
+        value -> Plasmo._convert_proxy_to_remote(rgraph, value),
+    )
+end
+
+function Plasmo._convert_local_to_proxy(
+    lgraph::Plasmo.OptiGraph,
+    var::SparseVariables.IndexedVarArray{T, N, K},
+) where {T <: Plasmo.NodeVariableRef, N, K}
+    return _benders_rebuild_indexed_array(
+        var,
+        Plasmo.ProxyVariableRef,
+        value -> Plasmo._convert_local_to_proxy(lgraph, value),
+    )
+end
+
+function Plasmo._convert_proxy_to_local(
+    lgraph::Plasmo.OptiGraph,
+    var::SparseVariables.IndexedVarArray{T, N, K},
+) where {T <: Plasmo.ProxyVariableRef, N, K}
+    return _benders_rebuild_indexed_array(
+        var,
+        Plasmo.NodeVariableRef,
+        value -> Plasmo._convert_proxy_to_local(lgraph, value),
+    )
+end
+
+function Plasmo._convert_proxy_to_local(
+    lgraph::Plasmo.OptiGraph,
+    var::SparseVariables.IndexedVarArray{T, N, K},
+) where {T <: Plasmo.RemoteVariableRef, N, K}
+    return _benders_rebuild_indexed_array(
+        var,
+        Plasmo.NodeVariableRef,
+        value -> begin
+            proxy = Plasmo._convert_remote_to_proxy(value.node.remote_graph, value)
+            Plasmo._convert_proxy_to_local(lgraph, proxy)
+        end,
+    )
+end
+
+function Plasmo._convert_proxy_to_local(
+    lgraph::Plasmo.OptiGraph,
+    rnode::Plasmo.RemoteNodeRef,
+)
+    pnode = Plasmo._convert_remote_to_proxy(rnode.remote_graph, rnode)
+    return Plasmo._convert_proxy_to_local(lgraph, pnode)
+end
+
 function JuMP.Containers.container(
     f::Function,
     indices,
