@@ -36,10 +36,15 @@ function _optimize_remote_graph_forward_batch(
 
         push!(
             jobs,
+            initialize_worker_cache ?
             (
                 index = job.index,
-                darray = initialize_worker_cache ? job.darray : nothing,
-                var_copies = initialize_worker_cache ? job.var_copies : nothing,
+                darray = job.darray,
+                var_copies = job.var_copies,
+                last_primals = last_primals,
+            ) :
+            (
+                index = job.index,
                 last_primals = last_primals,
             ),
         )
