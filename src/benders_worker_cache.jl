@@ -92,7 +92,10 @@ function Plasmo._convert_proxy_to_local(
 end
 
 function _benders_convert_constraint_array(array, convert_constraint)
-    converted = [(key, convert_constraint(value)) for (key, value) in array]
+    converted = [
+        (key, convert_constraint(array[key]))
+        for key in keys(array)
+    ]
     isempty(converted) && return array
 
     key_type = typeof(first(converted)[1])
