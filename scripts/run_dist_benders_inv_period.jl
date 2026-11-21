@@ -141,6 +141,7 @@ println("Seed:         $seed")
 
 run_start_time = now()
 run_start_clock = time()
+OpenEMPIRE.setup_benders_live_logging(; implementation = "investment_period")
 model_build_start = time()
 
 periods, sets, params = OpenEMPIRE.prepare_model_inputs(
@@ -248,6 +249,12 @@ solve_seconds = time() - solve_start_clock
 
 relative_gap = PlasmoBenders.relative_gap(benders)
 converged = relative_gap <= tolerance
+
+OpenEMPIRE.write_benders_live_status(
+    "COMPLETE";
+    implementation = "investment_period",
+    iteration = length(PlasmoBenders.get_lower_bounds(benders)),
+)
 
 time_to_optimal_seconds = converged ?
     time() - run_start_clock :

@@ -29,6 +29,7 @@ cat "$SGE_PE_HOSTFILE"
 
 # Select the distributed Benders run script
 BENDERS_IMPLEMENTATION="${BENDERS_IMPLEMENTATION:-investment_period}"
+export BENDERS_IMPLEMENTATION
 
 case "$BENDERS_IMPLEMENTATION" in
     investment_period)
@@ -47,4 +48,41 @@ esac
 echo "Using Benders implementation: $BENDERS_IMPLEMENTATION"
 echo "Running script: $RUN_SCRIPT"
 
-exec julia --project=. "$RUN_SCRIPT" "$@"
+RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)_SGE${SGE_JOB_ID:-$$}"
+if [[ -n "${OPENEMPIRE_LIVE_LOG_BASE:-}" ]]; then
+    LIVE_LOG_BASE="$OPENEMPIRE_LIVE_LOG_BASE"
+elif [[ -d /storage ]]; then
+    LIVE_LOG_BASE="/storage/OpenEMPIRE/benders_live"
+else
+    LIVE_LOG_BASE="$PWD/benders_live"
+fi
+export OPENEMPIRE_LIVE_LOG_DIR="$LIVE_LOG_BASE/$RUN_ID"
+mkdir -p "$OPENEMPIRE_LIVE_LOG_DIR/gurobi/master" \
+         "$OPENEMPIRE_LIVE_LOG_DIR/gurobi/sp"
+
+MAIN_LOG="$OPENEMPIRE_LIVE_LOG_DIR/main.log"
+touch "$MAIN_LOG"
+
+cat > "$OPENEMPIRE_LIVE_LOG_DIR/status.txt" <<EOF
+RUNNING
+run_id=$RUN_ID
+implementation=$BENDERS_IMPLEMENTATION
+EOF
+
+echo "Live logs: $OPENEMPIRE_LIVE_LOG_DIR"
+echo "Main log:  $MAIN_LOG"
+
+cleanup_live_status() {
+    exit_code=$?
+    if [[ $exit_code -ne 0 && -f "$OPENEMPIRE_LIVE_LOG_DIR/status.txt" ]]; then
+        cat > "$OPENEMPIRE_LIVE_LOG_DIR/status.txt" <<EOF
+ABORTED
+run_id=$RUN_ID
+implementation=$BENDERS_IMPLEMENTATION
+exit_code=$exit_code
+EOF
+    fi
+}
+trap cleanup_live_status EXIT
+
+julia --project=. "$RUN_SCRIPT" "$@" 2>&1 | tee -a "$MAIN_LOG"

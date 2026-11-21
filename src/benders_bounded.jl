@@ -1,5 +1,106 @@
 const _BOUNDED_WORKER_FORWARD_CACHE = Dict{Int, Tuple{Any, Any}}()
 
+function benders_live_log_dir()
+    configured = get(ENV, "OPENEMPIRE_LIVE_LOG_DIR", "")
+    if !isempty(configured)
+        dir = configured
+    elseif isdir("/storage")
+        dir = joinpath("/storage", "OpenEMPIRE", "benders_live")
+    else
+        dir = joinpath(pwd(), "benders_live")
+    end
+    mkpath(joinpath(dir, "gurobi", "master"))
+    mkpath(joinpath(dir, "gurobi", "sp"))
+    return dir
+end
+
+function setup_benders_live_logging(; implementation = "benders")
+    dir = benders_live_log_dir()
+    ENV["OPENEMPIRE_BENDERS_IMPLEMENTATION"] = implementation
+    iterations_file = joinpath(dir, "iterations.csv")
+    if !isfile(iterations_file)
+        open(iterations_file, "w") do io
+            println(
+                io,
+                "iteration,lower_bound,upper_bound,best_upper_bound,gap," *
+                "root_seconds,worker_batch_seconds,worker_solver_seconds," *
+                "worker_overhead_seconds,cut_seconds,total_seconds",
+            )
+        end
+    end
+    write_benders_live_status("RUNNING"; implementation = implementation)
+    return dir
+end
+
+function write_benders_live_status(status; implementation = "benders", iteration = nothing)
+    dir = benders_live_log_dir()
+    implementation = get(
+        ENV,
+        "OPENEMPIRE_BENDERS_IMPLEMENTATION",
+        implementation,
+    )
+    open(joinpath(dir, "status.txt"), "w") do io
+        println(io, status)
+        println(io, "implementation=$implementation")
+        iteration === nothing || println(io, "iteration=$iteration")
+        println(io, "updated=$(Dates.format(now(), dateformat"yyyy-mm-ddTHH:MM:SS"))")
+    end
+    return nothing
+end
+
+function append_benders_live_iteration!(;
+    iteration,
+    lower_bound,
+    upper_bound,
+    best_upper_bound,
+    gap,
+    root_seconds,
+    worker_batch_seconds,
+    worker_solver_seconds,
+    worker_overhead_seconds,
+    cut_seconds,
+    total_seconds,
+)
+    dir = benders_live_log_dir()
+    open(joinpath(dir, "iterations.csv"), "a") do io
+        println(
+            io,
+            join((
+                iteration,
+                lower_bound,
+                upper_bound,
+                best_upper_bound,
+                gap,
+                root_seconds,
+                worker_batch_seconds,
+                worker_solver_seconds,
+                worker_overhead_seconds,
+                cut_seconds,
+                total_seconds,
+            ), ","),
+        )
+    end
+    write_benders_live_status("RUNNING"; iteration = iteration)
+    return nothing
+end
+
+function benders_master_gurobi_log(iteration)
+    dir = joinpath(benders_live_log_dir(), "gurobi", "master")
+    mkpath(dir)
+    return joinpath(dir, "iter_$(lpad(iteration, 6, '0')).log")
+end
+
+function benders_subproblem_gurobi_log(subproblem_index, iteration)
+    sp_dir = joinpath(
+        benders_live_log_dir(),
+        "gurobi",
+        "sp",
+        "SP_$(lpad(subproblem_index, 6, '0'))",
+    )
+    mkpath(sp_dir)
+    return joinpath(sp_dir, "iter_$(lpad(iteration, 6, '0')).log")
+end
+
 function _bounded_worker_forward_state(job)
     state = get(_BOUNDED_WORKER_FORWARD_CACHE, job.index, nothing)
     if state === nothing
@@ -39,12 +140,14 @@ function _optimize_remote_graph_forward_batch(
             initialize_worker_cache ?
             (
                 index = job.index,
+                iteration = optimizer.current_iter + 1,
                 darray = job.darray,
                 var_copies = job.var_copies,
                 last_primals = last_primals,
             ) :
             (
                 index = job.index,
+                iteration = optimizer.current_iter + 1,
                 last_primals = last_primals,
             ),
         )
@@ -62,8 +165,15 @@ function _optimize_remote_graph_forward_batch(
         for job in remote_jobs
             lgraph, lvar_copies = _bounded_worker_forward_state(job)
 
+            gurobi_log = benders_subproblem_gurobi_log(job.index, job.iteration)
+            JuMP.set_optimizer_attribute(lgraph, "LogToConsole", 0)
+            JuMP.set_optimizer_attribute(lgraph, "LogFile", gurobi_log)
             JuMP.fix.(lvar_copies, job.last_primals, force = true)
             t_solve = @elapsed JuMP.optimize!(lgraph)
+            open(joinpath(dirname(gurobi_log), "latest.txt"), "w") do io
+                println(io, gurobi_log)
+                flush(io)
+            end
 
             feasible = PlasmoBenders._check_termination_status(
                 lgraph,
@@ -130,6 +240,17 @@ function run_benders_by_worker!(optimizer; output = true, run_gc = false)
     while optimizer.current_iter < optimizer.max_iters
         root_object = optimizer.solve_order[1]
         root_start = time()
+        root_iteration = optimizer.current_iter + 1
+        JuMP.set_optimizer_attribute(
+            root_object,
+            "LogToConsole",
+            0,
+        )
+        JuMP.set_optimizer_attribute(
+            root_object,
+            "LogFile",
+            benders_master_gurobi_log(root_iteration),
+        )
         JuMP.optimize!(root_object)
         root_solve_time = time() - root_start
         optimizer.time_root_problem_solve += root_solve_time
@@ -237,31 +358,30 @@ function run_benders_by_worker!(optimizer; output = true, run_gc = false)
             abs(optimizer.best_upper_bound - lower_bound)
         end
 
-        if output && (optimizer.current_iter == 1 || optimizer.current_iter % 20 == 0)
+        append_benders_live_iteration!(
+            iteration = optimizer.current_iter,
+            lower_bound = lower_bound,
+            upper_bound = upper_bound,
+            best_upper_bound = optimizer.best_upper_bound,
+            gap = gap,
+            root_seconds = root_solve_time,
+            worker_batch_seconds = worker_batch_wall_seconds,
+            worker_solver_seconds = worker_solver_seconds,
+            worker_overhead_seconds = worker_overhead_seconds,
+            cut_seconds = cut_seconds,
+            total_seconds = iteration_seconds,
+        )
+
+        if output
             println(
-                "Iteration ",
-                optimizer.current_iter,
-                ", gap ",
-                gap,
-                ", lower bound ",
-                lower_bound,
-                ", upper bound ",
-                optimizer.best_upper_bound,
-            )
-            println(
-                "  timing: root=",
-                round(root_solve_time; digits = 3),
-                "s, worker_batch=",
-                round(worker_batch_wall_seconds; digits = 3),
-                "s, worker_solver=",
-                round(worker_solver_seconds; digits = 3),
-                "s, worker_overhead=",
-                round(worker_overhead_seconds; digits = 3),
-                "s, cuts=",
-                round(cut_seconds; digits = 3),
-                "s, total=",
-                round(iteration_seconds; digits = 3),
-                "s",
+                "Benders iteration=$(optimizer.current_iter) ",
+                "MP=$(round(root_solve_time; digits=3))s ",
+                "SP=$(round(worker_batch_wall_seconds; digits=3))s ",
+                "LB=$(round(lower_bound; digits=6)) ",
+                "UB=$(round(optimizer.best_upper_bound; digits=6)) ",
+                "gap=$(round(gap; digits=8)) ",
+                "cuts=$(round(cut_seconds; digits=3))s ",
+                "total=$(round(iteration_seconds; digits=3))s",
             )
             flush(stdout)
         end
