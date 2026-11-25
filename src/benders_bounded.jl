@@ -90,9 +90,9 @@ function benders_master_gurobi_log(iteration)
     return joinpath(dir, "iter_$(lpad(iteration, 6, '0')).log")
 end
 
-function benders_subproblem_gurobi_log(subproblem_index, iteration)
+function benders_subproblem_gurobi_log(log_dir, subproblem_index, iteration)
     sp_dir = joinpath(
-        benders_live_log_dir(),
+        log_dir,
         "gurobi",
         "sp",
         "SP_$(lpad(subproblem_index, 6, '0'))",
@@ -156,16 +156,26 @@ function _optimize_remote_graph_forward_batch(
     add_slacks = PlasmoBenders.get_add_slacks(optimizer)
     feasibility_cuts = PlasmoBenders.get_feasibility_cuts(optimizer)
     is_MIP = PlasmoBenders.get_is_MIP(optimizer)
+    live_log_dir = benders_live_log_dir()
 
     remote_fetch = getfield(Main.Distributed, :remotecall_fetch)
-    return remote_fetch(worker, initialize_worker_cache, jobs) do clear_cache, remote_jobs
+    return remote_fetch(
+        worker,
+        initialize_worker_cache,
+        live_log_dir,
+        jobs,
+    ) do clear_cache, worker_log_dir, remote_jobs
         clear_cache && empty!(_BOUNDED_WORKER_FORWARD_CACHE)
         results = Any[]
 
         for job in remote_jobs
             lgraph, lvar_copies = _bounded_worker_forward_state(job)
 
-            gurobi_log = benders_subproblem_gurobi_log(job.index, job.iteration)
+            gurobi_log = benders_subproblem_gurobi_log(
+                worker_log_dir,
+                job.index,
+                job.iteration,
+            )
             JuMP.set_optimizer_attribute(lgraph, "LogToConsole", 0)
             JuMP.set_optimizer_attribute(lgraph, "LogFile", gurobi_log)
             JuMP.fix.(lvar_copies, job.last_primals, force = true)
