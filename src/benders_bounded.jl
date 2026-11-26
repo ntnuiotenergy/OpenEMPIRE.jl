@@ -1,4 +1,5 @@
 const _BOUNDED_WORKER_FORWARD_CACHE = Dict{Int, Tuple{Any, Any}}()
+const BENDERS_GUROBI_LOG_ITERATIONS = 10
 
 function benders_live_log_dir()
     configured = get(ENV, "OPENEMPIRE_LIVE_LOG_DIR", "")
@@ -171,18 +172,26 @@ function _optimize_remote_graph_forward_batch(
         for job in remote_jobs
             lgraph, lvar_copies = _bounded_worker_forward_state(job)
 
-            gurobi_log = benders_subproblem_gurobi_log(
-                worker_log_dir,
-                job.index,
-                job.iteration,
-            )
             JuMP.set_optimizer_attribute(lgraph, "LogToConsole", 0)
-            JuMP.set_optimizer_attribute(lgraph, "LogFile", gurobi_log)
+            gurobi_log = if job.iteration <= BENDERS_GUROBI_LOG_ITERATIONS
+                path = benders_subproblem_gurobi_log(
+                    worker_log_dir,
+                    job.index,
+                    job.iteration,
+                )
+                JuMP.set_optimizer_attribute(lgraph, "LogFile", path)
+                path
+            else
+                JuMP.set_optimizer_attribute(lgraph, "LogFile", "")
+                nothing
+            end
             JuMP.fix.(lvar_copies, job.last_primals, force = true)
             t_solve = @elapsed JuMP.optimize!(lgraph)
-            open(joinpath(dirname(gurobi_log), "latest.txt"), "w") do io
-                println(io, gurobi_log)
-                flush(io)
+            if gurobi_log !== nothing
+                open(joinpath(dirname(gurobi_log), "latest.txt"), "w") do io
+                    println(io, gurobi_log)
+                    flush(io)
+                end
             end
 
             feasible = PlasmoBenders._check_termination_status(
@@ -256,11 +265,12 @@ function run_benders_by_worker!(optimizer; output = true, run_gc = false)
             "LogToConsole",
             0,
         )
-        JuMP.set_optimizer_attribute(
-            root_object,
-            "LogFile",
-            benders_master_gurobi_log(root_iteration),
-        )
+        if root_iteration <= BENDERS_GUROBI_LOG_ITERATIONS
+            path = benders_master_gurobi_log(root_iteration)
+            JuMP.set_optimizer_attribute(root_object, "LogFile", path)
+        else
+            JuMP.set_optimizer_attribute(root_object, "LogFile", "")
+        end
         JuMP.optimize!(root_object)
         root_solve_time = time() - root_start
         optimizer.time_root_problem_solve += root_solve_time
