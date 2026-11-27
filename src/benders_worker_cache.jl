@@ -91,6 +91,62 @@ function Plasmo._convert_proxy_to_local(
     return Plasmo._convert_proxy_to_local(lgraph, pnode)
 end
 
+function _benders_convert_constraint_array(array, convert_constraint)
+    converted = [
+        (key, convert_constraint(value))
+        for (key, value) in array.data
+    ]
+    isempty(converted) && return array
+
+    key_type = typeof(first(converted)[1])
+    value_type = typeof(first(converted)[2])
+    data = Plasmo.OrderedDict{key_type, value_type}()
+    for (key, value) in converted
+        data[key] = value
+    end
+    return JuMP.Containers.SparseAxisArray(data, array.names)
+end
+
+function Plasmo._convert_remote_to_proxy(
+    rgraph::Plasmo.RemoteOptiGraph,
+    array::JuMP.Containers.SparseAxisArray{T, N, K},
+) where {T <: JuMP.ConstraintRef, N, K}
+    return _benders_convert_constraint_array(
+        array,
+        value -> Plasmo._convert_remote_to_proxy(rgraph, value),
+    )
+end
+
+function Plasmo._convert_proxy_to_remote(
+    rgraph::Plasmo.RemoteOptiGraph,
+    array::JuMP.Containers.SparseAxisArray{T, N, K},
+) where {T <: JuMP.ConstraintRef, N, K}
+    return _benders_convert_constraint_array(
+        array,
+        value -> Plasmo._convert_proxy_to_remote(rgraph, value),
+    )
+end
+
+function Plasmo._convert_local_to_proxy(
+    lgraph::Plasmo.OptiGraph,
+    array::JuMP.Containers.SparseAxisArray{T, N, K},
+) where {T <: JuMP.ConstraintRef, N, K}
+    return _benders_convert_constraint_array(
+        array,
+        value -> Plasmo._convert_local_to_proxy(lgraph, value),
+    )
+end
+
+function Plasmo._convert_proxy_to_local(
+    lgraph::Plasmo.OptiGraph,
+    array::JuMP.Containers.SparseAxisArray{T, N, K},
+) where {T <: JuMP.ConstraintRef, N, K}
+    return _benders_convert_constraint_array(
+        array,
+        value -> Plasmo._convert_proxy_to_local(lgraph, value),
+    )
+end
+
 function JuMP.Containers.container(
     f::Function,
     indices,
