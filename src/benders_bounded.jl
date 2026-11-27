@@ -1,5 +1,5 @@
 const _BOUNDED_WORKER_FORWARD_CACHE = Dict{Int, Tuple{Any, Any}}()
-const BENDERS_GUROBI_LOG_ITERATIONS = 10
+const BENDERS_GUROBI_LOG_ITERATIONS = 30
 
 function benders_live_log_dir()
     configured = get(ENV, "OPENEMPIRE_LIVE_LOG_DIR", "")
